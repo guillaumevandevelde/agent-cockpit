@@ -8271,6 +8271,153 @@ async def test_reaper_stuck_session_still_falls_back_to_pane_without_signal(monk
     ssignals.session_signals.clear("k-pane-0001")
 
 
+# ---- _session_has_transcript tri-state + non-Claude reaper guard ----------
+# (kaart 55fa66d1…). Before the per-CLI routing, the resolver always asked
+# Claude for a transcript on a Codex/OpenCode/MiMo/Copilot worktree, always
+# got None, and the reaper read that as "no transcript yet — fire the pane
+# scan" even on a productive mid-session agent whose pane happened to
+# mention '429' from a curl probe. The tri-state makes "no signal"
+# distinguishable from "no transcript" and the reaper's `is False` gate
+# keeps the pane scan suppressed for the unsupported-CLI case.
+
+
+def test_session_has_transcript_true_when_transcript_has_content(monkeypatch, tmp_path):
+    """Claude with a non-empty transcript → True (drop through, transcript
+    detector owns mid-session limits)."""
+    import app.kanban.dispatch as d
+    from app.kanban import session_recovery as srec
+
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text('{"type":"assistant","message":{"content":[]}}\n')
+
+    monkeypatch.setattr(
+        srec, "_resolve_transcript_file",
+        lambda project_path, session_name, *, cli_id, **kw: transcript,
+    )
+
+    assert d._session_has_transcript("/p", "k-x", cli_id="claude-code") is True
+
+
+def test_session_has_transcript_false_when_resolver_returns_none(monkeypatch, tmp_path):
+    """Claude, no transcript on disk → False (run the pane scan, classic
+    429-on-first-spawn case)."""
+    import app.kanban.dispatch as d
+    from app.kanban import session_recovery as srec
+
+    monkeypatch.setattr(
+        srec, "_resolve_transcript_file",
+        lambda project_path, session_name, *, cli_id, **kw: None,
+    )
+
+    assert d._session_has_transcript("/p", "k-x", cli_id="claude-code") is False
+
+
+def test_session_has_transcript_none_for_unsupported_cli(monkeypatch, tmp_path):
+    """Non-Claude CLI (Copilot, today) → None (no signal — suppress the
+    pane scan rather than fire it). The reaper's `is False` gate is the
+    only thing that keeps a productive Codex session whose pane happens
+    to mention '429' from being reaped (kaart 55fa66d1…)."""
+    import app.kanban.dispatch as d
+    from app.kanban import session_recovery as srec
+
+    monkeypatch.setattr(
+        srec, "_resolve_transcript_file",
+        lambda project_path, session_name, *, cli_id, **kw: None,
+    )
+
+    assert d._session_has_transcript("/p", "k-x", cli_id="copilot-cli") is None
+    assert d._session_has_transcript("/p", "k-x", cli_id="codex-cli") is None
+    assert d._session_has_transcript("/p", "k-x", cli_id="open-code") is None
+    assert d._session_has_transcript("/p", "k-x", cli_id="mimo-code") is None
+
+
+def test_session_has_transcript_false_when_project_path_missing(monkeypatch):
+    """Defensive: missing project_path → False (no scan-coordination
+    possible). The reaper only reaches `_session_has_transcript` when
+    ``project_path`` is set, but the function still has to answer
+    sensibly for the no-context callers."""
+    import app.kanban.dispatch as d
+
+    assert d._session_has_transcript(None, "k-x", cli_id="claude-code") is False
+
+
+@pytest.mark.asyncio
+async def test_reaper_pane_scan_suppressed_for_non_claude_session(monkeypatch, tmp_path):
+    """Regression for kaart 55fa66d1…: a Codex/OpenCode/MiMo/Copilot
+    session whose pane happens to mention a 429 substring (e.g. from a
+    curl probe or a quoted error in its work) must NOT be reaped by the
+    pane substring-scan fallback — the resolver returns no signal, and
+    the reaper's tri-state gate keeps the scan suppressed.
+
+    Reproduces the false-positive class for the reaper when the lane
+    isn't Claude Code: the resolver used to ask Claude for a transcript
+    on a non-Claude worktree, always got None, and the reaper always
+    ran the pane scan. With the per-CLI routing, ``None`` is distinct
+    from ``False`` and the gate skips the scan."""
+    import app.kanban.dispatch as d
+    from app.kanban import session_recovery as srec
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-codex-pane-0001")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    # Pane content has a curl-probe-style 429 substring — exactly the
+    # kind of legitimate content a productive Codex session can print
+    # while running an HTTP smoke test against its own dev stack.
+    pane = (
+        "$ curl -i http://localhost:8000/api/v1/projects\n"
+        "HTTP/2 429\n"
+        "  retry-after: 30\n"
+    )
+    monkeypatch.setattr(
+        d, "_capture_pane_content", lambda name, *, lines=20: pane,
+    )
+
+    # No usable transcript signal for Codex — the resolver returns
+    # None, the reaper reads it as the unsupported-CLI "no signal"
+    # branch and must NOT fire the pane scan.
+    monkeypatch.setattr(
+        srec, "_resolve_transcript_file",
+        lambda project_path, session_name, *, cli_id, **kw: None,
+    )
+
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="codex-productive", column="engineer")
+        await apply_operation(
+            s, op_type="create", entity_type="card", project_key=PK,
+            entity_id=cid, payload={
+                "executor_agent_id": "codex-cli",
+                "agent": "codex-cli",
+            },
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-codex-pane-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-codex-pane-0001"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 0, (
+        "non-Claude session reaped by the pane scan despite no usable "
+        "transcript signal — that's the false-positive class kaart "
+        "55fa66d1… was filed to prevent"
+    )
+    assert killed == []
+    assert card.claimed_by == "agent:k-codex-pane-0001"
+
+
 # ---- post_agent_status_comment (CC 2.1.198+ background-agent notifications) -
 
 

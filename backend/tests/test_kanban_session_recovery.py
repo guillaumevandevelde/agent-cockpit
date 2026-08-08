@@ -102,6 +102,79 @@ def test_resolve_transcript_file_none_without_transcript(tmp_path):
     assert result is None
 
 
+def test_resolve_transcript_file_routes_to_requested_cli(monkeypatch, tmp_path):
+    """Per-CLI routing (kaart 55fa66d1…): the resolver hands the worktree
+    to the selected CLI's ``resolve_transcript_file`` rather than
+    hard-coding Claude. Mirrors ``_resolve_resume_target``'s pattern."""
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "k-codex"
+    worktree.mkdir(parents=True)
+    expected = tmp_path / "codex-transcript.jsonl"
+    expected.write_text("{}")
+    calls = []
+
+    class FakeCli:
+        supports_transcript_resolution = True
+
+        def resolve_transcript_file(self, worktree_path, *, data_dir=None):
+            calls.append((worktree_path, data_dir))
+            return expected
+
+    monkeypatch.setattr(
+        recovery,
+        "get_agentic_cli",
+        lambda cli_id: FakeCli() if cli_id == "codex-cli" else None,
+    )
+
+    result = recovery._resolve_transcript_file(
+        str(repo), "k-codex", cli_id="codex-cli",
+    )
+
+    assert result == expected
+    assert calls == [(worktree, None)]
+
+
+def test_resolve_transcript_file_unknown_cli_returns_none(caplog, tmp_path):
+    """Unknown CLI is logged at warning and resolves to None — same shape
+    as the unknown-CLI branch in ``_resolve_resume_target``. The reaper
+    reads None as "no signal" and suppresses the pane scan rather than
+    fire it (kaart 55fa66d1…)."""
+    from unittest.mock import patch as _patch
+
+    repo = tmp_path / "repo"
+    (repo / ".claude" / "worktrees" / "k-mystery").mkdir(parents=True)
+
+    with _patch.object(
+        recovery, "get_agentic_cli",
+        side_effect=ValueError("unknown cli"),
+    ):
+        with caplog.at_level("WARNING"):
+            result = recovery._resolve_transcript_file(
+                str(repo), "k-mystery", cli_id="mystery-cli",
+            )
+
+    assert result is None
+    assert "transcript resolution requested for unknown cli=mystery-cli" in caplog.text
+
+
+def test_resolve_transcript_file_logs_unsupported_cli(caplog, tmp_path):
+    """A CLI that doesn't expose a transcript store (Copilot today) is
+    logged at info and returns None. The reaper reads None as "no
+    signal" and suppresses the pane scan — the bug class kaart
+    55fa66d1… was about (a Codex/OpenCode/MiMo/Copilot session whose
+    pane happened to mention '429' getting reaped mid-productivity)."""
+    repo = tmp_path / "repo"
+    (repo / ".claude" / "worktrees" / "k-copilot").mkdir(parents=True)
+
+    with caplog.at_level("INFO"):
+        result = recovery._resolve_transcript_file(
+            str(repo), "k-copilot", cli_id="copilot-cli",
+        )
+
+    assert result is None
+    assert "transcript resolution unsupported for cli=copilot-cli" in caplog.text
+
+
 # ---- _resolve_resume_target ----------------------------------------------
 
 def test_resolve_resume_target_picks_most_recent_transcript(tmp_path):
