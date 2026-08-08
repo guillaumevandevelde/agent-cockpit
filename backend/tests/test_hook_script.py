@@ -1,4 +1,4 @@
-from app.models.scheduled_message_schemas import HookEvent
+from app.api.v1.session_hooks.router import HookEvent
 from app.services.scheduling.hook_script import (
     SCHEDULING_HOOK_EVENTS,
     render_hook_command,

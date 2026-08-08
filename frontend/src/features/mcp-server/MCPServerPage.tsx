@@ -199,8 +199,6 @@ export function MCPServerPage() {
             {[
               { name: "list_sessions", desc: "List all Claude Code sessions" },
               { name: "get_session", desc: "Get session details by ID" },
-              { name: "list_scheduled_messages", desc: "List scheduled messages" },
-              { name: "get_scheduled_message", desc: "Get scheduled message details" },
               { name: "list_mcp_servers", desc: "List configured MCP servers" },
               { name: "get_mcp_server", desc: "Get MCP server details" },
               { name: "get_config", desc: "Get merged Claude Code config" },

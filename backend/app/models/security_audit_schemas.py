@@ -19,7 +19,7 @@ from app.utils.timeutils import ensure_aware
 def _serialize_naive_as_utc(dt: datetime) -> datetime:
     """SQLite drops tzinfo on round-trip; tag the value as UTC on the way out.
 
-    Mirrors ``_as_utc_iso`` in ``scheduled_message_schemas.py`` — same
+    Mirrors ``_as_utc_iso`` in the legacy scheduled-message schemas — same
     DB-engine quirk, same fix.
     """
     return ensure_aware(dt)

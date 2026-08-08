@@ -19,8 +19,22 @@ SCHEDULING_HOOK_EVENTS: tuple[str, ...] = (
     "SessionEnd",
 )
 
+# Path the hook command posts to. Renamed from
+# /api/v1/scheduled-messages/hook-event when the scheduled-messages feature
+# was retired — see docs/cockpit/scheduled-trigger-consolidatie-decision.md
+# §5.2. ``hook_installer`` rewrites any pre-existing entries that still point
+# at the old path so the rename stays silent for the operator.
+HOOK_EVENT_PATH = "/api/v1/session-hooks/hook-event"
+
+# Legacy marker used by older settings.json entries (pre-rename). Kept so
+# ``hook_installer._event_has_hook_command`` and the legacy-rewrite path can
+# detect/clean them up. New entries always use HOOK_EVENT_PATH.
+LEGACY_HOOK_EVENT_PATH = "/api/v1/scheduled-messages/hook-event"
+LEGACY_HOOK_EVENT_MARKER = "scheduled-messages/hook-event"
+
+
 def render_hook_command(event: str, port: int = 8000) -> str:
-    url = f"http://localhost:{port}/api/v1/scheduled-messages/hook-event"
+    url = f"http://localhost:{port}{HOOK_EVENT_PATH}"
     if event == "Notification":
         # Claude Code 2.1.198+ adds `notification_type` to Notification events
         # (e.g. agent_needs_input, agent_completed). Forward it so the router

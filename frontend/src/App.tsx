@@ -29,7 +29,6 @@ const PlanDetailPage = lazy(() => import('./features/plans/PlanDetailPage').then
 const CCBridgePage = lazy(() => import('./features/cc-bridge/CCBridgePage').then((m) => ({ default: m.CCBridgePage })))
 const PresencePage = lazy(() => import('./features/presence/PresencePage').then((m) => ({ default: m.PresencePage })))
 const AgentMailPage = lazy(() => import('./features/agent-mail/AgentMailPage').then((m) => ({ default: m.AgentMailPage })))
-const ScheduledMessagesPage = lazy(() => import('./features/scheduled-messages/ScheduledMessagesPage').then((m) => ({ default: m.ScheduledMessagesPage })))
 const KanbanPage = lazy(() => import('./features/kanban/KanbanPage').then((m) => ({ default: m.default })))
 const ImpedimentPage = lazy(() => import('./features/kanban/ImpedimentPage').then((m) => ({ default: m.ImpedimentPage })))
 const ApmPage = lazy(() => import('./features/apm/ApmPage').then((m) => ({ default: m.ApmPage })))
@@ -75,7 +74,6 @@ function App() {
                 <Route path="cc-bridge" element={<CCBridgePage />} />
                 <Route path="presence" element={<PresencePage />} />
                 <Route path="agent-mail" element={<AgentMailPage />} />
-                <Route path="scheduled-messages" element={<ScheduledMessagesPage />} />
                 <Route path="plans/:filename" element={<PlanDetailPage />} />
                 <Route path="plans" element={<PlansPage />} />
                 <Route path="context" element={<ContextPage />} />

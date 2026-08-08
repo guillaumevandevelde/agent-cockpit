@@ -386,8 +386,9 @@ def test_reconcile_removes_dead_panes(monkeypatch):
 
 def test_reconcile_preserves_live_panes(monkeypatch):
     """A pane in ``_panes`` that tmux still reports alive must NOT be removed,
-    because ``pane_for`` feeds the scheduled-messages-inject pipeline and
-    must keep its mapping intact while the session is live."""
+    because ``pane_for`` feeds the auto-resume and kanban-dispatch
+    keystroke-delivery paths and must keep its mapping intact while the
+    session is live."""
     from app.services.scheduling import session_registry as mod
 
     live = {"%5", "%7", "%9"}

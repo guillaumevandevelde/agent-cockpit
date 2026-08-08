@@ -294,4 +294,6 @@ verdient een eigen ready-state in plaats van `ready`.
 
 ✅ Vervolgkaart 2 geïmplementeerd (kaart `15cd4ba9…`): twee `recurring_triggers` (market-research `0 9 * * 1`, po-digest `0 8 * * 1`, beide Europe/Brussels); Step 7 verwijderd uit `market-research`- en `po-digest`-skill; stranded kaarten `d5b363dd…` (gedeblokkeerd, in dispatch) en `d2f3a10d…` (Done, no-action-needed).
 
+✅ Vervolgkaart 3 geïmplementeerd (kaart `1534ac0d…`): `delivery.py`/`crud.py`/`scheduled_message*.py`/`mcp_server/tools/scheduled.py`/`scheduled_messages/`-router verwijderd; hook-ingest en auto-resume herbergd onder nieuwe `/api/v1/session-hooks`-router; `hook_installer` herschrijft legacy-URLs in `~/.claude/settings.json` bij boot (getest); `SchedulerService.schedule_once`/`schedule_cron`/`_run_delivery`/`has_job`/`remove` vervallen; `dispatch.py:5600` docstring-update.
+
 Zie de kind-kaarten van `0767c57a…` voor de acceptance criteria.

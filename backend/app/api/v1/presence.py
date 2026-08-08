@@ -52,7 +52,7 @@ async def receive_event(
     dumped = payload.model_dump()
     updated_session = await service.process_event(dumped, db)
 
-    # Feed the scheduled-messages idle detector from the same hook stream, so we
+    # Feed the idle detector from the same hook stream, so we
     # don't need a separate hook install. cwd identifies the project to deliver to.
     if payload.cwd:
         idle_state.record(payload.hook_event_name, cwd=payload.cwd, session_id=payload.session_id)

@@ -21,7 +21,6 @@ import app.models.mcp_token  # noqa: F401  (register tables for create_all)
 import app.models.recurring_trigger  # noqa: F401  (register tables for create_all)
 import app.models.run_instance  # noqa: F401  (register tables for create_all)
 import app.models.sandcastle  # noqa: F401  (register tables for create_all)
-import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
 import app.models.security_audit  # noqa: F401  (register tables for create_all)
 import app.models.security_profile  # noqa: F401  (register tables for create_all)
 from app.api.v1.router import router as api_v1_router
@@ -200,19 +199,13 @@ async def lifespan(app: FastAPI):
     from app.services.scheduling.schema_guard import (
         ensure_backup_columns,
         ensure_model_columns,
-        ensure_scheduled_message_columns,
     )
-    await ensure_scheduled_message_columns(engine)
     await ensure_backup_columns(engine)
     await ensure_model_columns(engine)
     # Clean up any orphaned relay processes from previous runs
     from app.services.runs.pty_relay import cleanup_orphaned_relays, close_all_relays
     cleanup_orphaned_relays()
     # Start the scheduler and reschedule persisted, enabled jobs
-    from sqlalchemy import select
-
-    from app.database import AsyncSessionLocal
-    from app.models.scheduled_message import ScheduledMessage
     from app.services.scheduling.scheduler import scheduler_service
     scheduler_service.start()
     # Session recovery + run adoption + the dispatch tick run in a BACKGROUND
@@ -259,15 +252,6 @@ async def lifespan(app: FastAPI):
     scheduler_service.schedule_stale_detection(
         interval_minutes=settings.stale_check_interval_minutes
     )
-    async with AsyncSessionLocal() as s:
-        rows = (await s.execute(
-            select(ScheduledMessage).where(ScheduledMessage.enabled == True)  # noqa: E712
-        )).scalars().all()
-        for m in rows:
-            if m.trigger_type == "once" and m.fire_at:
-                scheduler_service.schedule_once(m.id, m.fire_at)
-            elif m.trigger_type == "cron" and m.cron_expr:
-                scheduler_service.schedule_cron(m.id, m.cron_expr, m.timezone)
     # Register the daily automatic-backup job when enabled.
     from app.services.auto_backup_service import get_or_create_settings
     async with AsyncSessionLocal() as s:
@@ -280,6 +264,7 @@ async def lifespan(app: FastAPI):
     # handles the past. See docs/cockpit/scheduled-trigger-consolidatie-decision.md §3.2.
     from app.models.recurring_trigger import RecurringTrigger
     from app.services.recurring_triggers import run_boot_inhaal
+    from sqlalchemy import select
     async with AsyncSessionLocal() as s:
         triggers = (await s.execute(
             select(RecurringTrigger).where(RecurringTrigger.enabled == True)  # noqa: E712

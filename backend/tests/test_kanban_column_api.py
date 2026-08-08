@@ -8,7 +8,7 @@ nullable default_agent / default_provider / default_model fields.
 The latently-broken shape lived at `service.update_column` doing
 `if v is not None: setattr(...)` — every explicit null was silently dropped.
 The new shape uses `payload.model_dump(exclude_unset=True)` (matches the rest
-of the codebase, e.g. PATCH /cards/{cid}, scheduled_messages PATCH, security
+of the codebase, e.g. PATCH /cards/{cid}, security
 PATCH, project_service.update).
 """
 import pytest

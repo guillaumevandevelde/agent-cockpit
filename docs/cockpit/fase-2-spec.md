@@ -1,8 +1,18 @@
 ---
 title: "Fase 2 — Spec: Scheduled messages"
 type: spec
-status: active
+status: superseded
 ---
+
+> **Statusbanner — superseded 2026-08-08.**
+> Het "scheduled messages"-pad (tmux-injectie via APScheduler) is
+> teruggetrokken; zie
+> [`scheduled-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md)
+> voor de meting en de gekozen opzet (cron → kanban-kaart). De
+> sessie-substraat die deze spec beschreef (idle/presence/auto-resume
+> + hook-ingest) staat onder `/api/v1/session-hooks`. De spec zelf
+> blijft voor historische context; er volgt geen verdere implementatie
+> van het oorspronkelijke plan.
 
 # Fase 2 — Spec: Scheduled messages
 

@@ -1,4 +1,7 @@
-"""Edge cases for tmux message injection (scheduled-message delivery, model A):
+"""Edge cases for tmux message injection (used by kanban-dispatch and
+auto-resume; the once/cron scheduled-message delivery path was retired
+with the scheduled-messages feature — see
+``docs/cockpit/scheduled-trigger-consolidatie-decision.md`` §5.2):
 tmux missing, send-keys timing out, the Enter step failing, and the readiness
 poll giving up. Delivery must report failure rather than raise into the scheduler."""
 import subprocess

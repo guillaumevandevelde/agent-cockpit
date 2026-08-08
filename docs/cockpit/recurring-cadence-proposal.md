@@ -47,24 +47,25 @@ de trigger-kaart aanmaakt plus de één-regel opt-in-call.
 > Mechanisme **B** (scheduled-messages) is geschrapt in plaats van "evolutie":
 > vijf weken scherp, 1 rij, `last_fired_at=NULL`, 0 delivery-attempts, en de enige
 > geplande maandag structureel gemist (in-memory jobstore ⇒ geen inhaal na een
-> restart). Mechanisme **A** blijft, maar niet in de vorm hieronder: de kaart
-> ontstaat pas op zijn eigen ochtend via een server-side cron-trigger, in plaats
-> van weken vooruit in Backlog te wachten.
+> restart). De tmux-injectieroute is met kaart `1534ac0d…` uitgefaseerd; de
+> hook-ingest en auto-resume-endpoints staan nu onder
+> `/api/v1/session-hooks`. Mechanisme **A** blijft, maar niet in de vorm hieronder:
+> de kaart ontstaat pas op zijn eigen ochtend via een server-side cron-trigger
+> (`/api/v1/recurring-triggers`), in plaats van weken vooruit in Backlog te wachten.
 
-Drie mechanismen liggen klaar; ze zijn niet concurrent maar **opeengestapeld** —
-elk vangt een ander geval af:
+Twee mechanismen blijven over na de herziening; ze zijn niet concurrent maar
+**opeengestapeld** — elk vangt een ander geval af:
 
 | Mechanisme | Rol | Wanneer actief |
 |---|---|---|
-| **A. Kanban-trigger-kaart met `scheduled_at` + Step 7 in de skill** | **Primair.** Eén kanban-kaart per run, met de `market-research`-skill als openingsprompt. Wekelijks vuurt de auto-dispatch-tick 'm af; de gedispatchte sessie **maakt zelf zijn opvolger** als laatste stap via Step 7 (chain-of-one-shots). | Nu — direct operationeel. |
-| **B. Scheduled-messages (fase 2)** | **Evolutie.** Vervangt de keten van wekelijkse spawns door één lang-levende "analyst"-sessie die via `tmux send-keys` elke maandag een "voer market-research uit"-injectie krijgt. Bespaart spawn-overhead en houdt sessiecontext warm. | Activeer zodra fase-2 Task 12 groen is. Expliciet gevolgd door follow-up Backlog-kaart *"Migrate weekly market-research trigger to scheduled-messages"* (id `a4d9f8b6…`). |
-| **C. Harness `/loop` + `CronCreate`** | **Noodpad / handmatig testen.** Als zowel A als B om een of andere reden niet beschikbaar zijn (bv. backend uit de lucht), kan de mens in een *interactieve* Claude-sessie `market-research` draaien met een ScheduleWakeup-loop. | Alleen voor ad-hoc; nooit als productie-pad. |
+| **A. Server-side cron-trigger → `create_card`** | **Primair.** Een `/api/v1/recurring-triggers`-rij met `cron_expr` + timezone; de backend maakt op elke occurrence zelf een verse Backlog-kaart aan, en de auto-dispatch-tick neemt 'm vandaar over. Geen chain-of-one-shots, geen Step 7 in de skill. | Nu — direct operationeel. |
+| **B. Harness `/loop` + `CronCreate`** | **Noodpad / handmatig testen.** Als de backend uit de lucht is, kan de mens in een *interactieve* Claude-sessie `market-research` draaien met een ScheduleWakeup-loop. | Alleen voor ad-hoc; nooit als productie-pad. |
 
-**Waarom gelaagd en niet "kies één":** A werkt vandaag al, maar spawnt elke week een
-nieuwe sessie. B is daar een optimalisatie van, niet een vervanging — de `scheduled_at`-
-mechaniek blijft de ruggengraat (het vult nog steeds de Backlog met onderzoekskaarten).
-C is er voor het geval de backend uit ligt. De drie vullen elkaar aan in
-robuustheid, niet in functionaliteit.
+**Waarom gelaagd en niet "kies één":** A werkt vandaag al en is de canonieke
+terugkerende trigger. B is er voor het geval de backend uit ligt. De
+historische "scheduled-messages"-tussenstap (kaart `a4d9f8b6…`) is gesloten
+als superseded; de volledige meting en rationale staat in het
+beslisdocument.
 
 ---
 
@@ -76,8 +77,8 @@ robuustheid, niet in functionaliteit.
 |---|---|---|
 | **Frequentie** | 1×/week | Snel genoeg om een release in `claude-task-master` / `claude-deck` / Anthropic-SDK binnen een week op te merken; traag genoeg dat een no-finding run niet weggegooid moeite is (zie market-research Step 3 — "zero-finding is legitimate"). |
 | **Tijdstip** | Maandag 09:00 Europe/Brussels | Begin van de werkweek, na eventuele weekend-releases; geeft het team de week om te reageren op de Backlog-kaarten die eruit vallen. |
-| **Tijdzone** | Europe/Brussels | Past bij de bestaande scheduled-messages-default (`backend/app/models/scheduled_message.py`); geen verrassing als B ooit actief wordt. |
-| **Zelf-corrigerend?** | Ja — Step 7 berekent de volgende `scheduled_at` als "next Monday 09:00 *nu*", niet "vorige scheduled_at + 7 dagen". Zo herstelt de keten zich automatisch na een gemiste run i.p.v. 7 dagen vooruit te driften. | Voorkomt stille drift over tijd; één vergeten run catastrofe wordt geen structureel probleem. |
+| **Tijdzone** | Europe/Brussels | Past bij de canonieke default van de recurring-triggers (`backend/app/models/recurring_trigger.py`). |
+| **Zelf-corrigerend?** | Ja — de cron-expressie wordt elke boot opnieuw aan APScheduler gevoed, en `run_boot_inhaal` vangt occurrences die tijdens downtime passeerden. | Voorkomt stille drift over tijd; één vergeten run catastrofe wordt geen structureel probleem. |
 | **Configurabel?** | Ja, per-kaart via `scheduled_at` | De mens kan elke willekeurige kaart op een ander tijdstip zetten; eenmalige runs (bv. "vóór de volgende major release") zijn een natuurlijk neveneffect. |
 
 **Bij groeiende werkdruk of dalend nut → maandelijks** (eerste maandag van de maand).
