@@ -9,11 +9,15 @@ status: decided
 **Datum:** 2026-07-27
 **Status:** besloten
 **Kaart:** `2bfefe2241f54bfab9723f8f4c9a03e1`
-**Uitkomst:** De LiteLLM-sidecar draait als **opt-in, gesuperviseerde derde service onder `cockpit.sh`**; dispatch is **fail-closed** op een dode proxy en de terugval gebeurt één laag hoger — in de pool-router vóór de spawn — in plaats van in een error-handler ná de fout.
+**Uitkomst:** De LiteLLM-sidecar draait als **opt-in, gesuperviseerde derde service onder `cockpit.sh`**. Dispatch is **fail-closed** op een dode proxy en de terugval gebeurt één laag hoger — in de pool-router vóór de spawn — in plaats van in een error-handler ná de fout.
 
 ✅ **Geïmplementeerd (kaart `893033c6…`, V1):** opt-in `cockpit.sh`-service met `/health/liveliness`-watchdog, eigen venv met `litellm==1.93.0` + `prisma` gepind in `config/litellm/requirements.txt`, conditionele doctor-check die `check-litellm-hardening.sh` hergebruikt, `*.example`-configsjabloon + gitignored real config. De upgrade-procedure uit §7 staat nu inline in het requirements-bestand zelf.
 
-✅ **Geïmplementeerd (kaart `424c23d4…`, V2, herevalideerd 2026-08-04):** een derde bron in `_paused_providers_for_pool` (`backend/app/kanban/dispatch.py:1208-1226`) — een per-endpoint `GET base_url`-probe met 30 s TTL-cache, fail-soft op timeout/DNS/connection refused (`bij twijfel = beschikbaar`). Het herstel hoort in de selectie, niet in de error-handler, precies zoals §3.2 voorschrift: bij een dode proxy in de vangnet-modus pauzeert de pool de provider. `_pick_pool_choice` blijft de dode vangnet teruggeven — de "laatste val-terug"-tak in `pick_subscription_for_cli` (`subscription_pool.py:236-249`) verandert niet — maar `has_available_spillover` keert `False` terug zodra de gekozen entry zelf gepauzeerd is, waardoor de reactieve limiet-lus de kaart parkeert tot de proxy weer bereikbaar is in plaats van door te schuiven naar diezelfde dode proxy. **Geen uitwijk** — de kaart wacht op reset. De expliciete-pin-tak blijft fail-closed: `resolve_effective_provider_and_model` raadpleegt de pause-merge niet — die loopt via `MAX_DISPATCH_FAILURES` naar Impediment mét de echte fout. Dekking: `tests/test_dispatch_endpoint_reachability_pause.py` (vier unit-tests op de pause-merge zelf plus drie end-to-end-tests op de dispatch-flow).
+✅ **Geïmplementeerd (kaart `424c23d4…`, V2, herevalideerd 2026-08-04):** een derde bron in `_paused_providers_for_pool` (`backend/app/kanban/dispatch.py:1208-1226`) — een per-endpoint `GET base_url`-probe met 30 s TTL-cache, fail-soft op timeout/DNS/connection refused (`bij twijfel = beschikbaar`).
+
+Het herstel hoort in de selectie, niet in de error-handler, precies zoals §3.2 voorschrift: bij een dode proxy in de vangnet-modus pauzeert de pool de provider. `_pick_pool_choice` blijft de dode vangnet teruggeven — de "laatste val-terug"-tak in `pick_subscription_for_cli` (`subscription_pool.py:236-249`) verandert niet — maar `has_available_spillover` keert `False` terug zodra de gekozen entry zelf gepauzeerd is. Daardoor parkeert de reactieve limiet-lus de kaart tot de proxy weer bereikbaar is, in plaats van door te schuiven naar diezelfde dode proxy. **Geen uitwijk** — de kaart wacht op reset.
+
+De expliciete-pin-tak blijft fail-closed: `resolve_effective_provider_and_model` raadpleegt de pause-merge niet — die loopt via `MAX_DISPATCH_FAILURES` naar Impediment mét de echte fout. Dekking: `tests/test_dispatch_endpoint_reachability_pause.py` (vier unit-tests op de pause-merge zelf plus drie end-to-end-tests op de dispatch-flow).
 
 ---
 
@@ -46,10 +50,10 @@ vragen wezenlijk:
   in Cockpit, en elk antwoord hieronder is zo gekozen dat dat zo blijft.
 - **`bbfcb365…`** leverde de meting
   ([`litellm-pilot-meting.md`](./litellm-pilot-meting.md)): de vertaling werkt
-  (tool-use end-to-end), prompt-integriteit is byte-exact, failover houdt een sessie
-  in leven, de vijf hardening-eigenschappen zijn groen tegen een echte proxy —
-  **maar `cache_read` is via de proxy structureel 0**, ~14× meer belastbare input per
-  beurt dan een warme Anthropic-cache.
+  (tool-use end-to-end), prompt-integriteit is byte-exact, failover houdt een
+  sessie in leven, de vijf hardening-eigenschappen zijn groen tegen een echte
+  proxy. **Maar `cache_read` is via de proxy structureel 0**, ~14× meer
+  belastbare input per beurt dan een warme Anthropic-cache.
 
 Die laatste bevinding is de belangrijkste input voor deze beslissing, en niet omdat
 ze de sidecar afkeurt. Ze **herdefinieert waar hij thuishoort**: de sidecar is geen
@@ -74,15 +78,19 @@ de enige relevante economie: dispatch draait vandaag op een **abonnement**, en
 `cache_read` daar een effectief gewicht van **w ≈ 0,014** heeft — statistisch
 ononderscheidbaar van nul.
 
-Dat maakt het contrast in quotum-termen nóg scherper (een warme beurt kost bijna
-niets van het quotum; via de proxy is elke beurt volle verse input), maar het maakt
-de proxy tegelijk **relevanter voor precies één scenario**: het quotum is op. Op dat
-moment kost de directe route niet "meer quotum" maar **niets meer** — de sessie
-sterft. Verkeer via de proxy raakt het Anthropic-quotum helemaal niet; het kost geld
-op een ander account. De vergelijking is dan niet "14× meer tokens" maar "geld op een
-goedkope upstream versus een dode sessie plus een re-dispatch". Dat is de enige
-verhouding waarin de sidecar onvoorwaardelijk wint, en het is exact de vangnet-rol
-uit Q4.
+Dat maakt het contrast in quotum-termen nóg scherper. Een warme beurt kost
+bijna niets van het quotum; via de proxy is elke beurt volle verse input. Maar
+het maakt de proxy tegelijk **relevanter voor precies één scenario**: het
+quotum is op.
+
+Op dat moment kost de directe route niet "meer quotum" maar **niets meer** —
+de sessie sterft. Verkeer via de proxy raakt het Anthropic-quotum helemaal
+niet; het kost geld op een ander account. De vergelijking is dan niet "14×
+meer tokens" maar "geld op een goedkope upstream versus een dode sessie plus
+een re-dispatch".
+
+Dat is de enige verhouding waarin de sidecar onvoorwaardelijk wint, en het is
+exact de vangnet-rol uit Q4.
 
 ---
 
@@ -152,41 +160,47 @@ Impediment met de echte foutmelding.
    iedere latere usage-analyse onbetrouwbaar op een manier die niet te detecteren is.
 3. **Fail-closed is al geïmplementeerd, correct en luid.** Een spawn die synchroon
    faalt geeft de claim vrij, telt `dispatch_failures` op en zet de kaart terug in de
-   bronkolom (`dispatch.py:5331-5360`); na `MAX_DISPATCH_FAILURES = 3`
+   bronkolom (`dispatch.py:5331-5360`). Na `MAX_DISPATCH_FAILURES = 3`
    (`dispatch.py:284`) gaat de kaart naar Impediment **met `str(exc)` in de comment**.
-   Dat is geen bord dat stilvalt — dat is een bord met één zichtbare kaart en de
-   werkelijke fout erbij. Er is geen reden deze provider een uitzondering te geven op
-   het contract dat voor elke andere spawn-fout geldt.
+   Dat is geen bord dat stilvalt — dat is een bord met één zichtbare kaart en
+   de werkelijke fout erbij. Er is geen reden deze provider een uitzondering
+   te geven op het contract dat voor elke andere spawn-fout geldt.
 4. **Fail-open zou de naad breken.** Een "provider X viel terug op Y"-tak in
    `dispatch.py` is per definitie LiteLLM-vormige logica in Cockpit — precies wat
    voorwaarde 1 verbiedt. Fail-closed kost nul regels code.
 
 ### 3.2 De eerlijke tegenwerping, en het antwoord
 
-Voorwaarde 2 van de kaart zegt: *"Eén sidecar ertussen die vastloopt legt het hele
-bord plat."* In de **vangnet**-modus lijkt fail-closed dat te veroorzaken: staat de
-proxy als pool-entry en is hij dood, dan verbranden kaarten die hem trekken drie
-dispatch-pogingen en landen in Impediment — terwijl ze op Anthropic gewoon hadden
-kunnen draaien.
+Voorwaarde 2 van de kaart zegt: *"Eén sidecar ertussen die vastloopt legt het
+hele bord plat."* In de **vangnet**-modus lijkt fail-closed dat te veroorzaken.
+Staat de proxy als pool-entry en is hij dood, dan verbranden kaarten die hem
+trekken drie dispatch-pogingen en landen in Impediment — terwijl ze op
+Anthropic gewoon hadden kunnen draaien.
 
 Dat is een reëel bezwaar, en het antwoord is **niet** een fallback in de
-error-handler. Het is dat de terugval op de verkeerde laag zou zitten. De pool-router
-kiest de provider **vóór** de spawn en merget de gepauzeerde-set in de drempel-scan
+error-handler. Het is dat de terugval op de verkeerde laag zou zitten.
+
+De pool-router kiest de provider **vóór** de spawn en merget de
+gepauzeerde-set in de drempel-scan
 (`subscription_pool.py:236-249`: een gepauzeerde of boven-drempel-entry wordt
-overgeslagen; de laatste entry is de val-terug — **maar die val-terug wordt ook
-teruggegeven wanneer die laatste entry zelf gepauzeerd is**, want de functie geeft
-deterministisch "als ik móét kiezen, dan deze" terug, zodat de caller weet welk
-pad de spawn heeft gekozen). De juiste ingreep is dus: **markeer een onbereikbare
-proxy als gepauzeerd vóór de selectie**. Daarmee verandert de `chosen`-uitkomst
-in de vangnet-topologie niet (de val-terug blijft de dode vangnet), **maar**
-`has_available_spillover` (`subscription_pool.py:274-323`) ziet dat de gekozen
-entry zelf in de paused-set zit en geeft `False` terug — de reactieve
-limiet-lus (`move_limited_session_to_resume`) parkeert de kaart tot de proxy
-weer bereikbaar is. Dat is een *normale, gelogde pool-observatie*, geen stille
-substitutie; het bord gaat niet plat, maar de kaart wacht. Op 2026-08-04 heeft
-de mens dit gedrag ("vangnet dood = kaart wacht op reset") bevestigd als
-gekozen behavior voor kaart `424c23d4…` — er is geen uitwijk naar een andere
-provider, de kaart wacht tot de proxy weer bereikbaar is.
+overgeslagen). De laatste entry is de val-terug. **Maar die val-terug wordt
+ook teruggegeven wanneer die laatste entry zelf gepauzeerd is** — de functie
+geeft deterministisch "als ik móét kiezen, dan deze" terug, zodat de caller
+weet welk pad de spawn heeft gekozen.
+
+De juiste ingreep is dus: **markeer een onbereikbare proxy als gepauzeerd vóór
+de selectie**. Daarmee verandert de `chosen`-uitkomst in de vangnet-topologie
+niet (de val-terug blijft de dode vangnet), **maar** `has_available_spillover`
+(`subscription_pool.py:274-323`) ziet dat de gekozen entry zelf in de
+paused-set zit en geeft `False` terug. De reactieve limiet-lus
+(`move_limited_session_to_resume`) parkeert de kaart tot de proxy weer
+bereikbaar is.
+
+Dat is een *normale, gelogde pool-observatie*, geen stille substitutie; het
+bord gaat niet plat, maar de kaart wacht. Op 2026-08-04 heeft de mens dit
+gedrag ("vangnet dood = kaart wacht op reset") bevestigd als gekozen behavior
+voor kaart `424c23d4…` — er is geen uitwijk naar een andere provider, de kaart
+wacht tot de proxy weer bereikbaar is.
 
 Het injectiepunt bestaat al en is één functie: `_paused_providers_for_pool`
 (`dispatch.py:1201-1225`) wordt in `dispatch.py:1248-1275` al gemerged met de
@@ -229,9 +243,10 @@ Drie ontwerpkeuzes, elk met een reden:
   doctor-output weg te kijken, en dan ziet niemand de WARN die er wél toe doet.
 
 De kaart noemt de stille dode sidecar "het ergste faalpad". Deze check is het
-tegengif, en hij sluit precies aan op de crash-loop-gap uit Q1: de supervisor geeft
-het na vijf snelle crashes op en zegt dat alleen tegen `supervisor.log`; doctor is de
-plek waar dat als WARN aan de oppervlakte komt. `cockpit.sh start` draait doctor al.
+tegengif, en hij sluit precies aan op de crash-loop-gap uit Q1: de supervisor
+geeft het na vijf snelle crashes op en zegt dat alleen tegen `supervisor.log`.
+Doctor is de plek waar dat als WARN aan de oppervlakte komt. `cockpit.sh
+start` draait doctor al.
 
 ---
 
@@ -280,10 +295,11 @@ isolatiegrens. Elke gedispatchte sessie draait op dezelfde host en kan
 `127.0.0.1:<poort>` bereiken.
 
 **Beslissing.** Eén `master_key`, geleverd aan de proxy via zijn eigen env
-(`os.environ/LITELLM_MASTER_KEY` in de config, nooit als literal — dat is een van de
-vijf eigenschappen die de hardening-check afdwingt) en aan Cockpit via de
-**project-scoped SecretStore**, zoals `resolve_compatible_endpoint`
-(`endpoints.py:232`) hem al ophaalt. **Geen per-sessie of per-lane virtuele keys.**
+(`os.environ/LITELLM_MASTER_KEY` in de config, nooit als literal — dat is een
+van de vijf eigenschappen die de hardening-check afdwingt). Aan Cockpit wordt
+de key geleverd via de **project-scoped SecretStore**, zoals
+`resolve_compatible_endpoint` (`endpoints.py:232`) hem al ophaalt. **Geen
+per-sessie of per-lane virtuele keys.**
 
 **Waarom niet per sessie**, met de gemeten redenen:
 
@@ -380,18 +396,22 @@ die kaart is toch degene die de proxy installeert en start, dus de pin, de insta
 en de service horen in één hand.
 
 > **Noot over de kaart-referenties (2026-07-27).** Tijdens deze sessie zijn drie
-> kind-kaarten van `27cdc2bd…` van het bord verdwenen — de naad-kaart (`333af652…`,
-> Done), de endpoint-catalogus (`8222fee8…`, Backlog) en de lane-bedradings-kaart
-> (`66180bc9…`, Backlog) — samen met de pilot-kaart (`bbfcb365…`, Done) en de
-> hardening-bugkaart (`1941bb10…`, Backlog); het bord ging van 77 naar 69 kaarten.
-> Of dat opruimwerk of verlies is, is van buitenaf niet vast te stellen, dus die ids
-> zijn hierboven **niet** als afhankelijkheid gebruikt: een `depends_on` naar een
-> niet-bestaande kaart houdt een kind stil uit dispatch. Het *werk* van `333af652…` en
-> `bbfcb365…` is wel geland en blijft verifieerbaar in code en docs
-> (`provider_env.py:240-261`, `endpoints.py`, `scripts/check-litellm-hardening.sh`,
-> [`litellm-pilot-meting.md`](./litellm-pilot-meting.md)). Wat **niet** meer op het
-> bord staat is de lane-bedrading en de endpoint-catalogus uit §11.3 van het
-> analysedoc — V2 veronderstelt die en zegt dat expliciet in zijn eigen
+> kind-kaarten van `27cdc2bd…` van het bord verdwenen: de naad-kaart
+> (`333af652…`, Done), de endpoint-catalogus (`8222fee8…`, Backlog) en de
+> lane-bedradings-kaart (`66180bc9…`, Backlog). Samen met de pilot-kaart
+> (`bbfcb365…`, Done) en de hardening-bugkaart (`1941bb10…`, Backlog) ging het
+> bord van 77 naar 69 kaarten.
+>
+> Of dat opruimwerk of verlies is, is van buitenaf niet vast te stellen. Die
+> ids zijn hierboven **niet** als afhankelijkheid gebruikt: een `depends_on`
+> naar een niet-bestaande kaart houdt een kind stil uit dispatch.
+>
+> Het *werk* van `333af652…` en `bbfcb365…` is wel geland en blijft verifieerbaar
+> in code en docs (`provider_env.py:240-261`, `endpoints.py`,
+> `scripts/check-litellm-hardening.sh`,
+> [`litellm-pilot-meting.md`](./litellm-pilot-meting.md)). Wat **niet** meer op
+> het bord staat is de lane-bedrading en de endpoint-catalogus uit §11.3 van
+> het analysedoc. V2 veronderstelt die en zegt dat expliciet in zijn eigen
 > acceptatiecriteria.
 
 ---
@@ -440,15 +460,18 @@ beschikbaarheid en auditeerbaarheid; die veranderen niet als de prijs daalt.
 
 ## 12. Voetnoot — de §11.x-verwijzingen
 
-Bij het uitvoeren van deze kaart bleek dat `9router-integratie-analyse.md` §11 **geen**
-subsecties had, terwijl er op drie plaatsen naar `§11.2`, `§11.3`, `§11.5` en `§11.6`
-werd verwezen: in deze kaart zelf, in `litellm-pilot-meting.md` (§0 en §10), en in §11
-van het analysedoc. De "herziening van 2026-07-21" bestond wél — als een set
-kind-kaarten (`8222fee8…`, `66180bc9…`, `d0446fd8…` en de herschreven versie van deze
+Bij het uitvoeren van deze kaart bleek dat `9router-integratie-analyse.md` §11
+**geen** subsecties had, terwijl er op drie plaatsen naar `§11.2`, `§11.3`,
+`§11.5` en `§11.6` werd verwezen. Die plaatsen zijn: deze kaart zelf,
+`litellm-pilot-meting.md` (§0 en §10), en §11 van het analysedoc.
+
+De "herziening van 2026-07-21" bestond wél — als een set kind-kaarten
+(`8222fee8…`, `66180bc9…`, `d0446fd8…` en de herschreven versie van deze
 kaart) — maar is nooit als documenttekst geland.
 
-Dat is dezelfde klasse fout als de `§12/V6`-verwijzing die de Herkomst-noot van deze
-kaart al signaleerde: een citaat vooruitlopend op een sectie die nooit geschreven is.
-Daarom zijn §11.1–§11.6 in dit ship materieel gemaakt in het analysedoc, met de
-inhoud gereconstrueerd uit het enige echte record — de kaarten — en met een expliciete
+Dat is dezelfde klasse fout als de `§12/V6`-verwijzing die de Herkomst-noot
+van deze kaart al signaleerde: een citaat vooruitlopend op een sectie die
+nooit geschreven is. Daarom zijn §11.1–§11.6 in dit ship materieel gemaakt in
+het analysedoc. De inhoud is gereconstrueerd uit het enige echte record — de
+kaarten — en met een expliciete
 noot dat de subsecties later zijn opgeschreven dan de citaten die ernaar wijzen.

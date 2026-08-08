@@ -44,10 +44,10 @@ Gemeten over 2026-07-15 → 2026-07-23 (§1):
 | Mediane tijd tussen limiet-hit en volgende activiteit in dezelfde sessie | **5,7 h** (p75 11,0 h; max 32,4 h) |
 | Sessies die na de limiet nooit meer iets deden | **7 van 65** |
 
-Detectiegraad is dus in de praktijk **≈ 0%**, en de kosten zijn niet theoretisch: op
-2026-07-22 om 13:22 raakten drie sessies tegelijk de Anthropic-limiet (reset 19:50); hun
-transcripts hervatten pas de volgende ochtend rond 08:00 — ~12 uur stilstand op een reset
-die na 6,5 uur voorbij was.
+Detectiegraad is dus in de praktijk **≈ 0%**, en de kosten zijn niet
+theoretisch. Op 2026-07-22 om 13:22 raakten drie sessies tegelijk de
+Anthropic-limiet (reset 19:50). Hun transcripts hervatten pas de volgende
+ochtend rond 08:00 — ~12 uur stilstand op een reset die na 6,5 uur voorbij was.
 
 De vier oorzaken, in volgorde van impact:
 
@@ -56,9 +56,9 @@ De vier oorzaken, in volgorde van impact:
    maar als een gewoon assistant-bericht in het transcript met `isApiErrorMessage: true`
    (§2.1). Er is dus niks te classificeren.
 2. **Het secundaire kanaal (reaper pane-scan) kijkt alleen naar sessies die nog nooit een
-   hook stuurden.** Een sessie die na twee uur werk zijn limiet raakt, is allang uit die
-   verzameling — de pane-scan kan structureel alleen limieten in de eerste ~120 s vangen
-   (§2.2).
+   hook stuurden.** Een sessie die na twee uur werk zijn limiet raakt, is
+   allang uit die verzameling. De pane-scan kan structureel alleen limieten
+   in de eerste ~120 s vangen (§2.2).
 3. **"Leeft" = "de tmux-sessie bestaat".** Een gelimiteerde sessie blijft open op het
    limiet-scherm, dus de claim wordt nooit vrijgegeven en de kaart komt nooit terug op het
    bord (§2.3). Er is geen enkele voortgangs- of stilstands-check.
@@ -74,8 +74,9 @@ het tweede abonnement is dode code** omdat er geen subscription-pool geconfigure
 
 Aanbevolen richting (§5): verplaats het signaal naar het **transcript** (structureel veld,
 werkt voor beide vendors, mid-sessie én bij spawn), **hervat in de bestaande pane** in
-plaats van kill+respawn, en voeg een **voortgangs-liveness** toe zodat elke vastgelopen
-sessie zichzelf oplost — ook de oorzaken die we nog niet opgesomd hebben.
+plaats van kill+respawn, en voeg een **voortgangs-liveness** toe. Zo lost elke
+vastgelopen sessie zichzelf op — ook de oorzaken die we nog niet opgesomd
+hebben.
 
 ---
 
@@ -316,11 +317,12 @@ op fout: te lang wachten (verloren capaciteit) of te vroeg herstarten (opnieuw t
 muur). Dezelfde regex is ook aan `"hit your session limit"` gekoppeld en zou de
 weekly-vorm uit 3.1 dus sowieso niet parsen.
 
-**3.3 De weekly-vorm mét datum parste niet (gefixt 2026-08-03).** Nadat 3.1/3.2 gefixt
-waren bleef één vorm over: de weekly-limiet zet een **datum** vóór de klok-tijd omdat de
-reset dagen weg kan liggen — `"You've hit your weekly limit · resets Aug 3, 7pm
-(Europe/Brussels)"` (waargenomen: `Jul 27`, `Aug 3`). De regex verwachtte de tijd direct
-na `resets`, dus dit viel terug op de blinde `FALLBACK_PAUSE_HOURS = 5`-gok. Gemeten
+**3.3 De weekly-vorm mét datum parste niet (gefixt 2026-08-03).** Nadat
+3.1/3.2 gefixt waren bleef één vorm over. De weekly-limiet zet een **datum**
+vóór de klok-tijd omdat de reset dagen weg kan liggen — `"You've hit your
+weekly limit · resets Aug 3, 7pm (Europe/Brussels)"` (waargenomen: `Jul 27`,
+`Aug 3`). De regex verwachtte de tijd direct na `resets`, dus dit viel terug op
+de blinde `FALLBACK_PAUSE_HOURS = 5`-gok. Gemeten
 gevolg op 2026-08-01: kaarten `efdc8f4f…` en `dfac67d3…` werden bij de backend-herstart
 van 2026-08-03 20:39 door de reaper geparkeerd tot 01:40 — terwijl hun echte reset
 (3 aug 19:00) op dat moment al **anderhalf uur voorbij** was.
@@ -393,10 +395,11 @@ Vijf ingrepen, in prioriteitsvolgorde. Ze staan hieronder als *wat* en *waarom*;
 
 ### R1 — Verplaats het signaal naar het transcript (kaart C1)
 
-Het transcript is de enige bron die alle vier de eigenschappen heeft die we nodig hebben:
-hij bevat de limiet **altijd**, voor **beide vendors**, **mid-sessie én bij spawn**, en het
-is een **gestructureerd veld** (`isApiErrorMessage: true`) in plaats van een substring in
-schermafval. De mapping worktree → transcript bestaat al en is in gebruik
+Het transcript is de enige bron die alle vier de eigenschappen heeft die we
+nodig hebben. Hij bevat de limiet **altijd**, voor **beide vendors**,
+**mid-sessie én bij spawn**, en het is een **gestructureerd veld**
+(`isApiErrorMessage: true`) in plaats van een substring in schermafval. De
+mapping worktree → transcript bestaat al en is in gebruik
 (`session_recovery._resolve_resume_target`), dus de detector kan per geclaimde kaart de
 staart van het transcript lezen en de laatste api-error classificeren.
 
@@ -405,13 +408,16 @@ event** is. Staat er daarna gewone assistant/user-activiteit, dan is de sessie z
 hersteld en mag er niets gebeuren.
 
 > ✅ **Geïmplementeerd (kaart `c8ad1ea8…`).** `detect_transcript_rate_limits`
-> (`backend/app/kanban/dispatch.py`) draait elke dispatch-tick per project, leest per
-> geclaimde kaart alleen de staart van het transcript (`_read_transcript_tail_entries`,
-> 64 KiB), en meldt een limiet zodra de laatste conversationele entry een
-> `isApiErrorMessage: true` is die als limiet classificeert (`_tail_rate_limit_entry`).
+> (`backend/app/kanban/dispatch.py`) draait elke dispatch-tick per project. Het
+> leest per geclaimde kaart alleen de staart van het transcript
+> (`_read_transcript_tail_entries`, 64 KiB) en meldt een limiet zodra de
+> laatste conversationele entry een `isApiErrorMessage: true` is die als
+> limiet classificeert (`_tail_rate_limit_entry`).
+>
 > De reactie is uitgetrokken uit de Notification-hook naar een gedeelde
-> `handle_rate_limit_signal` (per-provider `set_paused_until` + `move_limited_session_to_resume`),
-> zodat beide kanalen exact hetzelfde afhandelpad delen — geen tweede reactiepad.
+> `handle_rate_limit_signal` (per-provider `set_paused_until` +
+> `move_limited_session_to_resume`), zodat beide kanalen exact hetzelfde
+> afhandelpad delen — geen tweede reactiepad.
 
 ### R2 — Hervat in de bestaande pane in plaats van kill + respawn (kaart C3)
 
@@ -425,28 +431,31 @@ Voordeel: nul contextverlies, nul worktree-churn, geen `dispatch_failures`-bump,
 kaart hoeft het bord niet te verlaten. Kill + `To Resume` blijft de fallback wanneer de
 pane weg is of de nudge twee keer niet aanslaat.
 
-Te verifiëren aanname voor de uitvoerder: dat `claude` na een limiet-fout invoer accepteert
-zonder herstart (dat is wat de handmatige workflow suggereert, maar het is niet gemeten) en
-dat een nudge vóór de reset niet meer dan één extra mislukte call kost. Backoff en een
-maximum aantal pogingen zijn daarom onderdeel van de kaart.
+Te verifiëren aanname voor de uitvoerder: dat `claude` na een limiet-fout
+invoer accepteert zonder herstart. Dat is wat de handmatige workflow
+suggereert, maar het is niet gemeten. Verder: dat een nudge vóór de reset niet
+meer dan één extra mislukte call kost. Backoff en een maximum aantal pogingen
+zijn daarom onderdeel van de kaart.
 
 > ✅ **Geïmplementeerd (kaart `e2116332…`)** — `try_pane_resume` +
 > `_execute_pane_resume` + `handle_rate_limit_signal`
 > (`backend/app/kanban/dispatch.py`) plannen een apscheduler-job op
-> `reset_time + margin*attempts` met max 3 pogingen, en de bestaande
+> `reset_time + margin*attempts` met max 3 pogingen. De bestaande
 > `tmux_inject`-machinerie levert de nudge af zonder de sessie te killen.
 > De fallback naar kill + To Resume blijft staan voor de drie
 > vangnet-routes uit de acceptance criteria (pane gone, niet ready,
-> max attempts). Een tweede pass op 2026-07-25
-> (`commit e9ff0a1` → productie) mat echter twee ontwerp-bugs die
-> gemeten regressie veroorzaakten (36 events × ~30 s tot fallback, 0
-> echte nudges, 108 misleidende comments, 2 losse keystroke-injecties
-> in hergebruikte panes): de dispatch-tick interpreteerde dezelfde
-> in-transcript limit als een nieuwe re-hit en brandde het
-> attempt-budget op vóór de eerste nudge kon vuren, en de fallback
-> cancelde het apscheduler-job niet. Fix toegepast in een vervolg op
-> dezelfde kaart: een `pane_resume_fired`-vlag differentieert
-> "scheduled, wacht op fire" van "gevuurd, monitor re-limit", en
+> max attempts).
+
+Een tweede pass op 2026-07-25 (`commit e9ff0a1` → productie) mat echter twee
+ontwerp-bugs die gemeten regressie veroorzaakten (36 events × ~30 s tot
+fallback, 0 echte nudges, 108 misleidende comments, 2 losse
+keystroke-injecties in hergebruikte panes). De dispatch-tick interpreteerde
+dezelfde in-transcript limit als een nieuwe re-hit en brandde het
+attempt-budget op vóór de eerste nudge kon vuren. En de fallback cancelde het
+apscheduler-job niet.
+
+Fix toegepast in een vervolg op dezelfde kaart: een `pane_resume_fired`-vlag
+differentieert "scheduled, wacht op fire" van "gevuurd, monitor re-limit", en
 > `_pane_resume_fallback_to_kill` ruimt het apscheduler-job op voor
 > het naar To Resume gaat. De kern-aanname ("`claude` accepteert na
 > een limiet invoer en hervat productief") is daarmee eindelijk meetbaar
@@ -507,15 +516,15 @@ consumeert dezelfde classifier.
 ### Wat ik bewust níét voorstel
 
 - **Proactief niet-dispatchen op basis van quota-signalen.** De signalen zijn er wel
-  (`SubscriptionUsage`), maar Anthropic publiceert geen usage-API voor Pro/Max — de waarde
-  is een schatting uit lokale JSONL met een gegokte plan-tier-limiet — en MiniMax geeft
-  zonder `probe_url` `onbekend` terug. Op zo'n signaal een dispatch-beslissing bouwen ruilt
-  een detecteerbaar probleem in voor een onzichtbaar probleem (kaarten die niet starten
-  zonder dat iemand weet waarom).
+  (`SubscriptionUsage`), maar Anthropic publiceert geen usage-API voor Pro/Max. De
+  waarde is een schatting uit lokale JSONL met een gegokte plan-tier-limiet.
+  MiniMax geeft zonder `probe_url` `onbekend` terug. Op zo'n signaal een
+  dispatch-beslissing bouwen ruilt een detecteerbaar probleem in voor een
+  onzichtbaar probleem (kaarten die niet starten zonder dat iemand weet waarom).
 - **Overstappen op de headless transport om `RateLimitEvent` te krijgen.** Technisch is dat
-  het schoonste signaal, maar het is een transport-migratie met eigen gevolgen (geen
-  attachbare pane, human-takeover-verhaal) — veel te grote hefboom voor dit probleem, en R1
-  levert hetzelfde signaal zonder migratie.
+  het schoonste signaal. Het is een transport-migratie met eigen gevolgen (geen
+  attachbare pane, human-takeover-verhaal) — veel te grote hefboom voor dit
+  probleem. R1 levert hetzelfde signaal zonder migratie.
 
 ---
 

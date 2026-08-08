@@ -389,11 +389,13 @@ Wanneer één analyse-doc (typisch `docs/cockpit/*-analyse.md`) onderaan
 een **"Vervolgkaarten"-tabel** N follow-ups uitspuugt die hetzelfde
 "hot file" raken — bv. dezelfde module-level constanten of
 samenhangende methoden — levert parallel dispatch van die N
-**merge-conflicten** op zodra de eerste naar `master` pusht: de
-overige N-1 zitten nog in een branch die dezelfde regio wijzigt, en
+**merge-conflicten** op zodra de eerste naar `master` pusht.
+
+De overige N-1 zitten nog in een branch die dezelfde regio wijzigt. En
 elke landing dwingt een verse `git worktree add --detach` +
-`merge --no-ff` + handmatige conflict-resolution af. Bijkomend
-probleem: wijzigingen van een concurrente sibling kunnen het
+`merge --no-ff` + handmatige conflict-resolution af.
+
+Bijkomend probleem: wijzigingen van een concurrente sibling kunnen het
 runtime-gedrag verschuiven waar je tests op leunen. Geobserveerd in
 self-improve kaart `d8b137fc…` voor de 5 bevindingen van
 [`spawn-test-bridge-sessions-analyse.md`](./spawn-test-bridge-sessions-analyse.md)
@@ -456,9 +458,10 @@ die een doc SUPERSEDED markeert, doet vóór het shippen minimaal:
 **Voorbeeld uit de praktijk** (kanban-card `a495f2ce…`, 2026-07-17): de
 supersession van `2026-07-08-subscription-usage-leftover-design.md` +
 `-plan.md` door de simpeler `SubscriptionUsage` + `get_usage()`-vorm in
-`backend/app/services/subscriptions/base.py` verving drie downstream-refs die
-de stale doc nog als canonieke superpowers-tegenhanger / actieve ledger-rij
-voorstelden — alle drie moesten op de hierboven beschreven manier worden
+`backend/app/services/subscriptions/base.py` verving drie downstream-refs
+die de stale doc nog als canonieke superpowers-tegenhanger / actieve
+ledger-rij voorstelden. Alle drie moesten op de hierboven beschreven
+manier worden
 bijgewerkt. Zonder deze stap had een toekomstige sessie via
 `docs/cockpit/README.md` of `docs/cockpit/subscriptions.md` nog steeds naar
 het stale doc kunnen klikken, de banner zien, en zich afvragen waarom de
@@ -483,17 +486,16 @@ checker en blijft auditeerbaar in de PR-diff.
 
 ## 5. Product-taal voor Done-summaries en impediment-options
 
-> **Bron van waarheid:** dit is de canonieke § voor de
-> product-taal-conventie uit
-> [`product-owner-volgbaarheid-analyse.md`](./product-owner-volgbaarheid-analyse.md)
-> §4.2 (kaart `75c0952f…`, follow-up kaart `4358fe0a00e342878bc7a77fd21ffebe`),
-> aangevuld met de drie-delen-vorm uit
+> **Bron van waarheid:** dit is de canonieke § voor de product-taal-conventie
+> uit [`product-owner-volgbaarheid-analyse.md`](./product-owner-volgbaarheid-analyse.md)
+> §4.2 (kaart `75c0952f…`, follow-up kaart `4358fe0a00e342878bc7a77fd21ffebe`).
+> Aangevuld met de drie-delen-vorm uit
 > [`communicatie-en-weergave-analyse.md`](./communicatie-en-weergave-analyse.md)
 > §2.1 (kaart `8b3ce64c…`).
-> Drift-guard:
-> `backend/tests/test_product_language_convention.py` — elke mirror (deze
-> doc, de drie persona-prompts, de analyst-prompt-Python-mirror, de
-> `move_card`/`report_impediment` MCP docstrings, de dispatch-ship-
+>
+> Drift-guard: `backend/tests/test_product_language_convention.py`. Elke
+> mirror (deze doc, de drie persona-prompts, de analyst-prompt-Python-mirror,
+> de `move_card`/`report_impediment` MCP docstrings, de dispatch-ship-
 > instructies, en de git-ship-skill) moet dezelfde anker-substrings dragen.
 > Wijzig de conventie-tekst op alle mirrors in dezelfde commit, anders
 > faalt CI.
@@ -597,15 +599,13 @@ gaat specifiek over bordtekst.
 
 - ❌ Vóór — één alinea, proces-meta + jargon, kern begraven:
   > De synthese-spike leverde een analyse-doc op met 35 follow-ups
-  > verdeeld over 4 facet-docs; FCR kwam terug met OK op commit
-  > 7a1c5f3, session-retro: 1 self-improve-kaart gefiled, 1
-  > problem-finding gededupet op bestaande
-  > `flag-problem`-kaart; gereconstrueerd uit de durable
-  > kanban_ops-audit-log want de oorspronkelijke comment technisch
-  > geslaagd al bestaat de kaart niet meer; 33 van 35 follow-ups
-  > bleken al geïmplementeerd in de afgelopen maand, de resterende
-  > 2 zijn policy-lagen die nog moeten worden aangesloten op de
-  > bestaande `dispatch.py:_DISPATCH_COLUMNS`-pad.
+  > verdeeld over 4 facet-docs. FCR kwam terug met OK op commit
+  > 7a1c5f3. Session-retro: 1 self-improve-kaart gefiled. 1
+  > problem-finding gededupet op bestaande `flag-problem`-kaart.
+  > Het doc werd gereconstrueerd uit kanban_ops. De oorspronkelijke
+  > comment bestaat al, terwijl de kaart niet meer bestaat. 33 van 35
+  > follow-ups zijn geïmplementeerd. 2 policy-lagen moeten nog worden
+  > aangesloten.
 - ✅ Na — drie-delen-vorm, geen proces-meta, jargon met waarom:
   > **Uitkomst.** Product owner ziet dat 33 van de 35 ooit geplande
   > follow-ups al geïmplementeerd zijn; er resteren nog 2 kleine
@@ -661,10 +661,10 @@ valideert dat elk project dat `kanban` enabled heeft (≥1 `kanban_columns`-rij)
 rij heeft voor elke naam uit `COLUMNS`. Dit vangt de
 "project-enabled-vóór-een-kolomnaam-toegevoegd"-klasse van bugs voordat ze aan de
 oppervlakte komen in de UI. Draai het lokaal of in CI na elke wijziging aan
-`COLUMNS` of `ensure_*_column` helpers. Sinds kaart `4f0677c7…` herstelt
-`ensure_fixed_columns` deze drift bij het openen van het bord, dus een hit hier
-betekent nu: dat bord is nog niet geladen sinds het gat ontstond (of het project
-is nooit enabled — dan is er geen enkele rij en meldt het script niets).
+`COLUMNS` of `ensure_*_column` helpers. Sinds kaart `4f0677c7…` herstelt `ensure_fixed_columns` deze drift bij het
+openen van het bord. Een hit hier betekent nu: dat bord is nog niet geladen
+sinds het gat ontstond (of het project is nooit enabled — dan is er geen
+enkele rij en meldt het script niets).
 
 [`scripts/check-decision-register.sh`](../../scripts/check-decision-register.sh)
 valideert dat elk `docs/cockpit/*-decision.md` gelinkt is vanuit het beslis-register
@@ -685,7 +685,7 @@ historic-grens (default: 2026-07-16, commit `b2e7333` van de gate). Harness:
 `bash scripts/test_check_analysis_outcomes.sh`.
 
 [`scripts/check-problem-card-staleness.sh`](../../scripts/check-problem-card-staleness.sh)
-flagt elke open `[problem]`-kaart op `Backlog` / `Doing` / `Impediment` (zonder
+signaleert elke open `[problem]`-kaart op `Backlog` / `Doing` / `Impediment` (zonder
 `[self-improve]`) waarvan de keywords overlappen met een **nieuwere** rij in
 [`decisions.md`](./decisions.md) (Datum strikt na `created_at`) of een
 **nieuwer** commit-subject (`git log --since`). Doel: de
