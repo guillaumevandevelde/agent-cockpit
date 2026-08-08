@@ -17,10 +17,12 @@ status: active
 > **Methodologische noot.** De ouderkaart en vrijwel alle in de vier
 > facet-comments genoemde Backlog-follow-up-kaarten zijn tussen
 > 2026-07-11 en 2026-07-17 door een bulk `Clear-Done`-actie van het
-> bord verwijderd (kanban_ops-log: drie sweeps op 2026-07-12 06:10,
+> bord verwijderd. Kanban_ops-log: drie sweeps op 2026-07-12 06:10,
 > 2026-07-12 10:22 en 2026-07-14 11:24, elk tientallen `delete`-ops in
-> één transactie). De kaarten zelf zijn dus niet meer op te vragen via
-> `get_card`/`list_cards`; deze synthese is gereconstrueerd uit de
+> één transactie.
+>
+> De kaarten zelf zijn dus niet meer op te vragen via
+> `get_card`/`list_cards`. Deze synthese is gereconstrueerd uit de
 > **durable `kanban_ops`-audit-log** (`~/.claude-registry/kanban.db`,
 > tabel `kanban_ops`), waarin `create`/`comment`/`move`-rijen de
 > card-delete overleven. Dat dit nodig was is zelf een bevinding — zie
@@ -35,25 +37,28 @@ status: active
 De vier facet-analyses (2026-07-11) beantwoordden dit apart voor
 inceptie (A), bootstrap (B), portfolio (C) en veiligheid (D). Elke
 facet leverde een analysedoc + een set gescopete Backlog-follow-ups.
+
 **Wat deze synthese toevoegt ten opzichte van de vier facet-comments op
 de ouderkaart:** in de zes dagen tussen de facet-analyses en deze
 consolidatie is vrijwel de **volledige** in de facetten geïdentificeerde
-roadmap al door autonome kanban-dispatch **geïmplementeerd en gemerged**
-— dit verandert het eindoordeel wezenlijk ten opzichte van wat de
+roadmap al door autonome kanban-dispatch **geïmplementeerd en gemerged**.
+Dit verandert het eindoordeel wezenlijk ten opzichte van wat de
 facet-comments op het moment van schrijven meldden ("analyse + gaten
-gefileerd, geen implementatie"). Dat is zelf het belangrijkste
-synthese-resultaat: **Cockpit heeft, agentisch, zichzelf grotendeels tot
-app-fabriek omgebouwd** in de tijd die het kostte om deze synthese-kaart
-te dispatchen.
+gefileerd, geen implementatie").
+
+Dat is zelf het belangrijkste synthese-resultaat: **Cockpit heeft,
+agentisch, zichzelf grotendeels tot app-fabriek omgebouwd** in de tijd
+die het kostte om deze synthese-kaart te dispatchen.
 
 ## 2. Eindoordeel: hoe geschikt is Cockpit vandaag?
 
 **Kort antwoord.** Cockpit kan vandaag, zonder verdere implementatie,
-het volledige pad lopen: mens-goedgekeurd idee →
-spec + plan → nieuw gitrepo met baseline-`.claude/`-configuratie,
-scaffold-template, git-historie en registratie in het portfolio →
-autonome kanban-dispatch die het nieuwe project verder opbouwt via
-dezelfde analyst→executor-machine als het meta-project zelf gebruikt.
+het volledige pad lopen. Van mens-goedgekeurd idee via spec + plan naar een
+nieuw gitrepo met baseline-`.claude/`-configuratie, scaffold-template,
+git-historie en registratie in het portfolio. En verder naar autonome
+kanban-dispatch die het nieuwe project verder opbouwt via dezelfde
+analyst→executor-machine als het meta-project zelf gebruikt.
+
 Het kan meerdere van zulke projecten naast zichzelf **zien** (portfolio-
 dashboard) en heeft de bouwstenen om ze **veilig** te bouwen, te draaien
 en uit te leveren (secrets-store, container-hardening, CI-templates,
@@ -102,10 +107,10 @@ een app-fabriek.
 | D | `risk_class`-taxonomie (design-doc) | ✅ | `docs/cockpit/risk-class-taxonomie.md` |
 
 Van de **35 Backlog-follow-ups** die de vier facetten samen filedden
-(A: 8, B: 7, C: 8, D: 12) zijn er dus feitelijk **33 volledig
-geïmplementeerd en gemerged**, en zijn er **2 bewust als los onderdeel
-opgeleverd zonder de laatste integratiestap** (zie §2.2). Geen enkele
-is `not_feasible` gesloten of blijft onbehandeld in Backlog staan.
+(A: 8, B: 7, C: 8, D: 12) zijn er feitelijk **33 volledig geïmplementeerd
+en gemerged**. En er zijn **2 bewust als los onderdeel opgeleverd zonder
+de laatste integratiestap** (zie §2.2). Geen enkele is `not_feasible`
+gesloten of blijft onbehandeld in Backlog staan.
 
 ### 2.2 Wat nog structureel ontbreekt — de échte resterende gaten
 
@@ -115,12 +120,12 @@ steeds open door de huidige code te lezen:
 
 1. **`BootstrapPolicy` is niet aangesloten op `RepoBootstrapService`/
    `InceptionService`.** Het beleid (autodispatch uit bij geboorte,
-   geen CI bij geboorte, MIT-license-default, …) is volledig
-   ontworpen en getest als losstaand type (facet B, follow-up #5), maar
-   wordt door geen enkele productie-aanroep geconsumeerd — de eigen
-   docstring zegt dit expliciet. Een nieuw project krijgt dus vandaag
-   ad-hoc defaults uit `RepoBootstrapService`'s eigen code-paden, niet
-   de gedeliberateerde policy.
+   geen CI bij geboorte, MIT-license-default, …) is volledig ontworpen
+   en getest als losstaand type (facet B, follow-up #5). Het wordt door
+   geen enkele productie-aanroep geconsumeerd — de eigen docstring zegt
+   dit expliciet. Een nieuw project krijgt dus vandaag ad-hoc defaults
+   uit `RepoBootstrapService`'s eigen code-paden, niet de
+   gedeliberateerde policy.
 2. **`ProjectSecurityProfile`/`risk_class` stuurt nog niets aan.**
    `get_skip_permissions()` (`backend/app/kanban/dispatch.py:293-297`)
    retourneert nog onvoorwaardelijk `True` als er geen expliciete
@@ -150,8 +155,8 @@ steeds open door de huidige code te lezen:
 
 Facet D's eigen kernbevinding blijft dus letterlijk actueel: *"de
 resource-cap, de env-isolatie en de auth-default zijn de drie
-single-line fixes met de hoogste impact"* — het verschil is dat de
-onderliggende **mechanismen nu bestaan**; wat ontbreekt is de laatste
+single-line fixes met de hoogste impact"*. Het verschil is dat de
+onderliggende **mechanismen nu bestaan**. Wat ontbreekt is de laatste
 schakel die ze *default aan* zet voor een nieuw product-project.
 
 ### 2.3 Uit expliciete facet-scope gehouden (blijft zo, geen actie hier)
@@ -161,9 +166,10 @@ bewuste, herbevestigde out-of-scope-grenzen uit de facetten zelf:
 multi-tenancy/RBAC (D§5.3/§7), een echte network-egress-proxy (D§5.3),
 compliance-frameworks (D§5.3), MCP-server-trust-model (D§7),
 headless-SDK-transport (eigenaar blijft
-`orchestration-substrate-decision.md`), cross-device sync voor
-portfolio-werk (C§8, bevroren), en bredere deploy-targets dan GHCR
-(D§4.7 p.4 — "de grote stap", bewust ná F1+F2).
+`orchestration-substrate-decision.md`).
+
+Verder: cross-device sync voor portfolio-werk (C§8, bevroren), en bredere
+deploy-targets dan GHCR (D§4.7 p.4 — "de grote stap", bewust ná F1+F2).
 
 ## 3. Geprioriteerde roadmap
 
@@ -181,13 +187,12 @@ services.
 | 5 | Bredere Deploy-targets (Vercel/Fly/Render), echte egress-allowlist, multi-tenancy/RBAC | **Laag / bewust later** | Expliciet uit scope gehouden door facet D zelf; vereist een nieuwe policy-ronde, geen "vergeten" item | facet D §4.7 p.4, §5.3 |
 
 **Samengevat:** de synthese-aanbeveling is **niet** "bouw meer" maar
-**"schakel aan wat er al ligt"** — items 1 en 2 zijn de enige twee
-stukken implementatiewerk die nog nodig zijn om van "kan een
-product-project bouwen met dezelfde permissieve defaults als het
-meta-project" naar "kan een product-project bouwen met een veilig,
-risk-class-passend beleid" te gaan. Items 3 en 4 zijn beleidsbesluiten
-op reeds werkende schakelaars. Item 5 is een bewuste volgende
-iteratie, geen huidig gat.
+**"schakel aan wat er al ligt"**. Items 1 en 2 zijn de enige twee stukken
+implementatiewerk die nog nodig zijn om van "kan een product-project
+bouwen met dezelfde permissieve defaults als het meta-project" naar "kan
+een product-project bouwen met een veilig, risk-class-passend beleid" te
+gaan. Items 3 en 4 zijn beleidsbesluiten op reeds werkende schakelaars.
+Item 5 is een bewuste volgende iteratie, geen huidig gat.
 
 ## 4. Referenties
 
@@ -206,10 +211,10 @@ iteratie, geen huidig gat.
   [`ci-templates.md`](./ci-templates.md).
 - Belangrijkste (inmiddels van het bord geruimde, maar in `kanban_ops`
   herleidbare) follow-up-kaarten: facet A — `c33b2f14` (inceptie-pipeline
-  umbrella), `0260dbcd` (`create_project_from_intake`); facet B —
-  `dceb60ab` (`RepoBootstrapService`), `02b07a0f` (`BootstrapPolicy`-design);
-  facet C — `86c96fbd` (`kind`/`priority`-kolom), `567fe02d`
-  (portfolio-cap in dispatch); facet D — `828b7b25` (`SecretStore`),
+  umbrella), `0260dbcd` (`create_project_from_intake`). Facet B —
+  `dceb60ab` (`RepoBootstrapService`), `02b07a0f` (`BootstrapPolicy`-design).
+  Facet C — `86c96fbd` (`kind`/`priority`-kolom), `567fe02d`
+  (portfolio-cap in dispatch). Facet D — `828b7b25` (`SecretStore`),
   `b5c71e0c` (env-injectie-filter), `ea9b824f` (`ProjectSecurityProfile`).
 - Ouderkaart: `8db831a0df6d42689c5b26325b6cbecc` (verwijderd van het bord
   door Clear-Done; comments gereconstrueerd uit `kanban_ops`).
