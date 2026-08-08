@@ -89,12 +89,19 @@ if [ -n "$FRONTEND_TOUCHED" ]; then
         ln -s "<project-root>/frontend/node_modules" node_modules && \
         echo "bootstrapped frontend/node_modules via symlink (lockfile matches master)" && \
         # Sanity-probe the symlinked install: `.bin/`-presence is necessary
-        # but not sufficient (card 9b7c2a98…). Force Node to resolve eslint's
-        # full module graph so a missing transitive dep like `acorn`
-        # surfaces immediately; on probe failure, `mv` the corrupt symlink
-        # aside (`rm` is deny-listed) and fall back to `npm ci` — the outer
-        # block has already passed, so the cleanup must re-install in-place.
-        if ! node -e "require('eslint/lib/cli.js')" >/dev/null 2>&1; then \
+        # but not sufficient (card 9b7c2a98…). ESLint 10 (card 1e6fbe4e…)
+        # removed `lib/cli.js` as a resolvable subpath, so the legacy
+        # `require('eslint/lib/cli.js')` probe always fails on a healthy
+        # install and burns the symlink fast-path for a redundant `npm ci`.
+        # The replacement loads eslint's main module via its package
+        # exports (`require('eslint')` resolves `lib/api.js`) AND resolves
+        # the two transitive deps that `npm run lint` actually exercises —
+        # `espree` (ESLint's parser) and its `acorn` dep. Together those
+        # cover the failure class the legacy probe was guarding against;
+        # on probe failure, `mv` the corrupt symlink aside (`rm` is
+        # deny-listed) and fall back to `npm ci` — the outer block has
+        # already passed, so the cleanup must re-install in-place.
+        if ! node -e "require('eslint'); require.resolve('espree'); require.resolve('acorn')" >/dev/null 2>&1; then \
           mv node_modules "../node_modules.corrupt-$(date +%s)" && \
           echo "WARN: symlinked install failed probe (missing transitive dep?) — falling back to npm ci" && \
           npm ci; \

@@ -6522,22 +6522,33 @@ class TestBuildShipInstructions:
         ``rm`` (deny-listed, so ``mv``) the symlink and re-pay the
         multi-minute ``npm ci``. The gate must probe the symlinked
         install for actual workability — not just for the presence of
-        ``.bin/`` — and fall back to ``npm ci`` on probe failure."""
+        ``.bin/`` — and fall back to ``npm ci`` on probe failure.
+
+        ESLint 10 (card 1e6fbe4e…) removed ``lib/cli.js`` as a resolvable
+        subpath, so the legacy ``require('eslint/lib/cli.js')`` probe
+        is a false negative on healthy installs; the recipe now uses
+        ``require('eslint')`` (the package's main entry, resolved via
+        its ``exports`` field) plus ``require.resolve('espree')`` and
+        ``require.resolve('acorn')`` to cover the deeper-dep class."""
         for mode in ("direct", "pull-request"):
             instructions = dispatch._build_ship_instructions(mode)
             # The probe must actually exercise eslint's module graph
             # (not just `require.resolve`, which only checks file
-            # presence). Either `require('eslint/lib/cli.js')` (forces
-            # Node to load eslint's full module graph, so a missing
-            # transitive dep like `acorn` surfaces immediately) or
-            # `node_modules/.bin/eslint --version` (same entry point
-            # `npm run lint` uses). A pure `[ -d .bin ]` check is
-            # insufficient — that's exactly what the card asks us to
-            # *replace*.
-            assert "require('eslint/lib/cli.js')" in instructions \
-                or "node_modules/.bin/eslint --version" in instructions, \
-                f"{mode} ship recipe must probe the symlinked install " \
+            # presence). The current shape loads the eslint main module
+            # and resolves the two critical transitive deps the lint
+            # pipeline actually uses; older valid shapes (the pre-ESLint-10
+            # `lib/cli.js` probe and the `.bin/eslint --version` exec)
+            # remain accepted to avoid silent regression during the
+            # upgrade window. A pure `[ -d .bin ]` check is insufficient —
+            # that's exactly what the card asks us to *replace*.
+            assert (
+                "require('eslint'); require.resolve('espree'); require.resolve('acorn')" in instructions
+                or "require('eslint/lib/cli.js')" in instructions
+                or "node_modules/.bin/eslint --version" in instructions
+            ), (
+                f"{mode} ship recipe must probe the symlinked install "
                 "for deeper-dep corruption, not just .bin presence"
+            )
             # The probe must drive a real fallback to `npm ci` when it
             # fails — `npm ci` is the canonical recovery (pinned by
             # `test_frontend_gate_installs_deps_when_node_modules_missing`).
