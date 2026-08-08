@@ -15,17 +15,22 @@ status: decided
 **Uitkomst in één alinea.** **GO op RTK** (conditioneel: per-lane, via een
 worktree-lokale hook, `grep`-carve-out verplicht). **NO-GO op Headroom** — niet
 op kwaliteit, maar omdat zijn enige werkende integratievorm voor Claude Code
-`ANTHROPIC_BASE_URL` naar een lokale proxy zet, en dat is exact de
+`ANTHROPIC_BASE_URL` naar een lokale proxy zet. Dat is exact de
 subscription-OAuth-MITM die op 2026-07-15 al is afgewezen en op 2026-07-19
-opnieuw. **Caveman: conditionele GO** en **Ponytail: NO-GO** — en dat "conditioneel"
-is de kern van deze analyse. De opbrengst van beide mechanismeklassen hangt volledig
-af van één onopgeloste boekhoudvraag: **telt `cache_read` mee in het
-abonnementsquotum?** Gemeten over 25 echte dispatch-sessies is `cache_read`
-**95,9%** van alle tokens. Telt het mee, dan levert RTK **7,4%** headroom en
-Caveman 0,26%. Telt het niet mee, dan draait het exact om: RTK **1,6%** en Caveman
-**6,7%**. De twee mechanismen zijn dus **anti-gecorreleerd** op een vraag die dit
-huis nog niet heeft beslecht (§2) — en beide zijn een orde kleiner dan de "60–90%"
-op de doos. De écht grote lever ligt ergens anders (§10).
+opnieuw.
+
+**Caveman: conditionele GO** en **Ponytail: NO-GO** — en dat "conditioneel"
+is de kern van deze analyse. De opbrengst van beide mechanismeklassen hangt
+volledig af van één onopgeloste boekhoudvraag: **telt `cache_read` mee in het
+abonnementsquotum?**
+
+Gemeten over 25 echte dispatch-sessies is `cache_read` **95,9%** van alle
+tokens. Telt het mee, dan levert RTK **7,4%** headroom en Caveman 0,26%.
+Telt het niet mee, dan draait het exact om: RTK **1,6%** en Caveman **6,7%**.
+
+De twee mechanismen zijn dus **anti-gecorreleerd** op een vraag die dit huis
+nog niet heeft beslecht (§2) — en beide zijn een orde kleiner dan de
+"60–90%" op de doos. De écht grote lever ligt ergens anders (§10).
 
 ---
 
@@ -95,10 +100,12 @@ gebruikersrapportage.
 > **Conflict met een eerdere register-regel, expliciet.** De regel van
 > 2026-07-21 bij [`token-saver-meet-harnas.md`](./token-saver-meet-harnas.md)
 > (kaart `6b67df66…`) concludeert het omgekeerde: *"quotum is rolling 5h
-> message-window, dus `cache_read` trekt zeer waarschijnlijk niets af"* — daar
-> zelf al eerlijk gelabeld als *"best available inference, not authoritative"*.
-> Deze analyse haalt die inferentie **niet** onderuit met een harde bron; ze zet
-> er sterkere (maar nog steeds niet-officiële) tegen-evidentie naast. De
+> message-window, dus `cache_read` trekt zeer waarschijnlijk niets af"*. Dat
+> was daar zelf al eerlijk gelabeld als *"best available inference, not
+> authoritative"*.
+>
+> Deze analyse haalt die inferentie **niet** onderuit met een harde bron. Ze
+> zet er sterkere (maar nog steeds niet-officiële) tegen-evidentie naast. De
 > verantwoorde uitkomst is dus niet "de een wint", maar: **beslis het niet op
 > aanname — reken beide scenario's door.** Dat is §2.3.
 
@@ -120,17 +127,21 @@ noemer, waarmee Caveman het sterkste mechanisme van de vier wordt.
 > **✅ BESLECHT MET EEN METING (2026-07-21, kaart `97e623f9…`) — Scenario B is
 > de werkelijkheid.** Een gecontroleerde injectie-meting op dit abonnement
 > (Anthropic's eigen `five_hour.utilization`-teller, de bron achter `/usage`)
-> vindt een effectief cache_read-gewicht van **w = 0,014** — statistisch nul.
+> vindt een effectief cache_read-gewicht van **w = 0,014**. Dat is statistisch
+> nul.
+>
 > Het model-vrije bewijs: twee intervallen bewogen allebei **exact 4
-> procentpunt** terwijl hun cache_read 1,8× verschilde (2,05 M vs. 3,69 M). Dus:
-> **RTK ≈ 1,6% / Caveman ≈ 6,7% — Caveman is het sterkste mechanisme.** De
-> hedge blijft verstandig (beide opt-in, per-lane), maar de bouwinspanning weegt
-> nu richting output-reductie. De tegen-evidentie
+> procentpunt** terwijl hun cache_read 1,8× verschilde (2,05 M vs. 3,69 M).
+> Dus: **RTK ≈ 1,6% / Caveman ≈ 6,7%.** Caveman is het sterkste mechanisme.
+>
+> De hedge blijft verstandig (beide opt-in, per-lane), maar de bouwinspanning
+> weegt nu richting output-reductie. De tegen-evidentie
 > ([claude-code#24147](https://github.com/anthropics/claude-code/issues/24147),
 > "99,93% of quota") beschrijft token-*boekhouding* die cache_read meesommeert,
 > niet de werkelijke quotum-consumptie. Volledige meting + reproductie:
-> [`cache-read-quota-decision.md`](./cache-read-quota-decision.md). Deze
-> §2.3-doorrekening blijft staan als het waarom; de meting kiest de kolom.
+> [`cache-read-quota-decision.md`](./cache-read-quota-decision.md).
+>
+> Deze §2.3-doorrekening blijft staan als het waarom; de meting kiest de kolom.
 
 Dat is een ongemakkelijke uitkomst, maar het is de eerlijke. Twee praktische
 gevolgen:
@@ -484,10 +495,11 @@ is geen detail: het betekent dat RTK's plafond op tool-outputvolume ruwweg
 
 De kaart vroeg niet "hoeveel tokens minder" maar "hoeveel verder komt een
 dispatch voordat de drempel valt". Om dat te beantwoorden heb ik de 25
-transcripts opnieuw doorlopen met een counterfactual: elk `Bash`-`tool_result`
-van een RTK-gedekt commando wordt verkleind met de in §5.1 **gemeten** ratio, en
-die besparing wordt geteld voor elke turn die het daarna nog zou hebben
-her-gelezen (`Δtokens × resterende turns`, plus de eenmalige `cache_creation`).
+transcripts opnieuw doorlopen met een counterfactual. Elk `Bash`-`tool_result`
+van een RTK-gedekt commando wordt verkleind met de in §5.1 **gemeten** ratio.
+Die besparing wordt geteld voor elke turn die het daarna nog zou hebben
+her-gelezen (`Δtokens × resterende turns`, plus de eenmalige
+`cache_creation`).
 
 | Sessie (staart van de branchnaam) | Turns | Werkelijke `cache_read` | Gemodelleerde besparing | % |
 |---|---:|---:|---:|---:|
@@ -563,9 +575,9 @@ Twee harde randvoorwaarden:
    integratie.
 
 **Headroom: nee.** Zijn enige mechanische vorm is de base-URL-proxy (§4.2.1), de
-library-vorm heeft geen aangrijpingspunt (§4.2.5), en dat Headroom in Python
-geschreven is — het argument dat de kaart noemde — helpt niet: de integratie zou
-alsnog een apart proxy-proces zijn, niet een import in onze backend.
+library-vorm heeft geen aangrijpingspunt (§4.2.5). Dat Headroom in Python
+geschreven is — het argument dat de kaart noemde — helpt niet. De integratie
+zou alsnog een apart proxy-proces zijn, niet een import in onze backend.
 
 ## 8. Beslissing per mechanisme
 
@@ -599,25 +611,22 @@ alsnog een apart proxy-proces zijn, niet een import in onze backend.
 
 **Aangeraakte oppervlakken (lockstep, geen drift):**
 
-- Backend: `models.py` (`KanbanColumn.token_saver_enabled`),
-  `db.py` (additieve `ALTER TABLE` in `_ensure_column_table`,
-  fail-safe met `try/except`), `schemas.py` (Pydantic-velden +
-  `TokenSaverRequest`), nieuw `token_saver.py` (publieke surface
-  `maybe_install` / `is_board_enabled` / `set_board_enabled` /
-  `post_note` / `write_rtk_settings_into_worktree`),
-  `dispatch.py` (sync bridge naar `maybe_install` vanuit de
-  worktree-transport; `card_id` + `column_name` doorgegeven),
-  `api/v1/kanban/router.py` (GET/POST `/api/v1/kanban/token-saver`).
-- Frontend: `types.ts` (`token_saver_enabled: boolean`),
-  `api.ts` (`getTokenSaver` / `setTokenSaver`),
-  `ColumnSettingsDialog.tsx` (toggle, badge in read-only view,
-  init op Edit).
+- Backend: `models.py` (`KanbanColumn.token_saver_enabled`), `db.py` (additieve
+  `ALTER TABLE` in `_ensure_column_table`, fail-safe met `try/except`),
+  `schemas.py` (Pydantic-velden + `TokenSaverRequest`), nieuw `token_saver.py`
+  (publieke surface `maybe_install` / `is_board_enabled` / `set_board_enabled` /
+  `post_note` / `write_rtk_settings_into_worktree`). Verder: `dispatch.py`
+  (sync bridge naar `maybe_install` vanuit de worktree-transport; `card_id` +
+  `column_name` doorgegeven), `api/v1/kanban/router.py` (GET/POST
+  `/api/v1/kanban/token-saver`).
+- Frontend: `types.ts` (`token_saver_enabled: boolean`), `api.ts`
+  (`getTokenSaver` / `setTokenSaver`), `ColumnSettingsDialog.tsx` (toggle, badge
+  in read-only view, init op Edit).
 - Harness: `scripts/measure-token-saver.sh` heeft een nieuwe
-  `real-saver`-subcommand die via `apply_real_saver` de
-  dispatch-helper zelf aanroept — geen tweede JSON-merge-pad. De
-  bestaande `compare`-tabel heeft nu ook `real-saver`-rijen
-  per trial; `with-saver` blijft staan als de gedocumenteerde
-  prompt-mutatie-proxy ondergrens.
+  `real-saver`-subcommand die via `apply_real_saver` de dispatch-helper zelf
+  aanroept — geen tweede JSON-merge-pad. De bestaande `compare`-tabel heeft
+  nu ook `real-saver`-rijen per trial; `with-saver` blijft staan als de
+  gedocumenteerde prompt-mutatie-proxy ondergrens.
 
 **Acceptance-criteria check:**
 
@@ -640,17 +649,17 @@ alsnog een apart proxy-proces zijn, niet een import in onze backend.
   `token_saver:<project_key>` (Pydantic-validated;
   `set_board_enabled` schrijft `"1"` / `"0"` naar de
   bestaande kolom)
-- ✅ Tests: 23 unit-tests (`test_token_saver.py`) + 4
-  kolom-migratie-tests (`test_token_saver_column.py`) + 4
-  API-tests (`test_token_saver_api.py`), groen. Zeven bridge-tests maken de
-  activity-feed-claim hard: drie testen de async kern; één test de directe
-  sync-caller zonder lopende loop; en drie regressietests de werkelijke
-  productievoorwaarden — de sync bridge wordt vanuit een actieve event loop
-  aangeroepen, de open claim/move-transactie wordt vóór de worker-DB-call
-  gecommit, en een exception in de bridge zelf levert alsnog een zichtbare
-  `**Note:** Token saver fail-open: bridge …` op. De productie-test verwacht
-  zowel status `active` als exact
-  `**Note:** Token saver activated: RTK 0.43.0`.
+- ✅ Tests: 23 unit-tests (`test_token_saver.py`) + 4 kolom-migratie-tests
+  (`test_token_saver_column.py`) + 4 API-tests (`test_token_saver_api.py`),
+  groen. Zeven bridge-tests maken de activity-feed-claim hard. Drie testen
+  de async kern; één test de directe sync-caller zonder lopende loop; en
+  drie regressietests de werkelijke productievoorwaarden.
+
+  De sync bridge wordt vanuit een actieve event loop aangeroepen. De open
+  claim/move-transactie wordt vóór de worker-DB-call gecommit. Een exception
+  in de bridge zelf levert alsnog een zichtbare `**Note:** Token saver
+  fail-open: bridge …` op. De productie-test verwacht zowel status `active`
+  als exact `**Note:** Token saver activated: RTK 0.43.0`.
 - ✅ `compare`-harness uitgebreid met `real-saver`-variant in
   lockstep met de dispatch-helper
 
@@ -677,13 +686,12 @@ met drie varianten (baseline / proxy `with-saver` / echte
   op `_column_max_sessions` wordt hersteld). De card-eis "zonder
   kwaliteitsregressie" staat daarmee.
 - ⚠️ **`pass_diff=0` in de twee `real-saver`-runs.** Dat is **geen**
-  kwaliteitsfalen: de agent lost de `test_zero_column_cap`-tests
-  allebei op (vandaar `pass_tests=1`), maar met een andere
-  diff-shape dan de canonieke `r.max_sessions > 0` → `r.max_sessions
-  >= 0` één-regelige match. Het `score_golden`-criterium telt een
-  letterlijke vervang; meerdere geldige fixes scoren `0`. Onder de
-  proxy-variant scoort `pass_diff=1` in trial 2. Dit verschil hoort
-  bij de scorer, niet bij RTK.
+  kwaliteitsfalen: de agent lost de `test_zero_column_cap`-tests allebei op
+  (vandaar `pass_tests=1`), maar met een andere diff-shape dan de canonieke
+  `r.max_sessions > 0` → `r.max_sessions >= 0` één-regelige match. Het
+  `score_golden`-criterium telt een letterlijke vervang; meerdere geldige
+  fixes scoren `0`. Onder de proxy-variant scoort `pass_diff=1` in trial 2.
+  Dit verschil hoort bij de scorer, niet bij RTK.
 - ⚠️ **`cache_read` op `real-saver` is op N=2 niet eenduidig.** Trial 1
   toont `real-saver` 930.176 vs baseline 295.731 — `real-saver`
   **drie keer** zoveel `cache_read` (cache-creatie is 0 in beide,
@@ -749,9 +757,9 @@ uit §2.3, en beide zijn opt-in en per-lane, dus ze sluiten elkaar niet uit.
 
 **Heropenen** bij: (a) RTK krijgt een verliesvrije modus met winst, (b) Headroom
 krijgt een integratievorm die `ANTHROPIC_BASE_URL` niet aanraakt, (c) Anthropic
-wijzigt het meetellen van `cache_read` in abonnementen — dan verschuift het hele
-zwaartepunt van §2 —, of (d) de mix uit §5.2 verandert wezenlijk (bv. `Read` daalt
-onder `Bash`).
+wijzigt het meetellen van `cache_read` in abonnementen. In dat laatste geval
+verschuift het hele zwaartepunt van §2. Of (d) de mix uit §5.2 verandert
+wezenlijk (bv. `Read` daalt onder `Bash`).
 
 ### ✅ Geïmplementeerd (kaart `c31333bf…`, 2026-07-25) — productionele bridge hersteld na tweede Impediment
 
@@ -816,22 +824,27 @@ compensatiepad-tests niet afvangen.
 **Wat de reviewer-gate ronde 4 bracht.** De integrator van de §8-implementatie schreef
 twee artefacten in de dispatch-worktree: het wrapper-script op
 `<worktree>/.claude/hooks/rtk-cockpit-rewrite.sh` en een gemuteerd
-`<worktree>/.claude/settings.json`. Het hook-script is een untracked file in een
-nieuwe directory (`git status` → `?? .claude/hooks/rtk-cockpit-rewrite.sh`); de
-settings.json is **tracked** in deze repo (`git ls-files` bevestigt). Op élke
-shippende lane die de saver aan had, vuurde de ship-gate
+`<worktree>/.claude/settings.json`.
+
+Het hook-script is een untracked file in een nieuwe directory (`git status` →
+`?? .claude/hooks/rtk-cockpit-rewrite.sh`). De `settings.json` is **tracked**
+in deze repo (`git ls-files` bevestigt).
+
+Op élke shippende lane die de saver aan had, vuurde de ship-gate
 (`.claude/skills/git-ship/SKILL.md:154-156`) `git diff --quiet HEAD -- || git
-ls-files --others --exclude-standard` af en weigerde — vanaf de eerste seconde
-van de sessie, vóór de agent één regel werk deed. De voorgeschreven
-recovery-stap (`git add -A && git commit`) commitde dan de hook + de
-gepatchte `settings.json` naar `master`; van dat moment laadde élke sessie
-in élke worktree die hook uit de getrackte `settings.json`, RTK stond
-board-wide aan zonder lane-vlag, en de kill-switch kon het niet meer
-uitzetten (die gate't alléén de installatie, niet een al gecommitte
-settings.json). De bug was bovendien onzichtbaar zolang de RTK-binary niet
-op deze host stond — de installer valt fail-open op `failed` zonder
-filesystem-writes, en geen enkele bestaande test gebruikte een echte git
-worktree om `git status` te pollen.
+ls-files --others --exclude-standard` af. Die weigerde — vanaf de eerste
+seconde van de sessie, vóór de agent één regel werk deed.
+
+De voorgeschreven recovery-stap (`git add -A && git commit`) commitde dan de
+hook + de gepatchte `settings.json` naar `master`. Van dat moment laadde élke
+sessie in élke worktree die hook uit de getrackte `settings.json`. RTK stond
+board-wide aan zonder lane-vlag, en de kill-switch kon het niet meer uitzetten
+(die gate't alléén de installatie, niet een al gecommitte `settings.json`).
+
+De bug was bovendien onzichtbaar zolang de RTK-binary niet op deze host stond
+— de installer valt fail-open op `failed` zonder filesystem-writes, en geen
+enkele bestaande test gebruikte een echte git worktree om `git status` te
+pollen.
 
 **De fix (operator-besluit optie A, 2026-08-04).** Wrapper-script en
 hook-config verhuizen buiten de worktree zodat `git status` schoon blijft:
@@ -910,11 +923,11 @@ en de kaart promoot niet naar default-on. De fix maakt die opbrengst
 bereikbaar op shippende lanes waar ze eerst onbereikbaar was door de
 git-pollutie — dát was de blokkade, niet de compressie zelf.
 
-**Heropenen** bij: dezelfde voorwaarden als §8 + (h) Claude Code stopt
-met het gitignore-patroon voor `settings.local.json` (dan terugvallen op
-een andere gitignored bestemming, bv. `.claude/settings.local.json` →
+**Heropenen** bij: dezelfde voorwaarden als §8 + (h) Claude Code stopt met het
+gitignore-patroon voor `settings.local.json`. Dan terugvallen op een andere
+gitignored bestemming, bv. `.claude/settings.local.json` →
 `<cache>/settings/<project_key>.json` met absolute pad, of een
-`xattr`-gestuurd hook), of (i) RTK zelf komt met een ingebouwde
+`xattr`-gestuurd hook. Of (i) RTK zelf komt met een ingebouwde
 git-werkboom-veilige installatie die dit patroon overbodig maakt.
 
 ## 9. Reproductie
