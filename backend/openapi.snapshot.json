@@ -10629,6 +10629,17 @@
             "title": "Column",
             "type": "string"
           },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
           "rank": {
             "anyOf": [
               {
@@ -10639,6 +10650,17 @@
               }
             ],
             "title": "Rank"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           }
         },
         "required": [
@@ -13820,6 +13842,11 @@
             ],
             "title": "Selective Restore"
           },
+          "skip_kanban_db": {
+            "default": true,
+            "title": "Skip Kanban Db",
+            "type": "boolean"
+          },
           "skip_mcp_servers": {
             "default": false,
             "title": "Skip Mcp Servers",
@@ -13828,11 +13855,6 @@
           "skip_plugins": {
             "default": false,
             "title": "Skip Plugins",
-            "type": "boolean"
-          },
-          "skip_kanban_db": {
-            "default": true,
-            "title": "Skip Kanban Db",
             "type": "boolean"
           },
           "skip_skills": {
