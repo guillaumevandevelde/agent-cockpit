@@ -1024,6 +1024,7 @@ function SubtasksSection({
                   blockerTitles={meta.blockerTitles}
                   missingDepIds={meta.missingDepIds}
                   heldSince={meta.heldSince}
+                  scheduledAt={meta.scheduledAt}
                 />
               )}
             </button>

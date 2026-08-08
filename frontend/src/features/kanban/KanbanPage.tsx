@@ -296,12 +296,14 @@ export default function KanbanPage() {
         const missing = (card.held_blocker ?? []).filter(
           (id) => !cardsById.has(id),
         );
+        // `dangling_dep` is a backend-side alias for the `missing_dep` UI
+        // tier; everything else passes through as-is so a card the
+        // dispatcher is holding reads with the matching badge state instead
+        // of being silently re-graded as `ready` (kanban card 8b54be53… —
+        // the previous `scheduled → ready` mapping put a green "No open
+        // dependencies" badge next to the future-date chip on the same card).
         const state =
-          card.held_reason === "dangling_dep"
-            ? "missing_dep"
-            : card.held_reason === "scheduled"
-              ? "ready" // a future schedule is shown by CardItem's own date chip
-              : card.held_reason;
+          card.held_reason === "dangling_dep" ? "missing_dep" : card.held_reason;
         meta.set(card.id, {
           readyState: state,
           blockerTitles,
@@ -311,6 +313,7 @@ export default function KanbanPage() {
               ? card.metadata.gated_on
               : undefined,
           heldSince: card.held_since ?? undefined,
+          scheduledAt: card.scheduled_at ?? undefined,
         });
         continue;
       }

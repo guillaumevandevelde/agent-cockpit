@@ -177,6 +177,7 @@ export function CardItem({
   missingDepIds,
   gatedOn,
   heldSince,
+  scheduledAt,
   subtasks,
   projectPath,
 }: {
@@ -190,6 +191,12 @@ export function CardItem({
   // (kanban-pro-analyse.md §4.1 AC3).
   gatedOn?: string;
   heldSince?: string;
+  // Future `scheduled_at` from the parent `cardMeta`. Threaded into the
+  // `ReadyStateBadge` so the `scheduled`-state tooltip names the resolution
+  // instant — without it the badge reads "Scheduled — held until the
+  // scheduled time" without telling the operator WHEN. (kanban card
+  // 8b54be53…)
+  scheduledAt?: string;
   // Subtask rollup counts (done/total among cards whose parent_card_id
   // points at this card) — drives the compact "N/M subtasks" counter so
   // the operator can scan progress without opening the drawer.
@@ -200,12 +207,20 @@ export function CardItem({
 }) {
   const priority = card.priority && card.priority !== "none" ? card.priority : null;
   const labels = card.labels ?? [];
-  const scheduledAt = card.scheduled_at ?? null;
+  // Card's own `scheduled_at` — feeds the inline ⌛ chip and the To Resume
+  // auto-resume label/tooltip. Kept separate from the `scheduledAt` prop
+  // threaded down by `cardMeta`: that one is what ReadyStateBadge consumes
+  // for its "Scheduled" state tooltip. The two values coincide on a
+  // dispatcher-held card, but the chip / To Resume paths read `card.scheduled_at`
+  // directly because they render from the card regardless of held_reason.
+  const cardScheduledAt = card.scheduled_at ?? null;
   const isToResume = card.column === "To Resume";
-  const isPendingSchedule = isFutureSchedule(scheduledAt);
-  const autoResumeLabel = scheduledAt ? formatAutoResumeLabel(scheduledAt) : "Auto";
-  const autoResumeTooltip = scheduledAt
-    ? `${scheduledAt} (local: ${new Date(scheduledAt).toLocaleString()})`
+  const isPendingSchedule = isFutureSchedule(cardScheduledAt);
+  const autoResumeLabel = cardScheduledAt
+    ? formatAutoResumeLabel(cardScheduledAt)
+    : "Auto";
+  const autoResumeTooltip = cardScheduledAt
+    ? `${cardScheduledAt} (local: ${new Date(cardScheduledAt).toLocaleString()})`
     : undefined;
   const workType = (card.work_type && (WORK_TYPES as readonly string[]).includes(card.work_type)
     ? (card.work_type as WorkType)
@@ -400,6 +415,7 @@ export function CardItem({
             missingDepIds={missingDepIds}
             gatedOn={gatedOn}
             heldSince={heldSince}
+            scheduledAt={scheduledAt}
           />
         )}
         {/* Deliverables sit high in the row on purpose: on a Done card "what
@@ -484,7 +500,7 @@ export function CardItem({
         )}
         {isPendingSchedule && !isToResume && (
           <Badge variant="outline" className="text-[10px] font-normal">
-            &#8987; {new Date(scheduledAt!).toLocaleString()}
+            &#8987; {new Date(cardScheduledAt!).toLocaleString()}
           </Badge>
         )}
         {card.claimed_by && !readyState && (

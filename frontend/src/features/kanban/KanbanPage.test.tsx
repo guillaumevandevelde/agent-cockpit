@@ -403,6 +403,43 @@ describe("KanbanPage ready-state precedence", () => {
     expect(stateOf("card-untick")).toBe("ready");
   });
 
+  // Bug kaart 8b54be53…: the dispatcher holds a future-scheduled card out via
+  // `held_reason='scheduled'` (dep_resolver.py:154-172), but the UI used to
+  // map that reason back to `ready`, producing a green "No open dependencies"
+  // badge right next to the date chip — two contradictory signals. Pin both:
+  // the state IS scheduled, and the tooltip does not lie about dependencies.
+  it("flags a future-scheduled Backlog card as 'scheduled', not 'ready'", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({
+          id: "card-scheduled",
+          column: "Backlog",
+          scheduled_at: future,
+          held_reason: "scheduled",
+          held_since: new Date(Date.now() - 60_000).toISOString(),
+        }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]");
+
+    const badge = await waitFor(() => stateOf("card-scheduled"));
+    expect(badge?.getAttribute("data-ready-state")).toBe("scheduled");
+    expect(badge?.textContent).toBe("Scheduled");
+    // "No open dependencies" is the `ready` tooltip — must not surface here.
+    expect(badge?.getAttribute("title") ?? "").not.toContain("No open dependencies");
+  });
+
   // kanban-pro-analyse.md §4.1: the dispatcher holds two additional filters
   // the UI didn't mirror — child cards awaiting the analyst's plan_ref
   // delivery, and operator-set `metadata.gated_on` business gates. Both used
