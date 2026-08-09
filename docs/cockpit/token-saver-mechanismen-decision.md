@@ -930,6 +930,55 @@ gitignored bestemming, bv. `.claude/settings.local.json` →
 `xattr`-gestuurd hook. Of (i) RTK zelf komt met een ingebouwde
 git-werkboom-veilige installatie die dit patroon overbodig maakt.
 
+### ✅ Geïmplementeerd (kaart `f760c505…`, 2026-08-09) — host-onafhankelijke worktree-clean garantie
+
+**Wat.** Eén regel in de repo-`.gitignore` (`.claude/settings.local.json`)
+haalt de clean-worktree-garantie uit het host-globale pad. Was de
+documentatie afhankelijk van Claude Code's default excludes-regel
+(`~/.config/git/ignore:1`, `**/.claude/settings.local.json`), die alleen
+op deze host bestaat. Op een verse machine, in CI, of in een container
+zou de dispatch-install élke saver-lane een untracked `?? .claude/`
+bezorgen en de ship-gate vanaf de eerste seconde laten aborteren. De
+regressietest `test_active_branch_leaves_worktree_git_status_clean`
+ging op zo'n host rood, niet stil groen — de val werd wel gedetecteerd,
+maar de garantie was niet in het kritieke pad verankerd.
+
+**Hoe.** Eén regel in `.gitignore` (anchor: `Effect:` zegt wat het
+voorkomt); Claude Code's host-globale regel blijft als defense-in-depth
+staan. De docstring in `backend/app/kanban/token_saver.py:326-336`
+verwijst nu naar de repo-rule als de canonieke garantie, met de
+host-globale als secundaire observatie. De testhelper
+`_pin_claude_code_default_gitignore` (die `core.excludesFile` op een
+scratch-bestand zette) is vervangen door `_seed_repo_local_gitignore` die
+het test-repo's eigen `.gitignore` plant; een nieuwe test
+`test_repo_gitignore_covers_settings_local_json` leest de echte
+repo-`.gitignore` en pinned dat de `.claude/settings.local.json`-regel
+erin staat. Werkt op élke host, breekt niet zodra Claude Code stopt met
+zijn default — heropen-conditie (h) gesloten.
+
+**Aangeraakte oppervlakken (lockstep, geen drift):**
+
+- `.gitignore` — nieuwe `-regel, gegroepeerd onder `# Claude Cockpit
+  specific` met comment dat naar kanban card `f760c505…` en deze §8
+  wijst.
+- `backend/tests/test_token_saver.py` — helper
+  `_pin_claude_code_default_gitignore` vervangen door
+  `_seed_repo_local_gitignore`; nieuwe test
+  `test_repo_gitignore_covers_settings_local_json`; de twee
+  clean-status-tests en `test_active_branch_preserves_tracked_settings_json`
+  gebruiken nu de repo-eigen helper. Drie stale comment-regels boven de
+  `--- Clean-git-status contract ---`-blok en bij regel ~268 en ~691
+  verwijzen nu naar de repo-rule.
+- `backend/app/kanban/token_saver.py:326-336` — docstring van
+  `write_rtk_settings_into_worktree` noemt expliciet de repo-`.gitignore`
+  als canonieke garantie en degradeert de host-globale regel tot
+  defense-in-depth.
+
+**Heropenen** (i) blijft staan voor het geval RTK ooit een ingebouwde
+git-werkboom-veilige installatie krijgt — dan is de hele
+`.claude/settings.local.json`-route obsoleet. (h) is **gesloten**: de
+host-globale gitignore is geen single point of failure meer.
+
 ## 9. Reproductie
 
 ```bash

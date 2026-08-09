@@ -327,12 +327,16 @@ def write_rtk_settings_into_worktree(worktree_path: str, rtk_binary: str) -> Non
       ``settings.json``): the tracked ``settings.json`` is shared repo
       state; patching it would create a modified file in every dispatch
       worktree, again tripping the ship-gate's pre-flight
-      ``git diff --quiet HEAD --`` check. Claude Code's default gitignore
-      covers ``**/.claude/settings.local.json``
-      (``~/.config/git/ignore:1``), so the file is invisible to ``git``
-      entirely and the worktree stays clean. The Bash PreToolUse command
-      we write there points at the absolute cache path so the hook runs
-      regardless of which worktree it is invoked from.
+      ``git diff --quiet HEAD --`` check. The repo's own ``.gitignore``
+      covers ``.claude/settings.local.json``, so the file is invisible to
+      ``git`` entirely and the worktree stays clean. Claude Code's default
+      host-global gitignore carries the same pattern as defense-in-depth,
+      but the repo rule is the contract that travels — without it the
+      guarantee would break on a fresh host, a CI runner, or a container
+      (kanban card f760c505…,
+      docs/cockpit/token-saver-mechanismen-decision.md §8). The Bash
+      PreToolUse command we write here points at the absolute cache path
+      so the hook runs regardless of which worktree it is invoked from.
 
     Idempotent. Preserves every other key in the existing
     ``settings.local.json``. Raises on filesystem failure — the
