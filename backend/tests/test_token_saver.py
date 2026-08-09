@@ -266,14 +266,16 @@ async def test_fail_open_when_settings_unwritable(tmp_path, monkeypatch):
 #
 # The wrapper hook lives in the RTK cache (NOT in the worktree) and the
 # hook-config is written to ``.claude/settings.local.json`` (gitignored by
-# Claude Code's default ignore, ``**/.claude/settings.local.json`` from
-# ``~/.config/git/ignore``). Both moves keep the dispatch worktree's
+# the repo's own ``.gitignore``). Both moves keep the dispatch worktree's
 # ``git status`` clean so the ship-gate accepts the agent's commits —
 # the broken-state symptom this test exists to prevent: a previous
 # version wrote a tracked ``.claude/settings.json`` and a new
 # ``.claude/hooks/`` directory, every ship aborted at the first
 # uncommitted-changes guard (kanban card c31333bf… reviewer-gate, 4th
-# iteration).
+# iteration). The ignore pattern used to live in Claude Code's host-global
+# gitignore; that broke the guarantee on a fresh host, so the rule was
+# moved into the repo (kanban card f760c505… /
+# docs/cockpit/token-saver-mechanismen-decision.md §8).
 
 
 @pytest.mark.asyncio
@@ -483,39 +485,71 @@ async def test_active_branch_is_idempotent(tmp_path, monkeypatch):
 # the hook + the patched settings.json to master, which made RTK active
 # board-wide from the next dispatch on, with the kill-switch unable to undo
 # it. The fix: the wrapper lives in the RTK cache (outside the worktree),
-# the hook-config goes to ``settings.local.json`` (gitignored by Claude Code's
-# default ``**/.claude/settings.local.json`` rule), and ``git status`` stays
-# clean. These tests pin that contract against a real git worktree, not
-# ``tmp_path`` (where ``git status`` has nothing to look at).
+# the hook-config goes to ``settings.local.json`` (gitignored by the
+# repo's own ``.gitignore``), and ``git status`` stays clean. These tests
+# pin that contract against a real git worktree, not ``tmp_path`` (where
+# ``git status`` has nothing to look at). The ignore rule was moved out
+# of Claude Code's host-global default into the repo so the guarantee
+# holds on a fresh host (kanban card f760c505…); the new
+# ``test_repo_gitignore_covers_settings_local_json`` test pins that
+# invariant against the real repo.
 
 
-def _pin_claude_code_default_gitignore(repo, tmp_path):
-    """Reproduce Claude Code's default global gitignore in a scratch repo.
+def _seed_repo_local_gitignore(repo, *, pattern: str) -> None:
+    """Seed the *test repo's* own ``.gitignore`` with ``pattern``.
 
-    The installer writes ``.claude/settings.local.json`` and relies on that
-    path already being gitignored — on a real dispatch box Claude Code puts
-    ``**/.claude/settings.local.json`` in git's default excludes file
-    (``~/.config/git/ignore``). A scratch repo built by ``git init`` inherits
-    that only when the host happens to have it.
+    The token-saver installer writes ``.claude/settings.local.json`` and the
+    clean-worktree guarantee hinges on that path being gitignored. The ship
+    lands on any host when the repo's own ``.gitignore`` carries the pattern
+    (kanban card f760c505… — moved out of Claude Code's host-global default
+    rule into the repo to drop the host dependency). The test repo is a
+    fresh ``git init`` and inherits no ignore rules, so this helper plants
+    the same line the real repo has, before the install runs.
+    """
+    (repo / ".gitignore").write_text(pattern)
 
-    Without pinning it the clean-status assertions below silently depend on
-    host state: green on any machine with Claude Code installed, red
-    everywhere else (CI, a fresh checkout, a container) with a bare
-    ``?? .claude/`` that reads like a product bug rather than a missing
-    precondition. Set it explicitly so the tests assert the real invariant —
-    *given the documented ignore rule, the install leaves status clean* — on
-    every host.
 
-    Repo-local config is shared with linked worktrees, so pointing
-    ``core.excludesFile`` at the repo covers the worktree the tests drive.
+def _real_repo_root() -> Path:
+    """Resolve the git toplevel of the test's working tree.
+
+    Lets the host-independent guarantee test read the real repo's
+    ``.gitignore`` from CI, a fresh checkout, and a developer machine —
+    any path that ships the same tree.
     """
     import subprocess
 
-    excludes = tmp_path / "git-excludes"
-    excludes.write_text("**/.claude/settings.local.json\n")
-    subprocess.run(
-        ["git", "-C", str(repo), "config", "core.excludesFile", str(excludes)],
-        check=True, capture_output=True,
+    root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=str(Path(__file__).resolve().parent),
+        text=True,
+    ).strip()
+    return Path(root)
+
+
+def test_repo_gitignore_covers_settings_local_json():
+    """The repo's own ``.gitignore`` keeps ``.claude/settings.local.json``
+    out of ``git status``.
+
+    Host-independent guarantee: previously this rule lived only in Claude
+    Code's default global gitignore (``~/.config/git/ignore``), so the
+    clean-worktree contract held on a developer's box but broke on a fresh
+    machine, in CI, or in a container — the dispatch install would then
+    leave a ``?? .claude/`` in every worktree and the ship-gate would abort
+    from the first second. Pin the rule in the repo's own ``.gitignore``
+    so the contract travels with the codebase. See kanban card f760c505…
+    and docs/cockpit/token-saver-mechanismen-decision.md §8.
+    """
+    gitignore = _real_repo_root() / ".gitignore"
+    assert gitignore.is_file(), f"repo .gitignore missing: {gitignore}"
+    text = gitignore.read_text()
+    # Anchor on the literal repo path (not the host-global ``**/`` glob) so
+    # the assertion verifies the project-owned rule, not a coincidental
+    # match against a similar Claude Code rule.
+    assert ".claude/settings.local.json" in text, (
+        "repo .gitignore must ignore .claude/settings.local.json — "
+        "without this the token-saver install leaks untracked files into "
+        "every dispatch worktree (kanban card f760c505…):\n"
+        f"{text}"
     )
 
 
@@ -549,10 +583,12 @@ async def test_active_branch_leaves_worktree_git_status_clean(
         ["git", "-C", str(repo), "config", "user.name", "test"],
     ):
         subprocess.run(cmd, check=True, capture_output=True)
-    _pin_claude_code_default_gitignore(repo, tmp_path)
+    _seed_repo_local_gitignore(
+        repo, pattern=".claude/settings.local.json\n",
+    )
     (repo / "README.md").write_text("hello\n")
     for cmd in (
-        ["git", "-C", str(repo), "add", "README.md"],
+        ["git", "-C", str(repo), "add", ".gitignore", "README.md"],
         ["git", "-C", str(repo), "commit", "-m", "init"],
         ["git", "-C", str(repo), "worktree", "add",
          "-b", "feature", str(wt), "main"],
@@ -618,7 +654,9 @@ async def test_active_branch_preserves_tracked_settings_json(
         ["git", "-C", str(repo), "config", "user.name", "test"],
     ):
         subprocess.run(cmd, check=True, capture_output=True)
-    _pin_claude_code_default_gitignore(repo, tmp_path)
+    _seed_repo_local_gitignore(
+        repo, pattern=".claude/settings.local.json\n",
+    )
     (repo / "README.md").write_text("hello\n")
     (repo / ".claude").mkdir()
     tracked = {
@@ -656,7 +694,7 @@ async def test_active_branch_preserves_tracked_settings_json(
     assert on_disk == tracked
 
     # Git status: only ``.claude/settings.local.json`` may appear, and it
-    # must NOT appear (it is gitignored by Claude Code's default rule).
+    # must NOT appear (it is gitignored by the repo's own ``.gitignore``).
     status_out = subprocess.run(
         ["git", "-C", str(wt), "status", "--porcelain"],
         check=True, capture_output=True, text=True,

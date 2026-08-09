@@ -59,6 +59,14 @@ htmlcov/
 # Claude Cockpit specific
 ~/.claude-registry/
 
+# Token-saver hook config (kanban card f760c505…,
+# docs/cockpit/token-saver-mechanismen-decision.md §8). The dispatcher
+# writes the wrapper-hook config here on every active-branch install; the
+# rule used to live only in Claude Code's host-global gitignore, which
+# broke the clean-worktree guarantee on a fresh host. Pin it in the repo
+# so the contract travels with the codebase.
+.claude/settings.local.json
+
 # Tooling artifacts
 .claude/worktrees/
 .playwright-mcp/
