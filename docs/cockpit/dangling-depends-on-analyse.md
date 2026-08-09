@@ -117,11 +117,12 @@ is bovendien hetzelfde woord dat elders (Impediment) "een mens moet ingrijpen" b
 
 ```bash
 # per Backlog-kaart met depends_on: toont elke dep-id + of die nog bestaat en z'n kolom
-sqlite3 backend/claude_registry.db "
-  SELECT c.id, c.title, c.depends_on
-  FROM kanban_cards c
-  WHERE c.project_key='git:github.com/guillaumevandevelde/claude-cockpit'
-    AND c.column='Backlog' AND c.depends_on IS NOT NULL AND c.depends_on != '[]';"
+python3 -c '
+import sqlite3
+con = sqlite3.connect("file:backend/claude_registry.db?mode=ro", uri=True)
+for row in con.execute("SELECT c.id, c.title, c.depends_on FROM kanban_cards c WHERE c.project_key=\"git:github.com/guillaumevandevelde/claude-cockpit\" AND c.column=\"Backlog\" AND c.depends_on IS NOT NULL AND c.depends_on != \"[]\""):
+    print(row)
+'
 # een dep-id is 'dangling' als deze query 0 rijen geeft:
 #   SELECT 1 FROM kanban_cards WHERE id='<dep-id>';
 ```

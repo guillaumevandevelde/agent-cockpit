@@ -311,7 +311,7 @@ leerzaam is: vijf sessies schreven een gedrags-verklaring voor wat een race cond
 | Waarneming | Bron |
 |---|---|
 | `move card a70a9272 (payload_keys=['column'])` gelogd 07:24:55.516 | backend-log |
-| Diezelfde move-op staat **niet** in `kanban_ops` | `sqlite3 kanban.db` |
+| Diezelfde move-op staat **niet** in `kanban_ops` | inspectie tegen `kanban.db` tijdens triage |
 | `Killed tmux session: k-review-analys-590c` 07:24:55.**523** (7 ms later, zelfde `correlation_id`) | backend-log |
 | `Exception terminating connection <aiosqlite…>` 07:24:55.526 | backend-log |
 | `failed to release claim on card a70a9272` | backend-log |
