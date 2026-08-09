@@ -53,6 +53,8 @@ vorm. Elke ingang heeft één zin in gewone taal; waar zinvol staat er een
   met afhankelijkheden en een plan-attachment.
   Persona: `.claude/agents/analyst.md`.
 - **backlog** — de kolom met kaarten die wachten op dispatch.
+- **branch** — een git-vertakking waarin één kaart werkt; samengevoegd
+  met master via **merge**.
 - **claim** — het reserveren van een kaart door één sessie, zodat geen
   tweede agent dezelfde kaart pakt.
 - **column_overrides** — per-kaart override van model/provider/transport per
@@ -108,8 +110,9 @@ vorm. Elke ingang heeft één zin in gewone taal; waar zinvol staat er een
 - **plan_ref** — verwijzing van een kind-kaart naar het plan van zijn
   parent-kaart. Wordt geleverd door `add_plan_attachment`.
 - **prompt-injector** — een per-lane prompt-uitbreiding zoals Caveman
-  of Ponytail; de ingangsregels van deze prompten komen in
-  `.claude/prompt-injectors/`.
+  of Ponytail. Ingangsregels in
+  `backend/app/kanban/prompt_injectors.py`; kill-switch in
+  `backend/app/kanban/db.py:244-248`.
 - **reviewer** — de persona die een Done-kaart opnieuw toetst vóór
   goedkeuring. Persona: `.claude/agents/reviewer.md`.
 - **scheduled_at** — ISO-timestamp op een kaart die de dispatch
@@ -140,6 +143,9 @@ vorm. Elke ingang heeft één zin in gewone taal; waar zinvol staat er een
 - **work_type** — classificatie van een kaart (`feature`, `bug`,
   `chore`, `analysis`) die de routering bepaalt. Veld op het model:
   `backend/app/kanban/models.py:77`.
+- **worktree** — een geïsoleerde git-checkout voor één sessie, zodat
+  de master-branch niet wordt geraakt. Aangemaakt door de dispatcher;
+  opgeruimd door `scripts/worktree-gc.sh` zodra gemerged.
 
 ## Stand van zaken (kind-kaarten)
 
@@ -171,3 +177,8 @@ vorm. Elke ingang heeft één zin in gewone taal; waar zinvol staat er een
 - 2026-08-08 — Aanvullende termen toegevoegd zodat de woordenlijst het
   anker is voor eerste-gebruik-verwijzingen. Totaal nu 35 begrippen
   (5 canoniek + 30 aanvullend). Kaart `8d37a7b9…`.
+- 2026-08-09 — `worktree` en `branch` toegevoegd (mistten uit §5 van
+  `taalgebruik-conventies.md`). De `prompt-injector`-verwijzing
+  hersteld naar `backend/app/kanban/prompt_injectors.py`; eerdere
+  pad `.claude/prompt-injectors/` bestond niet. Totaal nu 37
+  begrippen. Kaart `8d37a7b9…` (impediment-resolutie).
