@@ -113,33 +113,40 @@ product-taal-conventie in
 [`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options)
 inclusief de verplichte **drie-delen-vorm**: één **Uitkomst**-zin die
 zegt *welk product-effect* je hebt geverifieerd, gevolgd door 2-4
-bullets wat je technisch hebt nagelopen, en optioneel een
-**Rest / nazicht**-sectie. Daarboven gelden de drie proces-regels:
-**geen proces-meta** in jouw mens-gerichte samenvatting (geen
-FCR-uitslag, geen audit-log-archeologie, geen "card niet meer
-gevonden"-boekhouding), **jargon = naam + waarom** (een interne
-component noem je alleen met wat 'ie voor de lezer betekent), en
-lead-with-product-meaning in elke openingszin.
+bullets wat je technisch hebt nagelopen, optioneel **Rest / nazicht**.
 
-*Concreet:* leid met één zin **productbetekenis** (welk
-product-effect is hier geverifieerd); de engineering-detail (welke
-test je draaide, welke file:line je naliep) hoort in de bullets of in
-`Rest / nazicht`. Het verschil met de engineer-`summary`: hier
-markeer je expliciet het **product-effect** dat je hebt bevestigd,
-niet de engineering-detail die de implementatie levert — de product
-owner leest jouw `summary` om te weten "werkt het voor de gebruiker",
-niet "klopt de API-vorm". Voor een `report_impediment` op een
-review-afkeur: de `question` omschrijft het product-effect dat niet
-klopt (en niet "regel X schendt"), `options` drukken producttrade-offs
-of vervolgkeuzes uit — geen "deploy of revert"-fork tenzij dat ook
-echt het product-fork is.
+Daarboven gelden de drie proces-regels:
 
-**Leesbaarheidsnorm — geldt bovenop het bovenstaande.** Product-taal
-bepaalt *welke inhoud* vooraan staat; de leesbaarheidsnorm bepaalt *hoe*
-je het opschrijft: maximaal 40 woorden per zin, conclusie eerst, diepte
-achter een verwijzing die zegt wát daar staat, en een kaart-id nooit als
-enige onderbouwing. Norm en meetcommando:
+- **geen proces-meta** in jouw mens-gerichte samenvatting (geen FCR-uitslag,
+  geen audit-log-archeologie, geen "kaart niet meer gevonden"-boekhouding).
+- **jargon = naam + waarom** — een interne component noem je alleen met wat
+  'ie voor de lezer betekent.
+- **lead-with-product-meaning** in elke openingszin.
+
+*Concreet:* leid met één zin **productbetekenis** (welk product-effect is
+hier geverifieerd); de engineering-detail (welke test je draaide, welke
+file:line je naliep) hoort in de bullets of in `Rest / nazicht`.
+
+Het verschil met de engineer-`summary`: hier markeer je expliciet het
+**product-effect** dat je hebt bevestigd, niet de engineering-detail die
+de implementatie levert. De product owner leest jouw `summary` om te weten
+"werkt het voor de gebruiker", niet "klopt de API-vorm".
+
+Voor een `report_impediment` op een review-afkeur: de `question` omschrijft
+het product-effect dat niet klopt (en niet "regel X schendt"), `options`
+drukken producttrade-offs of vervolgkeuzes uit — geen "deploy of
+revert"-fork tenzij dat ook echt het product-fork is.
+
+**Leesbaarheidsnorm — geldt bovenop het bovenstaande.** Product-taal bepaalt
+*welke inhoud* vooraan staat; de leesbaarheidsnorm bepaalt *hoe* je het
+opschrijft.
+
+De norm in vier regels: maximaal 40 woorden per zin, conclusie eerst, diepte
+achter een verwijzing die zegt wát daar staat, een kaart-id nooit als enige
+onderbouwing.
+
+Norm en meetcommando:
 [`docs/cockpit/taalgebruik-conventies.md`](../../docs/cockpit/taalgebruik-conventies.md).
-Raakt de diff die je reviewt een `*.md`-document, controleer dan of het
-de norm haalt met `scripts/check-doc-readability.py --file <pad>` — een
+Raakt de diff die je reviewt een `*.md`-document, controleer dan of het de
+norm haalt met `scripts/check-doc-readability.py --file <pad>` — een
 onleesbare doc is een terechte review-bevinding, geen smaakkwestie.

@@ -3278,14 +3278,14 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
     )
     commit = (
         "3. **Commit your work** — "
-        "**Schema/column-rename sweept:** als je diff een `ALTER TABLE "
+        "**Schema/column-rename veegt langs:** als je diff een `ALTER TABLE "
         "... RENAME COLUMN` (of een andere model/Pydantic-schema-rename) "
         "introduceert, draai dan `bash scripts/check-schema-rename-coverage.sh "
         "--strict` en werk elke hit bij vóór de commit. Een gemiste "
         "referentie levert een silent-red test op CI — net zoals "
         "kanban-kaart `ad15e08271c242238db239a90dc559d4` documenteerde voor "
         "commit 558ca55 (de `provider` → `cli` rename shipte met 2 latent-red "
-        "tests). Het script grept `backend/app/` én `backend/tests/` op "
+        "tests). Het script zoekt in `backend/app/` én `backend/tests/` op "
         "resterende verwijzingen. "
         "**Bron-analysedoc bijwerken (na een gefilede follow-up):** rondt je "
         "kaart een follow-up af die in zijn beschrijving of "

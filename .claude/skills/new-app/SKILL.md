@@ -7,8 +7,8 @@ description: Use when a human says "ik heb een idee voor een nieuwe app/tool/pro
 
 Turn a free conversation about a new app idea into a **real project on the
 board**: a git repo with a seeded `.claude/`, the design + plan committed as
-repo files, a registered `Project` row, and a first Backlog card — in one
-interactive session.
+repo files, a registered `Project` row, and a first Backlog card.
+All in one interactive session.
 
 Nothing lands on the meta-board in between. **The inceptie-flow is
 cardless**: there is no intake card and no Promote click. The interview
