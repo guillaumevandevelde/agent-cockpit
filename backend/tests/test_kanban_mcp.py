@@ -193,6 +193,43 @@ async def test_get_card_unknown_prefix_returns_not_found_with_hint():
 
 
 @pytest.mark.asyncio
+async def test_get_card_returns_project_key_unchanged_for_round_trip_with_list_cards():
+    """Regression for kanban card b99d03c363994b4bb7d78c26e82647e0.
+
+    `get_card` must hand back exactly the `project_key` stored in
+    `kanban_cards` — no pre-rebrand alias rewrite on the read path — so a
+    caller can pipe that value straight into `list_cards` / `create_card`
+    without a detour through `resolve_project_key`. The historical failure
+    mode: get_card returned the pre-rebrand key while the DB row already
+    carried the current key, so list_cards(die_key) refused with
+    `unknown_project_key` and every agent-flow that did get_card → list_cards
+    paid one extra call plus the resolve detour."""
+    project_key = "git:github.com/guillaumevandevelde/agent-cockpit"
+    full_id = "f" * 32
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key=project_key, entity_id=full_id,
+            payload={"title": "round-trip"})
+        await s.commit()
+
+    got = await m.get_card(full_id)
+    assert got.get("error") is None, f"get_card failed: {got}"
+    assert got["project_key"] == project_key, (
+        f"get_card rewrote project_key: stored={project_key!r} "
+        f"returned={got.get('project_key')!r}"
+    )
+
+    # The key from get_card must work as input to list_cards without any
+    # alias mapping or resolve_project_key detour — that round-trip is the
+    # whole point of acceptance criterion 2.
+    listed = await m.list_cards(project_key)
+    assert any(c["id"] == full_id for c in listed), (
+        f"project_key from get_card ({got['project_key']!r}) did not round-trip "
+        f"through list_cards: got {len(listed)} rows, none matching {full_id}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_move_card_not_found():
     result = await m.move_card("nonexistent-id", "Done")
     assert result.get("error") == "not_found"
