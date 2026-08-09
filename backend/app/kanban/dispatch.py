@@ -1300,10 +1300,10 @@ async def _unreachable_compatible_providers(
             paused.add(entry.provider)
             logger.info(
                 "subscription pool: anthropic-compatible endpoint "
-                "%s/%s unreachable — pausing provider %r until next "
-                "probe (TTL %.1fs)",
-                project_key, entry.endpoint_name, entry.provider,
-                _ENDPOINT_PROBE_TTL_S,
+                "%s/%s (url=%s) unreachable — pausing provider %r "
+                "until next probe (TTL %.1fs)",
+                project_key, entry.endpoint_name, endpoint.base_url,
+                entry.provider, _ENDPOINT_PROBE_TTL_S,
             )
     return paused
 

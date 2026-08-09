@@ -39,6 +39,7 @@ performed.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -188,6 +189,53 @@ async def test_paused_providers_for_pool_pauses_unreachable_compatible(
         )
 
     assert "anthropic-compatible" in paused
+
+
+@pytest.mark.asyncio
+async def test_pause_log_includes_endpoint_base_url(
+    stub_probe, caplog: pytest.LogCaptureFixture,
+):
+    """The pause log line must name the URL that actually failed, not
+    just ``project_key/endpoint_name`` — the registry can rename the
+    endpoint between the probe and the operator reading the log, and
+    a dead proxy is the moment you least want to chase a registry row
+    just to know what to ping. Acceptance criterion 4 of card
+    424c23d4… asked for the URL in the log; the original ship missed
+    it (kaart k-chore-probe-p-3b39… revisit)."""
+    stub_probe["http://dead-router.example/v1"] = False
+
+    with caplog.at_level(logging.INFO, logger="app.kanban.dispatch"):
+        async with KanbanSessionLocal() as s:
+            await _seed_endpoint(
+                s, "router-dead", base_url="http://dead-router.example/v1",
+            )
+            await subscription_pool.set_subscription_pool(
+                s, "git:example.com/me/repo",
+                [subscription_pool.PoolEntry(
+                    provider="anthropic-compatible", model=None,
+                    drempel=0.9, endpoint_name="router-dead",
+                )],
+            )
+            await s.commit()
+
+            await dispatch._paused_providers_for_pool(
+                s, project_key="git:example.com/me/repo",
+            )
+
+    pause_messages = [
+        r.getMessage() for r in caplog.records
+        if r.name == "app.kanban.dispatch" and "unreachable" in r.getMessage()
+    ]
+    assert pause_messages, (
+        "expected the pause log line to be emitted at INFO; got: "
+        f"{[r.getMessage() for r in caplog.records]}"
+    )
+    assert any(
+        "http://dead-router.example/v1" in msg for msg in pause_messages
+    ), (
+        "expected the failing base_url in the pause log; got: "
+        f"{pause_messages}"
+    )
 
 
 @pytest.mark.asyncio
