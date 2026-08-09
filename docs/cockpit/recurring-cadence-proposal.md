@@ -106,7 +106,7 @@ description:    |
   docs/cockpit/recurring-cadence-proposal.md, met `scheduled_at` = eerstvolgende
   maandag 09:00 Europe/Brussels en dezelfde `parent_card_id`. Zie de skill voor
   details. Doe dit onvoorwaardelijk — ook bij zero-finding.
-project_key:    git:github.com/guillaumevandevelde/claude-cockpit   # geresolved via MCP, NOOIT gokken
+project_key:    git:github.com/guillaumevandevelde/agent-cockpit     # geresolved via MCP, NOOIT gokken
 parent_card_id: 3f8ccfab70f44672908a8b1559754148                    # het Self-improvement analysis-card; anders verliest de opvolger de parent-linkage in de activity feed
 column:         Backlog                                              # _DISPATCH_COLUMNS = ("Backlog", "To Resume")
 work_type:      analysis                                              # routing-meta, niet hetzelfde als agent
@@ -274,7 +274,7 @@ in de **acceptance criteria** van die kaart zelf.
 | 1 | Dit voorstel landt in `docs/cockpit/recurring-cadence-proposal.md` | deze kaart | engineer |
 | 2 | `market-research` skill-tekst uitgebreid met **Step 7** (chain-of-one-shots) in dezelfde commit | deze kaart | engineer |
 | 3 | Eén seed-trigger-kaart aanmaken in Backlog met `scheduled_at` = eerstvolgende maandag 09:00 Europe/Brussels, `project_key`, `parent_card_id`, etc. | deze kaart (id `b7b195e2…`) | engineer |
-| 4 | **Eenmalig** autodispatch inschakelen voor `git:github.com/guillaumevandevelde/claude-cockpit` op deze device: `POST /api/v1/kanban/autodispatch` met `{"project_key": "…", "enabled": true}` — anders pakt de dispatch-tick 'm niet op, ook al is `scheduled_at` gezet. | **menselijke stap**, eenmalig | de operator die dit voorstel landt |
+| 4 | **Eenmalig** autodispatch inschakelen voor `git:github.com/guillaumevandevelde/agent-cockpit` op deze device: `POST /api/v1/kanban/autodispatch` met `{"project_key": "…", "enabled": true}` — anders pakt de dispatch-tick 'm niet op, ook al is `scheduled_at` gezet. | **menselijke stap**, eenmalig | de operator die dit voorstel landt |
 | 5 | Companion Backlog-kaart aanmaken *"Migrate weekly market-research trigger to scheduled-messages"* met `parent_card_id` van deze kaart en expliciete afhankelijkheid op fase-2 Task 12 in de description | deze kaart (id `a4d9f8b6…`) | engineer |
 | 6 | Eerste echte run monitoren (eerstvolgende maandag 09:00) — `session-problem-scan` na de run om te zien of Step 7 daadwerkelijk een opvolger aanmaakte | toekomstig | operator |
 
@@ -296,4 +296,4 @@ in de **acceptance criteria** van die kaart zelf.
 - [x] Companion Backlog-kaart *"Migrate to scheduled-messages"* aangemaakt in Backlog met `parent_card_id = 3f8ccfab…` en fasale blokkade in description.
 - [x] Step 7 toegevoegd aan de `market-research`-skill in dezelfde commit.
 - [x] Eerste trigger-kaart ge-seed in Backlog (`b7b195e2…`) met juiste `project_key`, `parent_card_id`, `scheduled_at` = eerstvolgende maandag.
-- [ ] Autodispatch ingeschakeld voor `git:github.com/guillaumevandevelde/claude-cockpit` op deze device — **menselijke stap, niet door deze engineer-sessie uit te voeren** (out-of-autonomy: device-state, niet code).
+- [ ] Autodispatch ingeschakeld voor `git:github.com/guillaumevandevelde/agent-cockpit` op deze device — **menselijke stap, niet door deze engineer-sessie uit te voeren** (out-of-autonomy: device-state, niet code).

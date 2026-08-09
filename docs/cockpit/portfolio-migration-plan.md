@@ -83,7 +83,7 @@ key één keer af met dezelfde functie die het board gebruikt:
 
 ```
 cockpit_key = resolve_project_key(<pad van de draaiende cockpit-checkout>)
-# op deze repo vandaag: "git:github.com/guillaumevandevelde/claude-cockpit"
+# op deze repo vandaag: "git:github.com/guillaumevandevelde/agent-cockpit"
 ```
 
 Dan, per bestaand project:
