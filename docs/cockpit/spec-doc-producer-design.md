@@ -181,9 +181,12 @@ kaarten dragen vandaag een niet-leeg `spec_doc`? — i.p.v. een schatting. De ka
 `kanban_cards` (`backend/app/kanban/models.py:122`). Eén SQL-regel telt de populatie:
 
 ```bash
-sqlite3 ~/.claude-registry/kanban.db \
-  "SELECT COUNT(*) FROM kanban_cards
-   WHERE COALESCE(TRIM(json_extract(metadata, '\$.spec_doc')), '') != '';"
+python3 -c '
+import sqlite3, os
+path = os.path.expanduser("~/.claude-registry/kanban.db")
+con = sqlite3.connect("file:" + path + "?mode=ro", uri=True)
+print(con.execute("SELECT COUNT(*) FROM kanban_cards WHERE COALESCE(TRIM(json_extract(metadata, \"$.spec_doc\")), \"\") != \"\"").fetchone()[0])
+'
 ```
 
 `json_extract(metadata, '$.spec_doc')` haalt het anker uit de bag; `COALESCE(TRIM(...), '') != ''`
@@ -192,22 +195,13 @@ kaarten met een echt gevuld pad tellen. Uitsplitsing per doc (welke docs geïmpl
 voor een rijkere gate:
 
 ```bash
-sqlite3 ~/.claude-registry/kanban.db \
-  "SELECT json_extract(metadata, '\$.spec_doc') AS spec_doc, COUNT(*) AS n
-   FROM kanban_cards
-   WHERE COALESCE(TRIM(json_extract(metadata, '\$.spec_doc')), '') != ''
-   GROUP BY spec_doc ORDER BY n DESC;"
-```
-
-Staat de `sqlite3`-CLI niet op de box (zoals op de huidige WSL-dev-omgeving), gebruik dan de
-venv-python — zelfde query, zelfde getal:
-
-```bash
-/home/vdvgu/claude-cockpit/backend/venv/bin/python -c "
+python3 -c '
 import sqlite3, os
-c = sqlite3.connect(os.path.expanduser('~/.claude-registry/kanban.db'))
-print(c.execute(\"SELECT COUNT(*) FROM kanban_cards WHERE COALESCE(TRIM(json_extract(metadata,'\$.spec_doc')),'') != ''\").fetchone()[0])
-"
+path = os.path.expanduser("~/.claude-registry/kanban.db")
+con = sqlite3.connect("file:" + path + "?mode=ro", uri=True)
+for spec_doc, n in con.execute("SELECT json_extract(metadata, \"$.spec_doc\") AS spec_doc, COUNT(*) AS n FROM kanban_cards WHERE COALESCE(TRIM(json_extract(metadata, \"$.spec_doc\")), \"\") != \"\" GROUP BY spec_doc ORDER BY n DESC"):
+    print(spec_doc, n)
+'
 ```
 
 Kaart-2 draait deze telling als **eerste acceptatie-stap**: telling ~0 → gemotiveerde stop

@@ -88,7 +88,7 @@ Hergebruikt het bestaande veld, de bestaande UI-plek en de bestaande gate.
 - **Migratierisico: nul op dit apparaat.** Geteld in
   `~/.claude-registry/kanban.db`: 7 kolomrijen, waarvan 3 met een cap (allemaal
   `2`), **0 rijen met waarde `0`**. Reproductie:
-  `sqlite3 ~/.claude-registry/kanban.db 'select project_key,name,max_sessions from kanban_columns'`.
+  `python3 -c 'import sqlite3,os; p=os.path.expanduser("~/.claude-registry/kanban.db"); c=sqlite3.connect("file:"+p+"?mode=ro", uri=True); [print(r) for r in c.execute("select project_key,name,max_sessions from kanban_columns")]'`
 
 ### Optie B — per-project work_type-allowlist
 
