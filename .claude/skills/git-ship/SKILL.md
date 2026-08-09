@@ -127,9 +127,11 @@ Do **not** run backend pytest locally in this repo — that step was removed
 deliberately: this is a shared box, and concurrent dispatched sessions each
 running the full pytest suite caused multi-minute stalls / SSH
 idle-disconnects. GitHub Actions (`quality.yml`) runs ruff + pytest against
-your push and is the backend gate; it also re-runs the frontend checks as a
-backstop, but by then the work may already be merged — it's not a substitute
-for checking the frontend yourself first.
+your push and is the backend gate.
+
+`quality.yml` re-runs the frontend checks as a backstop, but by then the work
+may already be merged — it's not a substitute for checking the frontend
+yourself first.
 
 If a frontend check fails: fix the issue, re-run, and only ship once green.
 Never ship a known-red frontend check.
@@ -193,30 +195,33 @@ Make sure every change is committed to the current branch:
 git add -A && git commit -m "<descriptive summary>"
 ```
 
-**Schema/column-rename sweept:** als je diff een `ALTER TABLE ...
+**Schema/column-rename veegt langs:** als je diff een `ALTER TABLE ...
 RENAME COLUMN` (of een andere model/Pydantic-schema-rename) introduceert,
 draai dan `bash scripts/check-schema-rename-coverage.sh --strict` en
 werk elke hit bij vóór de commit. Een gemiste referentie levert een
 silent-red test op CI — net zoals kanban-kaart `ad15e08271c242238db239a90dc559d4`
 documenteerde voor commit 558ca55 (de `provider` → `cli` rename shipte
-met 2 latent-red tests). Het script grept `backend/app/` én
+met 2 latent-red tests). Het script zoekt in `backend/app/` én
 `backend/tests/` op resterende verwijzingen.
 
 **Bron-analysedoc bijwerken (na een gefilede follow-up):** rondt je kaart een
 follow-up af die in zijn beschrijving of `metadata.facet`/`metadata.parent_card`
 naar een `docs/cockpit/*.md`-analyse-/designdoc verwijst, voeg dan **vóór de
-commit** een korte `✅ Geïmplementeerd (kaart <id>)`-regel toe aan de paragraaf
-van dat doc die de gap beschreef. Zo blijft het doc niet als "niets
-geïmplementeerd, alleen analyse + gefilede gaten" staan terwijl zijn eigen
-follow-ups al gemerged zijn (geobserveerd op de vier facet-docs van
-synthese-kaart `c980a926…`: 33 van 35 follow-ups waren al gemerged terwijl 2
-van de 4 docs zich nog als pure analyse presenteerden). **De bron is
-`metadata["spec_doc"]`** — als de kaart-context boven aan deze prompt een
-regel `**Brondoc (spec_doc):** …` toont, is dat het docpad dat je moet
-bijwerken. Geen `spec_doc`-regel in de prompt én geen analysedoc-verwijzing
-in beschrijving/facet/parent_card? Sla deze stap over. **Geen retroactieve
-verplichting** — alleen het doc dat jouw kaart raakt; raakt je kaart geen
-analysedoc, sla je deze stap over.
+commit** een korte `✅ Geïmplementeerd (kaart <id>)`-regel toe. Zet hem bij de
+paragraaf van dat doc die de gap beschreef.
+
+Zo documenteer je wat er nu al gesloten is. Zonder deze regel bleef het doc
+anders als "niets geïmplementeerd, alleen analyse + gefilede gaten" staan
+terwijl zijn eigen follow-ups al gemerged waren. Geobserveerd op de vier
+facet-docs van synthese-kaart `c980a926…`: 33 van 35 follow-ups gemerged
+terwijl 2 van de 4 docs zich nog als pure analyse presenteerden.
+
+**De bron is `metadata["spec_doc"]`** — als de kaart-context boven aan deze
+prompt een regel `**Brondoc (spec_doc):** …` toont, is dat het docpad dat je
+moet bijwerken. Geen `spec_doc`-regel in de prompt én geen analysedoc-
+verwijzing in beschrijving/facet/parent_card? Sla deze stap over. **Geen
+retroactieve verplichting** — alleen het doc dat jouw kaart raakt; raakt je
+kaart geen analysedoc, sla je deze stap over.
 
 ## 4a. Ship mode `direct` — merge to master
 
@@ -512,27 +517,35 @@ fi
 git worktree remove --force "$WT"
 ```
 
-Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`), **run the session-end
-retro** (invoke the `session-retro` skill — read
-`.claude/skills/session-retro/SKILL.md` for the full procedure: reflect → dedupe → file
-0–N `[self-improve]` cards → `comment` on this host card), and finally `move_card` to
-`Done` with a `summary` of the work you did (required — the move is rejected without it).
+Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`).
+
+Next, **run the session-end retro**: invoke the `session-retro` skill (read
+`.claude/skills/session-retro/SKILL.md` for the full procedure — reflect →
+dedupe → file 0–N `[self-improve]` cards → `comment` on this host card).
+
+Finally, `move_card` to `Done` with a `summary` of the work you did
+(required — the move is rejected without it).
+
 **Product-taal** (conventie §5 van `docs/cockpit/kanban-conventions.md`, kaart
 `4358fe0a…` + kaart `8b3ce64c…`): volg de verplichte **drie-delen-vorm** —
 één **Uitkomst**-zin die leidt met *productbetekenis* (wat kan de product
-owner nu doen / zien / beslissen dat voorheen niet kon), gevolgd door
-2-4 bullets met de engineering-detail (bestanden, endpoints, tests), en
-optioneel een **Rest / nazicht**-sectie. Daarboven gelden de drie
-proces-regels: **geen proces-meta** in de mens-gerichte samenvatting
-(geen FCR-uitslag, geen session-retro-uitkomst, geen
-dedup-boekhouding, geen audit-log-archeologie — die horen in de
-activity-feed of in retro-kaarten), **jargon = naam + waarom** (een
-interne component noem je alleen met wat 'ie voor de lezer betekent),
-en lead-with-product-meaning in elke openingszin. Een kale
-engineering-summary voldoet aan de gate maar niet aan de
-product-taal-conventie. Voor een `report_impediment` met `options`:
-druk de opties uit als **producttrade-offs**, niet als
-implementatie-forks.
+owner nu doen / zien / beslissen dat voorheen niet kon).
+
+Daarna 2-4 bullets met de engineering-detail (bestanden, endpoints, tests),
+en optioneel een **Rest / nazicht**-sectie.
+
+Daarboven gelden de drie proces-regels:
+
+- **geen proces-meta** in de mens-gerichte samenvatting (geen FCR-uitslag,
+  geen session-retro-uitkomst, geen dedup-boekhouding, geen
+  audit-log-archeologie — die horen in de activity-feed of in retro-kaarten).
+- **jargon = naam + waarom** — een interne component noem je alleen met wat
+  'ie voor de lezer betekent.
+- **lead-with-product-meaning** in elke openingszin.
+
+Een kale engineering-summary voldoet aan de gate maar niet aan de
+product-taal-conventie. Voor een `report_impediment` met `options`: druk
+de opties uit als **producttrade-offs**, niet als implementatie-forks.
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
 
@@ -554,21 +567,27 @@ rediscover the recipe by hand.
 the conflict set with `git diff --name-only --diff-filter=U`. When that set is a
 **non-empty subset** of `{docs/cockpit/README.md, docs/cockpit/llms.txt}`, the
 script runs the carve-out automatically and the merge completes inline — no
-human intervention. `docs/cockpit/llms.txt` is fully regenerated;
-`docs/cockpit/README.md` is regenerated only between the
-`<!-- BEGIN GENERATED DOC INDEX -->` and `<!-- END GENERATED DOC INDEX -->` markers,
-and the carve-out verifies (via line numbers) that every conflict hunk sits
-inside that block — a conflict outside the markers falls through to
-`report_impediment` (kanban card 72db7429…). Both files are regenerated by
-`scripts/generate-doc-index.py` from the frontmatter of `docs/cockpit/*.md`;
-concurrent docs-sessions each regenerate from their own frontmatter snapshot,
-the merged frontmatter is the union, and the regenerate inside `$WT` reconciles
-from that union. **Why the conflict must remain visible**
-(`.gitattributes`-alternative rejected): a `merge=ours` rule for both paths
-would suppress the conflict entirely and silently keep master's
-pre-regeneration index, losing any new frontmatter added on the branch until
-someone manually re-runs the script. The "conflict → regenerate" loop is the
-right pattern — the conflict acts as a freshness alarm.
+human intervention.
+
+`docs/cockpit/llms.txt` is fully regenerated. `docs/cockpit/README.md` is
+regenerated only between the
+`<!-- BEGIN GENERATED DOC INDEX -->` and `<!-- END GENERATED DOC INDEX -->`
+markers, and the carve-out verifies (via line numbers) that every conflict
+hunk sits inside that block — a conflict outside the markers falls through
+to `report_impediment` (kanban card 72db7429…).
+
+Both files are regenerated by `scripts/generate-doc-index.py` from the
+frontmatter of `docs/cockpit/*.md`. Concurrent docs-sessions each regenerate
+from their own frontmatter snapshot, the merged frontmatter is the union, and
+the regenerate inside `$WT` reconciles from that union.
+
+**Why the conflict must remain visible** (`.gitattributes`-alternative
+rejected): a `merge=ours` rule for both paths would suppress the conflict
+entirely and silently keep master's pre-regeneration index, losing any new
+frontmatter added on the branch until someone manually re-runs the script.
+
+The "conflict → regenerate" loop is the right pattern — the conflict acts as
+a freshness alarm.
 
 If the carve-out rejects (a handwritten file is in the conflict set), the
 worktree at `$WT` is left in its conflicted state for inspection and the script
@@ -621,25 +640,32 @@ while true; do
 done
 ```
 
-If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), **run the session-end retro**
-(invoke the `session-retro` skill — read `.claude/skills/session-retro/SKILL.md` for the
-full procedure: reflect → dedupe → file 0–N `[self-improve]` cards → `comment` on this host
-card), and finally `move_card` to `Done` with a `summary` of the work you did (required —
-the move is rejected without it). **Product-taal** (conventie §5 van
-`docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…` + kaart `8b3ce64c…`):
-volg de verplichte **drie-delen-vorm** — één **Uitkomst**-zin die leidt
-met *productbetekenis*, gevolgd door 2-4 bullets met de
-engineering-detail, en optioneel een **Rest / nazicht**-sectie.
-Daarboven gelden de drie proces-regels: **geen proces-meta** in de
-mens-gerichte samenvatting (geen FCR-uitslag, geen
-session-retro-uitkomst, geen dedup-boekhouding, geen
-audit-log-archeologie — die horen in de activity-feed), **jargon =
-naam + waarom** (een interne component noem je alleen met wat 'ie
-voor de lezer betekent), en lead-with-product-meaning in elke
-openingszin. Een kale engineering-summary voldoet aan de gate maar
-niet aan de product-taal-conventie. Voor een `report_impediment` met
-`options`: druk de opties uit als **producttrade-offs**, niet als
-implementatie-forks.
+If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`).
+
+Next, **run the session-end retro**: invoke the `session-retro` skill (read
+`.claude/skills/session-retro/SKILL.md` for the full procedure — reflect →
+dedupe → file 0–N `[self-improve]` cards → `comment` on this host card).
+
+Finally, `move_card` to `Done` with a `summary` of the work you did
+(required — the move is rejected without it).
+
+**Product-taal** (conventie §5 van `docs/cockpit/kanban-conventions.md`, kaart
+`4358fe0a…` + kaart `8b3ce64c…`): volg de verplichte **drie-delen-vorm** —
+één **Uitkomst**-zin die leidt met *productbetekenis*, gevolgd door 2-4
+bullets met de engineering-detail, en optioneel een **Rest / nazicht**-sectie.
+
+Daarboven gelden de drie proces-regels:
+
+- **geen proces-meta** in de mens-gerichte samenvatting (geen FCR-uitslag,
+  geen session-retro-uitkomst, geen dedup-boekhouding, geen
+  audit-log-archeologie — die horen in de activity-feed).
+- **jargon = naam + waarom** — een interne component noem je alleen met wat
+  'ie voor de lezer betekent.
+- **lead-with-product-meaning** in elke openingszin.
+
+Een kale engineering-summary voldoet aan de gate maar niet aan de
+product-taal-conventie. Voor een `report_impediment` met `options`: druk de
+opties uit als **producttrade-offs**, niet als implementatie-forks.
 
 If the loop exited because a check failed, the PR was closed, or the wait timed
 out: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `report_impediment`
@@ -684,9 +710,12 @@ when leftovers exist.
   move without it (`report_impediment` already supplies one via its `question` arg). The
   `summary` itself is bound by the product-taal-conventie (§5 van
   `docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…` + kaart
-  `8b3ce64c…`): volg de verplichte **drie-delen-vorm** (één
-  **Uitkomst**-zin met *productbetekenis* → 2-4 bullets engineering-detail
-  → optioneel **Rest / nazicht**), met **geen proces-meta** in de
-  mens-gerichte samenvatting, **jargon = naam + waarom**, en
-  lead-with-product-meaning; voor impediment-options: druk
-  *producttrade-offs* uit, niet als implementatie-forks.
+  `8b3ce64c…`):
+
+  Volg de verplichte **drie-delen-vorm**: één **Uitkomst**-zin met
+  *productbetekenis*, 2-4 bullets engineering-detail, optioneel
+  **Rest / nazicht**. Plus **geen proces-meta** in de mens-gerichte
+  samenvatting, **jargon = naam + waarom**, en lead-with-product-meaning.
+
+  Voor impediment-options: druk *producttrade-offs* uit, niet als
+  implementatie-forks.

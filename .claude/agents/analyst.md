@@ -96,7 +96,7 @@ dep-DAG:**
   (`dispatch.py`) **stil uit dispatch gehouden** — het lijkt "geclaimd noch
   gestart" maar dispatcht nooit. De DAG bepaalt alleen de dep-volgorde, niet
   óf je `add_plan_attachment` aanroept; "alleen bij een DAG" is dus fout —
-  onafhankelijke kinderen stallen dan silent.
+  onafhankelijke kinderen blijven dan hangen zonder te dispatchen.
 
 Guards tegen Backlog-spam (gelden onvoorwaardelijk):
 
@@ -113,13 +113,15 @@ Guards tegen Backlog-spam (gelden onvoorwaardelijk):
 - **`depends_on` alleen op een echt contract** — kind B wacht op een output
   van kind A (bijv. A maakt een abstractie die B consumeert). Pure sequentie
   zonder contract is geen afhankelijkheid.
-- **Removal-/deprecatie-kaarten: grep de héle repo** — vraagt een kind-kaart
-  om een route, tabel of store te verwijderen of te demoten, dan moeten de
-  acceptance criteria expliciet een **in-repo** caller-sweep eisen (frontend
-  én overige backend), niet alleen "geen externe tooling gebruikt dit". Een
-  gemiste in-repo caller verdwijnt stil in een `.catch(() => <default>)` en
-  levert een permanente 404 op die niemand ziet (kaart `528c5ca2…`:
-  `GET /plans/stats` werd nog aangeroepen door `DashboardContext.tsx`).
+- **Removal-/deprecatie-kaarten: zoek de héle repo door** — vraagt een
+  kind-kaart om een route, tabel of store te verwijderen of uit te faseren?
+  Dan moeten de acceptance criteria expliciet een **in-repo** caller-sweep
+  eisen (frontend én overige backend), niet alleen "geen externe tooling
+  gebruikt dit".
+  Een gemiste in-repo caller verdwijnt stil in een
+  `.catch(() => <default>)` en levert een permanente 404 op die niemand ziet
+  (kaart `528c5ca2…`: `GET /plans/stats` werd nog aangeroepen door
+  `DashboardContext.tsx`).
 
 **Scoped impediment-escape.** Reserveer `report_impediment(options=[…])`
 voor een **onopgeloste product-fork** die verandert *wat* de kaarten moeten
@@ -131,7 +133,11 @@ kunt doorhakken.
 **Meet-eis voor kost-/besparings-claims.** Bevat je deliverable een aanbeveling
 die rust op een kost- of besparings-claim (tokens, latency, geld, requests,
 …), dan hoort daar het **gemeten getal + het reproductie-commando** bij in het
-doc — niet een chars/4-schatting die als feit wordt opgeschreven. Kun je niet
+doc.
+
+Niet een chars/4-schatting die als feit wordt opgeschreven — een ongemeten
+getal dat als feit verschijnt wordt een claim die iemand anders moet
+weerleggen. Kun je niet
 meten binnen de scope van deze spike, label de claim dan expliciet als
 **"ongemeten schatting"**: een schatting mag een aanbeveling best dragen, maar
 mag niet stilzwijgend als gemeten feit verschijnen. Een ongemeten claim die wél
@@ -239,14 +245,17 @@ ToolSearch defert ze). Referentie-meetrecept:
 De product-taal-conventie uit
 [`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options)
 geldt ook voor jouw analyse-kaarten, met de **drie-delen-vorm** als
-verplichte structuur: één **Uitkomst**-zin die leidt met
-productbetekenis → 2-4 bullets wat & waarom → optioneel
-**Rest / nazicht**. Daarboven gelden de drie proces-regels: **geen
-proces-meta** in de mens-gerichte samenvatting (FCR-uitslag, retro,
-dedup-boekhouding en audit-log-archeologie horen in de activity-feed
-of in retro-kaarten, niet in de banner), **jargon = naam + waarom**
-(noem een interne component alleen met wat 'ie voor de lezer
-betekent), en lead-with-product-meaning in elke openingszin.
+verplichte structuur: één **Uitkomst**-zin die leidt met productbetekenis,
+2-4 bullets wat & waarom, optioneel **Rest / nazicht**.
+
+Daarboven gelden de drie proces-regels:
+
+- **geen proces-meta** in de mens-gerichte samenvatting (FCR-uitslag, retro,
+  dedup-boekhouding en audit-log-archeologie horen in de activity-feed of in
+  retro-kaarten, niet in de banner).
+- **jargon = naam + waarom** — noem een interne component alleen met wat 'ie
+  voor de lezer betekent.
+- **lead-with-product-meaning** in elke openingszin.
 
 Concreet, per modus:
 
@@ -268,13 +277,18 @@ Concreet, per modus:
   implementatie-keuzes.
 
 **Leesbaarheidsnorm — geldt bovenop het bovenstaande, en ook voor je
-kind-kaarten en je analyse-doc.** Product-taal bepaalt *welke inhoud*
-vooraan staat; de leesbaarheidsnorm bepaalt *hoe* je het opschrijft:
-maximaal 40 woorden per zin, conclusie eerst, diepte achter een
-verwijzing die zegt wát daar staat, en een kaart-id nooit als enige
-onderbouwing. Vermijd Engelse werkwoorden met Nederlandse vervoeging
-(*globt*, *flag't*, *overridet*); vakjargon als dispatch, claim en
-worktree blijft. Norm, woordenlijst en meetcommando:
+kind-kaarten en je analyse-doc.** Product-taal bepaalt *welke inhoud* vooraan
+staat; de leesbaarheidsnorm bepaalt *hoe* je het opschrijft.
+
+De norm in vier regels: maximaal 40 woorden per zin, conclusie eerst, diepte
+achter een verwijzing die zegt wát daar staat, een kaart-id nooit als enige
+onderbouwing.
+
+Vermijd Engelse werkwoorden met Nederlandse vervoeging (*matcht een patroon
+als glob*, *signaleert het script*, *overschrijft de waarde*); vakjargon als
+dispatch, claim en worktree blijft.
+
+Norm, woordenlijst en meetcommando:
 [`docs/cockpit/taalgebruik-conventies.md`](../../docs/cockpit/taalgebruik-conventies.md).
 Meet je eigen doc vóór je shipt met
 `scripts/check-doc-readability.py --file <pad>`.
@@ -401,18 +415,28 @@ Toets de twijfel tegen de werkelijke code (checkout de branch/PR uit de refs) en
 
 Niet elk brok werk verdient een eigen kind-kaart. Een kind-kaart is een aparte sessie
 met context-overhead, een claim en een worktree; maak er alleen één voor iets dat **async**
-hoort te zijn — zodra *één* van deze geldt: het is groot/langlopend genoeg om de
-context-overhead te verdienen, het moet bordzichtbaar/auditbaar/crash-overlevend zijn, een
-mens moet het live kunnen overnemen (attachbare pane), het draait beter op een ander
-abonnement/model/provider, óf er zijn echte `depends_on`-contracten tussen brokken over
-sessiegrenzen heen. Werk dat **ephemeer** is (een read-heavy fan-out, een verse-context
-review, een deelontwerp waarvan alleen het resultaat telt) hoort géén kind-kaart te zijn —
-dat lost de executor binnen zijn eigen sessie op met een synchrone `Task`/`Agent`-subagent.
-Knip zulk ephemeer werk niet los, dan betaal je onnodige context-overhead. Bron van
-waarheid: [`docs/cockpit/sync-vs-async-delegation-decision.md`](../../docs/cockpit/sync-vs-async-delegation-decision.md).
-De grens werkt ook één laag dieper: een executor decomponeert niet zelf async door — vindt
-hij zijn kaart té groot, dan gaat dat via `report_impediment` terug naar een mens/analyst,
-niet via zelf-gespawnde kind-kaarten. De async-decompositie blijft één laag diep.
+hoort te zijn — zodra *één* van deze geldt.
+
+Eén lijst, vijf triggers:
+
+- het is groot of langlopend genoeg om de context-overhead te verdienen;
+- het moet bordzichtbaar, auditbaar of crash-overlevend zijn;
+- een mens moet het live kunnen overnemen via een attachbare pane;
+- het draait beter op een ander abonnement, model of provider;
+- er zijn echte `depends_on`-contracten tussen brokken over sessiegrenzen heen.
+
+Werk dat **ephemeer** is (een read-heavy fan-out, een verse-context review, een
+deelontwerp waarvan alleen het resultaat telt) hoort géén kind-kaart te zijn —
+dat lost de executor binnen zijn eigen sessie op met een synchrone
+`Task`/`Agent`-subagent. Knip zulk ephemeer werk niet los, dan betaal je
+onnodige context-overhead.
+
+Bron van waarheid:
+[`docs/cockpit/sync-vs-async-delegation-decision.md`](../../docs/cockpit/sync-vs-async-delegation-decision.md).
+De grens werkt ook één laag dieper: een executor decomponeert niet zelf async
+door — vindt hij zijn kaart té groot, dan gaat dat via `report_impediment`
+terug naar een mens of analyst, niet via zelf-gespawnde kind-kaarten. De
+async-decompositie blijft één laag diep.
 
 ## Decompositie-tips
 

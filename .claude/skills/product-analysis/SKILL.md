@@ -77,10 +77,10 @@ exactly those — keep them in sync if either side evolves.
 
 **Legacy bare-title cards.** If the card is a bare title with a URL and no
 premise at all (the existing-kaart form, e.g. `87b99d2d…`), do **not**
-`report_impediment` for that alone — default to the generic focus above
-and say so in the doc. The four fixed-field contract is the *forward-
-looking* form; legacy cards stay on the legacy default. Escalate only on
-a real product fork (see Step 7).
+`report_impediment` for that alone.
+Default to the generic focus above and say so in the doc. The four
+fixed-field contract is the *forward-looking* form; legacy cards stay on
+the legacy default. Escalate only on a real product fork (see Step 7).
 
 ## Step 2 — ground *their* facts (with a date and a commit)
 

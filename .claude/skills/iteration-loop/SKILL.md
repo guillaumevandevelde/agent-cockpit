@@ -6,11 +6,12 @@ description: Use when running a structured repeat-until-clean loop with a named 
 # iteration-loop
 
 A small, structured loop that runs a **named preset** (e.g. `verify`,
-`simplify`, `investigate`) **repeatedly until clean**, emits a clear signal
-tag at the end (`<loop-complete>` or `<loop-blocked>`), and leaves a
-per-iteration breadcrumb in `.claude/state/iteration-<card-id>.txt` so an
-operator — or a follow-up `session-problem-scan` — can see what the loop
-did and why it stopped.
+`simplify`, `investigate`) **repeatedly until clean**.
+
+It emits a clear signal tag at the end (`<loop-complete>` or `<loop-blocked>`),
+and leaves a per-iteration breadcrumb in `.claude/state/iteration-<card-id>.txt`
+so an operator — or a follow-up `session-problem-scan` — can see what the
+loop did and why it stopped.
 
 The shape is borrowed from `claude-task-master`'s `task-master loop`
 command (loop runs Claude Code in a Docker sandbox, one task per loop,
@@ -75,20 +76,20 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 
 ### `verify` — test + lint + build (default end-of-card gate)
 
-- **Runs:** the in-worktree checks from `git-ship` step 2 — the
-  `FRONTEND_TOUCHED` probe + symlink-or-`npm ci` bootstrap (when
-  `frontend/package-lock.json` matches origin/master, symlink the main
-  checkout's `frontend/node_modules` to skip the multi-minute install;
-  only fall back to `npm ci` when the lockfile diverged or main's
-  `node_modules` is missing/partial — partial is detected by a
-  `node_modules` dir without `.bin/` and moved aside via `mv` since
-  `rm` is deny-listed). Backend `pytest` is **not** run locally on this
-  box (see CLAUDE.md / `git-ship` rationale — the shared box's
-  concurrent sessions caused multi-minute stalls under full pytest).
-  The loop trusts GitHub Actions `quality.yml` for the backend gate and
-  only verifies what is verifiable in-worktree.
-  If `ruff` is wired into the worktree (`backend/.venv/bin/ruff`), run
-  that too; otherwise skip and note it in the progress file.
+- **Runs:** the in-worktree checks from `git-ship` step 2. The
+  `FRONTEND_TOUCHED` probe and the symlink-or-`npm ci` bootstrap detect a
+  frontend diff and install deps — when `frontend/package-lock.json`
+  matches origin/master, symlink the main checkout's `frontend/node_modules`
+  to skip the multi-minute install.
+  Fall back to `npm ci` when the lockfile diverged or main's `node_modules`
+  is missing or partial. Partial is detected by a `node_modules` dir
+  without `.bin/` and moved aside via `mv` since `rm` is deny-listed.
+  Backend `pytest` is **not** run locally on this box (see CLAUDE.md /
+  `git-ship` rationale — concurrent sessions caused multi-minute stalls
+  under full pytest). The loop trusts GitHub Actions `quality.yml` for the
+  backend gate and only verifies what is verifiable in-worktree.
+  If `ruff` is wired into the worktree (`backend/.venv/bin/ruff`), run that
+  too; otherwise skip and note it in the progress file.
 - **Clean when:** lint passes AND build succeeds, with zero warnings
   that aren't already in the ESLint baseline.
 - **Blocked when:** build fails on a code issue the loop can't fix in one
@@ -139,13 +140,13 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 
 ### `pytest-attr` — attribute pytest failures to engineer vs pre-existing
 
-- **Use when:** an engineer card touches `backend/` and the engineer
-  wants to know "is this `FAILED` mine or one of the ~15-20 pre-existing
-  failures on `origin/master`?" without running `git stash + pytest +
-  git stash pop` four extra times per session (the pain that motivated
-  kanban card 4c7c5346). Pairs with `scripts/pytest-baseline.sh` (one-
-  shot baseline capture) and `scripts/pytest-compare.sh` (current-vs-
-  baseline attribution).
+- **Use when:** an engineer card touches `backend/` and the engineer wants
+  to know "is this `FAILED` mine or one of the ~15-20 pre-existing failures
+  on `origin/master`?".
+  The motivation: avoiding `git stash + pytest + git stash pop` four extra
+  times per session (kanban card 4c7c5346).
+  Pairs with `scripts/pytest-baseline.sh` (one-shot baseline capture) and
+  `scripts/pytest-compare.sh` (current-vs-baseline attribution).
 - **Runs:**
   1. If `.claude/state/pytest-baseline.txt` is missing or older than
      `--max-age-hours` (env `PYTEST_BASELINE_MAX_AGE_HOURS`, default 24),
@@ -235,9 +236,9 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 - **Use when:** an engineer card touches `backend/app` or `backend/tests`
   and the engineer wants to know "is this `ruff check` hit mine or one of
   the N pre-existing hits on `origin/master`?" without running
-  `git stash -u && ruff && git stash pop` four extra times per session
-  (the pain that motivated kanban card 070911ee for the original 31-hit
-  cleanup, and 7678afc4… for the tooling that prevents the next incident).
+  `git stash -u && ruff && git stash pop` four extra times per session.
+  Motivated by kanban card 070911ee for the original 31-hit cleanup and
+  7678afc4… for the tooling that prevents the next incident.
   Pairs with `scripts/ruff-baseline.sh` (one-shot baseline capture) and
   `scripts/ruff-compare.sh` (current-vs-baseline attribution).
 - **Runs:**
@@ -254,11 +255,11 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 - **Worktree sessions (no local venv):** both scripts resolve ruff via
   the same worktree-local → shared main-checkout venv → PATH fallback
   chain as `scripts/pytest-baseline.sh` (the `scripts/lib/resolve-ruff-cmd.sh`
-  sibling), so no `RUFF_CMD=` override is needed even in a fresh
-  worktree. Same caveat as `pytest-attr` re. the shared-box rationale
-  that `ruff` is normally not run locally — this preset exists for
-  engineers who *choose* to debug their backend changes with a local
-  ruff run; CI's `quality.yml` is still the canonical backend gate.
+  sibling), so no `RUFF_CMD=` override is needed even in a fresh worktree.
+  Same caveat as `pytest-attr` re. the shared-box rationale: `ruff` is
+  normally not run locally. This preset exists for engineers who *choose*
+  to debug their backend changes with a local ruff run; CI's `quality.yml`
+  is still the canonical backend gate.
 - **Clean when:** `ruff-compare.sh` exits 0 — every current hit is also
   in the baseline (no new hits). Pre-existing + FIXED-only diffs are
   fine; the loop's job is "did this card add any new reds?", not "is
@@ -313,14 +314,14 @@ After `<loop-complete>` or `<loop-blocked>`:
    for whoever picks them up next.
 3. **Lifecycle is git-driven, not worktree-gc-driven.** The progress
    path `.claude/state/iteration-<card-id>.txt` is in `.gitignore`
-   (added by commit `31f3a51` "chore: gitignore iteration-loop
-   progress files"), so a file written there is ignored by git — the
-   ship pre-flight only tests tracked-file changes (`git status
+   (added by commit `31f3a51` "chore: gitignore iteration-loop progress
+   files"), so a file written there is ignored by git.
+   The ship pre-flight only tests tracked-file changes (`git status
    --porcelain | grep -v '^??'`), so untracked files like this one are
-   out of the blocking path, and `scripts/worktree-gc.sh` treats the
-   worktree as clean and removes the whole `.claude/` subtree along
-   with the worktree when the card moves to `Done`. No manual `rm`
-   needed.
+   out of the blocking path.
+   `scripts/worktree-gc.sh` treats the worktree as clean and removes the
+   whole `.claude/` subtree along with the worktree when the card moves
+   to `Done`. No manual `rm` needed.
 
    Some past sessions have also committed these files into their
    card's commit (search `git ls-files .claude/state/` — they're
@@ -329,20 +330,21 @@ After `<loop-complete>` or `<loop-blocked>`:
    required today; if `git status` reports nothing under
    `.claude/state/`, leave it alone.
 
-   **Subdir gotcha — the path is cwd-relative.** If a mid-session
-   `cd` left the loop running with cwd in a subdirectory (e.g.
+   **Subdir gotcha — the path is cwd-relative.** A mid-session
+   `cd` can leave the loop running with cwd in a subdirectory. Example:
    `cd backend && …` for a pytest run, then a subsequent iteration
-   appending to `.claude/state/…` from that cwd), the file lands at
-   e.g. `backend/.claude/state/iteration-<card-id>.txt` — and the
-   gitignore pattern does **not** match nested paths, so the file
-   shows up under `git status` as untracked. With the new pre-flight
-   (tracked-files-only), an untracked `iteration-*.txt` no longer
-   *blocks* the ship, but it still leaks across worktree boundaries
-   if the loop writes to a subdir. Best practice: the loop writes to
-   the gitignored root (`.claude/state/`) so the file is invisible to
-   both `git status` and the pre-flight — if you ever see the file
-   under a non-ignored subdir, move it before the next ship so it
-   doesn't ride along on a different worktree's `git worktree remove`.
+   appending to `.claude/state/…` from that cwd lands the file at
+   `backend/.claude/state/iteration-<card-id>.txt`.
+   The gitignore pattern does **not** match nested paths, so the file
+   shows up under `git status` as untracked.
+   With the new pre-flight (tracked-files-only), an untracked
+   `iteration-*.txt` no longer *blocks* the ship, but it still leaks
+   across worktree boundaries if the loop writes to a subdir.
+   Best practice: the loop writes to the gitignored root
+   (`.claude/state/`) so the file is invisible to both `git status` and
+   the pre-flight.
+   If you ever see the file under a non-ignored subdir, move it before
+   the next ship.
 
    If the pre-flight ever mentions an untracked
    `iteration-*.txt` in its advisory, `git status --ignored` will

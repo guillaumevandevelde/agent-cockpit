@@ -88,7 +88,7 @@ outcome='decomposed', beide altijd (ook zonder dep-DAG):
   stil uit dispatch gehouden (het lijkt "geclaimd noch gestart" maar dispatcht
   nooit). De DAG bepaalt alleen dep-volgorde, niet óf je add_plan_attachment
   aanroept — "alleen bij een DAG" is dus fout: onafhankelijke kinderen
-  stallen dan silent.
+  blijven dan hangen zonder te dispatchen.
 Guards tegen Backlog-spam:
 - Acceptance-criteria-niveau only — titel + 2-5 zinnen acceptance criteria;
   speculatieve ideeën blijven §-prose, geen kaart.
@@ -96,8 +96,8 @@ Guards tegen Backlog-spam:
   comment op de bestaande kaart i.p.v. dupliceren.
 - depends_on alleen op een echt contract — pure sequentie zonder contract
   is geen afhankelijkheid.
-- Removal-/deprecatie-kaarten: grep de héle repo — vraagt een kind-kaart om
-  een route, tabel of store te verwijderen of te demoten, dan moeten de
+- Removal-/deprecatie-kaarten: zoek de héle repo door — vraagt een kind-kaart om
+  een route, tabel of store te verwijderen of uit te faseren, dan moeten de
   acceptance criteria expliciet een in-repo caller-sweep eisen (frontend én
   overige backend), niet alleen "geen externe tooling gebruikt dit". Een
   gemiste in-repo caller verdwijnt stil in een .catch(() => <default>) en
@@ -193,7 +193,8 @@ Product-taal bepaalt welke inhoud vooraan staat; de leesbaarheidsnorm
 bepaalt hoe je het opschrijft. Maximaal 40 woorden per zin, conclusie
 eerst, diepte achter een verwijzing die zegt wát daar staat, en een
 kaart-id nooit als enige onderbouwing. Vermijd Engelse werkwoorden met
-Nederlandse vervoeging (globt, flag't, overridet); vakjargon als
+Nederlandse vervoeging (matcht een patroon als glob, signaleert het
+script, overschrijft de waarde); vakjargon als
 dispatch, claim en worktree blijft. Norm, woordenlijst en meetcommando:
 `docs/cockpit/taalgebruik-conventies.md`. Meet je eigen doc vóór je
 shipt met `scripts/check-doc-readability.py --file <pad>`.

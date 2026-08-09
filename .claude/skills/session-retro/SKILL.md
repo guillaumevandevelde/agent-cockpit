@@ -8,9 +8,10 @@ description: Use when any dispatched session — executor/engineer or analyst �
 End-of-session self-improvement reflection. You look back over the work you
 just did in THIS session, identify 0–N concrete improvement points that
 would have made this session — or the next one — measurably better at
-advancing the app's self-verbetering doelstelling (CLAUDE.md §
-"Zelfverbetering"), and file each as a Backlog kanban card. The session
-keeps moving toward Done; the cards keep the lessons.
+advancing the app's zelfverbetering doelstelling (CLAUDE.md §
+"Zelfverbetering").
+File each as a Backlog kanban card. The session keeps moving toward Done;
+the cards keep the lessons.
 
 This is the **end-of-session, self-noticed** counterpart to:
 
@@ -83,10 +84,10 @@ For each candidate improvement, in order:
    resolves the project key" → keep. "Maybe someday it would be nice
    to have a slash command" → skip.
 3. **Actionable here-or-nearby?** Can an engineer card close it without
-   a research rabbit-hole? If the answer is "we'd need to redesign the
-   dispatcher first", that's a parent card, not a single-session task
-   — file the parent but keep it under `parent_card_id` linking to a
-   feature family only if the host card you're closing has one.
+   a research rabbit-hole?
+   If the answer is "we'd need to redesign the dispatcher first", that's
+   a parent card, not a single-session task. File the parent, but link it
+   to a feature family only if the host card you're closing has one.
 4. **Novelty?** Would this be the second, third, ... Nth card about the
    same root cause? Re-pull Backlog/Impediment first (Step 3) and
    deduplicate — but if the existing card already captures it, prefer

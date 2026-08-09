@@ -6,10 +6,10 @@ description: Use when you notice a problem during your own session — a bug, co
 # flag-problem
 
 You are mid-task and you notice something broken that isn't what you were asked
-to fix — a stale doc, a tool that lied about its own defaults, an inconsistent
-API, a footgun that cost you 10 minutes to work around. Don't just mention it
-in chat and move on. File it, or add to an existing filing, so the next
-session doesn't rediscover it the hard way.
+to fix. Examples: a stale doc, a tool that lied about its own defaults, an
+inconsistent API, a footgun that cost you 10 minutes to work around.
+Don't just mention it in chat and move on. File it (or extend an existing
+filing), so the next session doesn't rediscover it the hard way.
 
 This is the **in-session, self-noticed** counterpart to
 `session-problem-scan`, which is an **external, on-demand sweep** over past
@@ -39,13 +39,14 @@ something weird while doing my actual work"; use `session-problem-scan` for
 
 **This is the step most likely to silently fail.** Kanban cards are bucketed
 by a free-form `project` string with no validation — a typo or a
-differently-derived key creates an invisible parallel board. This was
-verified the hard way while building this skill: `list_cards(project=
-"claude-cockpit")` returned an empty board even though real cards existed,
-because the live board for this repo is keyed `git:github.com/
-guillaumevandevelde/claude-cockpit` — derived from the git remote, not typed
-by hand. A card filed under any other string (a guessed slug, a display name,
-a different-cased string) is orphaned: invisible from the real board, and it
+differently-derived key creates an invisible parallel board.
+This was verified the hard way while building this skill:
+`list_cards(project= "claude-cockpit")` returned an empty board even
+though real cards existed, because the live board for this repo is keyed
+`git:github.com/guillaumevandevelde/claude-cockpit` — derived from the git
+remote, not typed by hand.
+A card filed under any other string (a guessed slug, a display name, a
+different-cased string) is orphaned: invisible from the real board, and it
 makes future dedupe checks against it silently miss.
 
 Resolve it for real, don't guess. If the `cockpit-kanban` MCP server is
@@ -129,9 +130,9 @@ what you claim (`CLAUDE.md` does *not* hold the FCR prompt — kaart
 ## Don't let this derail your actual task
 
 Filing takes two tool calls once you have the resolved project key. Do it,
-then get back to the card you were actually dispatched for. If the problem
-is big enough to need real investigation, file a *stub* card now (evidence +
-"needs investigation") rather than going down the rabbit hole mid-session —
+then get back to the card you were actually dispatched for.
+If the problem is big enough to need real investigation, file a *stub* card
+now (evidence + "needs investigation"). Skip the rabbit hole mid-session —
 a future session (or a human) can pick it up with full context restored from
 your evidence section.
 
