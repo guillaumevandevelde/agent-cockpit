@@ -37,6 +37,11 @@ alinea onbruikbaar, en een gemiddelde verbergt dat.
 
 Reproduceer de meting met het commando in [§7](#7-meten).
 
+✅ Geïmplementeerd (kaart `85db6366…`) — `CLAUDE.md` staat op 0 hits. De diepte
+van de `git stash`-gotcha verhuisde naar
+[`git-stash-safety.md`](./git-stash-safety.md), die van de `pkill`-gotcha
+eerder al naar [`pkill-safety.md`](./pkill-safety.md).
+
 ## 2. De vier meetbare normen
 
 | Norm | Waarde | Gemeten door |

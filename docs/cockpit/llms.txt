@@ -18,6 +18,7 @@
 - [CITemplateService — drie GitHub-Actions-templates voor pasgeboren projecten](./ci-templates.md): type=reference status=active
 - [Cockpit capability-baseline](./cockpit-capability-baseline.md): type=reference status=active
 - [Fase 1 — Validatiechecklist (werkt claude-deck onder WSL?)](./fase-1-validation.md): type=reference status=active
+- [git stash in gedeelde worktrees — waarom niet, en wat wel](./git-stash-safety.md): type=reference status=active
 - [Isolated component preview (light + dark screenshot)](./isolated-component-preview.md): type=reference status=active
 - [Kanban-DB conventions](./kanban-conventions.md): type=reference status=active
 - [Kanban — known follow-ups (post-v1)](./kanban-followups.md): type=reference status=active
