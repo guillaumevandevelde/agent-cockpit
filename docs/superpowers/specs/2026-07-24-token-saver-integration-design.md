@@ -50,8 +50,9 @@ Claude Code `PreToolUse` hook.
    card-activity panel can group them.
 6. **Measurement acceptance.** Re-running the counterbalanced harness
    with a *real* RTK variant must show non-negative benefit OR
-   acceptable quality (golden task `pass_tests=1` and `pass_diff=1` on
-   the revert task). If the integration shows zero / negative benefit
+   acceptable quality (golden task `pass_tests=1` on
+   the revert task; the former `pass_diff` column was dropped from
+   `score_golden` — see `docs/cockpit/prompt-injectors-decision.md`). If the integration shows zero / negative benefit
    or quality regression, the feature is disabled by default and the
    card reports measured outcome to `decisions.md` before shipping.
 7. **Tests cover both branches.** Pytest covers the active branch
@@ -429,7 +430,7 @@ subcommand:
   `.claude/settings.json`.
 - Runs the same `claude -p ...` invocation as `with-saver`, just with
   the hook instead of the prompt proxy.
-- Score with the same `score_golden` (pass_tests + pass_diff).
+- Score with the same `score_golden` (pass_tests).
 - The `compare` subcommand extends the table with a
   `real-saver` row per trial. The existing `with-saver` row stays as
   the documented proxy lower-bound.
@@ -479,7 +480,7 @@ After implementation, **before** moving the card to Done:
 4. Run `scripts/measure-token-saver.sh compare` once. Capture the full
    table (baseline / with-saver / real-saver / deltas).
 5. Decide:
-   - `real-saver` shows `pass_tests=1` AND `pass_diff=1` AND non-negative
+   - `real-saver` shows `pass_tests=1` AND non-negative
      token delta vs `baseline` → GO. Card moves to Done with measured
      numbers in the summary.
    - Otherwise → the feature ships disabled-by-default (which is the

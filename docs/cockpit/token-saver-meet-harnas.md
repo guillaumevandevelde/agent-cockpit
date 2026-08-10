@@ -17,8 +17,8 @@ token-savers (RTK / Caveman / Ponytail) **emuleert** in een verse scratch
 git-worktree per run tegen een golden task (1-line revert van commit `b30a9bb`
 op `backend/app/kanban/dispatch.py`), de drie afzonderlijke
 verbruiks-componenten (`input_tokens` / `cache_creation_input_tokens` /
-`cache_read_input_tokens`) naast een binaire kwaliteitsscore (`pass_tests` +
-`pass_diff`) rapporteert, en **twee trials in counterbalanced volgorde**
+`cache_read_input_tokens`) naast één binaire kwaliteitsscore (`pass_tests`)
+rapporteert, en **twee trials in counterbalanced volgorde**
 draait zodat noch gedeelde worktree-state noch variant-volgorde een confounder
 is. **Lower bound**: als deze naïeve regex-mutatie de golden task breekt, doet
 een echte saver dat ook (en waarschijnlijk vaker).
@@ -66,11 +66,16 @@ isolation (verse scratch-worktree + verse golden-task-revert per run).
 `test_zero_column_cap_does_not_block_other_columns`) staan al op master —
 dus de agent werkt **tegen** een gefaalde test-suite.
 
-**Score** = twee binaire signalen per run:
-- `pass_tests`: `pytest -k zero_column_cap` exit-code 0.
-- `pass_diff`: `git diff -- backend/app/kanban/dispatch.py` bevat NIET
-  meer de gebroken `> 0`-regel en WEL de `>= 0`-regel (post-state-check,
-  niet pre+post als één concat — anders kan "untouched" ook scoren).
+**Score** = één binair signaal per run:
+- `pass_tests`: `pytest tests/test_kanban_dispatch.py -k zero_column_cap`
+  exit-code 0.
+
+De eerdere tweede kolom `pass_diff` (een grep op de canonieke
+`>= 0`-regel) is geschrapt uit `score_golden`: agents lossen de taak
+regelmatig functioneel gelijkwaardig maar tekstueel anders op, dus de
+kolom mat schrijfstijl, niet kwaliteit. Reden en bewijs:
+[`prompt-injectors-decision.md`](./prompt-injectors-decision.md) (kaart
+`0a3ee4c9…`).
 
 **Twee trials, counterbalanced**: trial 1 = `baseline → with-saver`,
 trial 2 = `with-saver → baseline`. Beide trials draaien in **verse
@@ -170,7 +175,7 @@ zich kan vergissen).
 
 ```bash
 cd /home/vdvgu/claude-cockpit
-bash scripts/test_measure_token_saver.sh   # 68/68 unit-asserts, exit 0
+bash scripts/test_measure_token_saver.sh   # 70/70 unit-asserts, exit 0
 
 # Vier-run counterbalanced compare, ~6–12 minuten wall-clock
 CLAUDE_MODEL=sonnet \
@@ -188,9 +193,9 @@ CLAUDE_MODEL=sonnet \
   bash scripts/measure-token-saver.sh injector-compare
 ```
 
-Verwachte output: een 7-rij Markdown-tabel
-(variant / input / cache_creation / cache_read / output / pass_tests /
-pass_diff) per trial, met delta-rij. De scratch worktrees worden per
+Verwachte output: een 6-koloms Markdown-tabel
+(variant / input / cache_creation / cache_read / output / pass_tests)
+per trial, met delta-rij. De scratch worktrees worden per
 `run_one` opgeruimd; de result-files landen in
 `$MEASURE_RESULT_DIR` (of standaard in
 `$REPO_ROOT/.tmp-measure-token-saver/<UTC-timestamp>/` als die env-var
@@ -315,10 +320,10 @@ getallen per run), vier `*.score`.)
   follow-up (handig voor harnassen die de hele suite willen draaien),
   niet langer een blokkade voor `pass_tests`-geldigheid.
 - **`score_golden` herkent geen alternatieve geldige oplossingen**
-  (`pass_diff=0` in trial 2 with-saver) → verbeter de
-  regex-substring-check naar een **equivalente-gedrag-check** (bijv.
-  pytest + structurele AST-validatie), of documenteer expliciet dat
-  alleen de canonieke 1-line revert telt.
+  (`pass_diff=0` in trial 2 with-saver). ✅ **Opgelost (kaart
+  `0a3ee4c9…`)**: de `pass_diff`-kolom is geschrapt; `pass_tests` is de
+  enige kwaliteitsmaat en accepteert elke gedragsequivalente oplossing.
+  Reden: [`prompt-injectors-decision.md`](./prompt-injectors-decision.md).
 
 ## 8. Wat er in deze versie **reproduceerbaar** anders is dan de
 eerdere (afgewezen) meting
