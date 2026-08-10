@@ -150,7 +150,7 @@ zich kan vergissen).
 
 ```bash
 cd /home/vdvgu/claude-cockpit
-bash scripts/test_measure_token_saver.sh   # 34/34 unit-asserts, exit 0
+bash scripts/test_measure_token_saver.sh   # 68/68 unit-asserts, exit 0
 
 # Vier-run counterbalanced compare, ~6–12 minuten wall-clock
 CLAUDE_MODEL=sonnet \
@@ -160,6 +160,12 @@ CLAUDE_MODEL=sonnet \
 MEASURE_RESULT_DIR="$PWD/docs/cockpit/measure-evidence/$(date -u +%Y-%m-%d)-counterbalanced" \
 CLAUDE_MODEL=sonnet \
   bash scripts/measure-token-saver.sh compare
+
+# Prompt-injectors (Caveman + Ponytail) in plaats van de proxy: beide armen
+# gaan door de productie-`build_card_prompt`, dus het enige byte-verschil is
+# de slice zelf. Zie prompt-injectors-decision.md voor de uitkomst.
+CLAUDE_MODEL=sonnet \
+  bash scripts/measure-token-saver.sh injector-compare
 ```
 
 Verwachte output: een 7-rij Markdown-tabel

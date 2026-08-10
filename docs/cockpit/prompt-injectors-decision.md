@@ -26,47 +26,53 @@ Twee MIT-gelicentieerde upstream plugins (`JuliusBrussee/caveman`, `DietrichGebe
 
 ## Eerste kwaliteitsmeting per lane-type
 
-De kaart vroeg om een meting die **twee contrasterende lanes** dekt: een lane waar beknopte output gewenst is (compressie helpt) en een lane waar het analyseresultaat zelf de deliverable is (compressie schaadt). De reviewer keurde de eerste versie van deze tabel af omdat de cijfers niet door een echte meting waren gedekt (`cache_read` kwam niet voor; de meetuitkomst was niet gemeten). De huidige cijfers komen uit `scripts/measure-token-saver.sh with-injector` (2026-08-09, N=2 per variant); de **canonical numbers** in dit doc + `decisions.md` register-rij zijn deze verbatim-cijfers. De proxy-cijfers uit `token-saver-mechanismen-decision.md` §8 en uit de eerste meting hier (2026-08-05, N=1, proxy) blijven in dat doc staan voor hun eigen context maar zijn **niet** wat de lane-conclusie draagt.
+De kaart vroeg om een meting die **twee contrasterende lanes** dekt: een lane waar beknopte output gewenst is, en een lane waar het analyseresultaat zelf de deliverable is. Twee eerdere versies van deze paragraaf zijn afgekeurd omdat de cijfers iets anders beschreven dan ze beweerden. Onder staat wat er nu wél gemeten is, met welke opzet, en welke uitspraken die meting draagt.
 
-### Meting 2026-08-09 — `scripts/measure-token-saver.sh with-injector`, N=2 trials per variant (verbatim slice)
+### Meting 2026-08-10 — `scripts/measure-token-saver.sh injector-compare` (productie-promptvorm)
 
-`scripts/measure-token-saver.sh with-injector` voert dezelfde golden-task uit maar nu met de **verbatim** Caveman + Ponytail slice uit `backend/app/kanban/prompt_injectors.py` — dezelfde constanten die `resolve_active_injectors` aan `build_card_prompt` doorgeeft. N=2 trials per variant (4 dispatches totaal) op hetzelfde baseline-tijdstip, zodat `cache_read` over meerdere runs in dezelfde kolom kan renderen.
+Beide armen worden gerenderd door de productiecode zelf: `backend/app/kanban/dispatch.py::build_card_prompt`, dezelfde functie die elke echte dispatch gebruikt. Het enige byte-verschil tussen de armen zijn de twee injector-kwargs. De golden-task gaat als kaartbeschrijving naar binnen; persona, slices, kaarttekst en ship-recept staan in de volgorde die productie oplevert. Twee trials, tegengesteld geordend, zodat elke arm één koude en één warme cachepositie krijgt.
 
-| Variant | input_tokens | cache_creation | cache_read | output_tokens | pass_tests |
-|---|---|---|---|---|---|
-| `baseline-1` | 48784 | 0 | 236160 | 1886 | 1 |
-| `baseline-2` | 49408 | 0 | 240256 | 1175 | 1 |
-| `with-injector-2` | 51847 | 0 | 201984 | 1023 | 1 |
-| `with-injector-3` | 51088 | 0 | 249344 | 933 | 1 |
-| **Δ (injector mean − baseline mean)** | **+2372 (+4.8%)** | 0 | **−12544 (−5.3%)** | **−552 (−36.1%)** | 2/2 = 2/2 |
+| Run | input | cache_creation | cache_read | output | turns | pass_tests |
+|---|---|---|---|---|---|---|
+| trial 1 — `card-baseline` | 77.791 | 0 | 1.636.608 | 3.743 | 34 | 1 |
+| trial 1 — `card-injector` | 72.240 | 0 | 284.544 | 1.046 | 7 | 1 |
+| trial 2 — `card-baseline` | 138.970 | 0 | 1.174.195 | 3.076 | 23 | 1 |
+| trial 2 — `card-injector` | 79.019 | 0 | 1.436.544 | 3.542 | 22 | 1 |
 
-Artefacten: `/home/vdvgu/.cache/cockpit-measure-token-saver/20260809T223000Z-verbatim-slice/` (baseline-1, baseline-2, injector-2, injector-3 — injector-1 viel uit op een Anthropic 429 `Token Plan usage limit reached` en is uit de aggregates gelaten; het is géén kwaliteitsfailure van de slice, de slice werd niet eens ge-evalueerd).
+Artefacten: `/home/vdvgu/.cache/cockpit-measure-token-saver/20260810T084936Z-production-shape/`. Alle vier de runs liepen op eigen kracht af; geen enkele is afgekapt.
 
-`injector-1/trial-1-with-injector.json` (rate-limit, gewoon genegeerd in de aggregates):
-```
-result: 'API Error: Request rejected (429) · Token Plan usage limit reached: ...'
-usage : {input: 45394, cache_creation: 0, cache_read: 53760, output: 851}
-```
+**Wat deze meting draagt.**
 
-**Wat het zegt vs. de 2026-08-05-proxy.** De proxy-mutatie van `apply_saver` (~110 bytes) en de verbatim slice (~5.7 KB × 2 = ~11 KB) zijn twee verschillende metingen en geven verschillende cijfers. De cache-key-shift bij de proxy was ≫ die bij de verbatim resolver (de resolver is byte-stabiel over `(project_key, column_name)`). Outputcompressie is bij beide aanwezig; de proxy overtreft de verbatim slice omdat zijn voorschrift directer is (`shortest possible phrasing` vs. de upstream-tekst die meer nuance heeft). Concreet:
+- **De slice breekt de prompt-cache niet.** `cache_creation` is 0 in alle vier de runs en `cache_read` is in beide armen groot. De ongeveer 12 KB extra preamble verhindert dus geen cache-hit. Dat sluit aan op de puurheidstest `tests/test_prompt_injectors.py::test_resolver_returns_byte_stable_output_for_same_inputs`: dezelfde inputs geven dezelfde bytes, dus dezelfde cache-sleutel.
+- **De taakkwaliteit blijft gelijk.** `pass_tests` is 1 in alle vier de runs — 2/2 per arm.
 
-| Metric | Proxy 2026-08-05 N=1 | Verbatim 2026-08-09 N=2 |
+**Wat deze meting níét draagt: een percentage.** Per trial vergeleken:
+
+| | trial 1 | trial 2 |
 |---|---|---|
-| Δ input | −57% | **+4.8%** |
-| Δ cache_read | −51% | **−5.3%** |
-| Δ output | −65% | **−36.1%** |
-| pass_tests | 1/1 | 2/2 |
+| Δ input | −7,1% | −43,1% |
+| Δ cache_read | −82,6% | **+22,3%** |
+| Δ output | −72,1% | **+15,1%** |
+| turns (baseline → injector) | 34 → 7 | 23 → 22 |
 
-De proxy overstate de `cache_read`-drop met een factor ~10× en de output-drop met ~2×. De **canonical numbers** in dit doc en in `decisions.md` zijn de verbatim-cijfers; de proxy-cijfers blijven staan in `token-saver-mechanismen-decision.md` §8 voor zijn eigen context (RTK-werk).
+Twee van de drie tokenmaten wisselen van teken tussen de trials. De oorzaak staat in de laatste rij: `cache_read` en `output` schalen met het aantal beurten dat de agent neemt, en dat aantal varieert sterk per run. In trial 1 werkte de injector-arm de taak in 7 beurten af tegen 34 voor de baseline; in trial 2 zaten beide armen op ongeveer 22. Waar het beurtenaantal dicht bij elkaar ligt, verdwijnt het verschil. Met N=2 is de spreiding tussen runs dus groter dan het verschil tussen de armen, en een getal als "Δ output −36%" zou opnieuw iets beweren wat het artefact niet draagt.
+
+De richting is niet weerlegd — alleen niet aangetoond. Een uitspraak over tokenbesparing vraagt meer runs per arm; dat staat als vervolgkaart onder.
+
+**Over `pass_diff`.** Die kolom is 0 in alle vier de runs, in beide armen gelijk, en discrimineert dus niet. De check zoekt letterlijk naar `r.max_sessions >= 0`, terwijl agents de regel herschrijven naar een gelijkwaardige vorm zonder die vergelijking. In het ene geval dat we konden inspecteren — de commit die vóór de sandbox op master belandde — stond er `if r.max_sessions is not None`, functioneel gelijk en letterlijk anders. `pass_tests` is hier de betekenisvolle kwaliteitsmaat.
+
+**Ingetrokken cijfers.** De 2026-08-09-tabel die hier eerder stond (Δ input +4,8%, Δ cache_read −5,3%, Δ output −36,1%) is ingetrokken. Die meting zette Ponytail ná de taakbody in plaats van vóór, terwijl productie beide slices in de preamble zet. `cache_read` is een eigenschap van het prompt-voorvoegsel, dus een verkeerd voorvoegsel meet iets anders dan de dispatch-vorm. De 2026-08-05-proxycijfers (Δ input −57%, Δ cache_read −51%, Δ output −65%) blijven staan in `token-saver-mechanismen-decision.md` §8 voor hun eigen RTK-context; ze zijn gemeten met een prompt-mutatie van ongeveer 110 bytes en beschrijven de injectors niet.
+
+**Veiligheidsvoorwaarde bij deze meetvorm.** De kaartvormige armen geven de agent het volledige ship-recept, en een gemeten agent voerde dat ook uit: hij pushte zijn golden-task-bewerking naar `origin/master` (teruggedraaid in `2e0eb256`). De runs draaien daarom in een `git archive`-export zonder `.git`, zonder remote en buiten de repo. Wie deze meting herhaalt, doet dat met `injector-compare`; de losse subcommando's `card-baseline`/`card-injector` gebruiken dezelfde sandbox.
 
 **Lane-type-conclusie** (kaart-accepatiecriterium "minstens één lane waar beknopte output gewenst is én één waar het artefact zelf de deliverable is"):
 
 | Lane-type | Voorbeeld | Verwacht effect | Conclusie |
 |---|---|---|---|
-| Research-/sweep | `[research] Weekly market-research sweep` | Output-reductie ~36% op de 2026-08-09-verbatim-meting (N=2 baseline, N=2 injector). De upstream Caveman-§"Auto-Clarity" carve-out houdt security/irreversible-warning-zinnen buiten compressie, dus kritieke ontdekkingen blijven staan. | **Geschikt.** Default-uit blijft; operators zetten hem aan per-lane. |
-| Analysis-leaf | `analysis` work_type met `analyst_agent_id=None` (de leaf design-deliverable — het analysedoc IS de deliverable) | De Ponytail-§"Boundaries" carve-out zegt "Ponytail governs what you build, not how you talk" — gevolg: code wordt korter maar analysedoc-prose blijft. De Caveman-§"Boundaries" carve-out zegt expliciet "Persisted outside chat: write normal prose — code, comments, commits, docs, issue/PR/MR text, memory files". Beide carve-outs zijn verbatim opgenomen in de attributie-header. **Verwachting (ongemeten):** een agent die een analysedoc schrijft terwijl de slice aan staat, heeft Caveman's "Persisted outside chat: write normal prose" expliciet in zijn preamble staan, maar bij output-discipline-zwakke modellen zou de slice alsnog in analysedoc-prose kunnen doorwerken. | **Niet geschikt voor deze lane uit voorzorg.** Default-uit blijft; operators die hem aanzetten op analysis-leaf krijgen het als bekende regressie. Een echte kwaliteitsmeting op deze lane is een eigen follow-up (zie onder). |
+| Research-/sweep | `[research] Weekly market-research sweep` | De 2026-08-10-meting laat lagere output zien in trial 1 en licht hogere in trial 2; een besparingspercentage draagt zij niet. Wat zij wél laat zien: de taak wordt in beide armen goed afgerond en de prompt-cache blijft werken. De upstream Caveman-§"Auto-Clarity" carve-out houdt security- en irreversible-warning-zinnen buiten compressie, dus kritieke ontdekkingen blijven staan. | **Geschikt**, op grond van gelijke taakkwaliteit en een werkende cache — niet op grond van een gemeten besparing. Default-uit blijft; operators zetten hem aan per lane. |
+| Analysis-leaf | `analysis` work_type met `analyst_agent_id=None` (de leaf design-deliverable — het analysedoc IS de deliverable) | De Ponytail-§"Boundaries" carve-out zegt "Ponytail governs what you build, not how you talk", en de Caveman-§"Boundaries" carve-out zegt expliciet "Persisted outside chat: write normal prose — code, comments, commits, docs, issue/PR/MR text, memory files". Beide carve-outs staan verbatim in de attributie-header. **Verwachting (ongemeten):** een agent die een analysedoc schrijft heeft die regel expliciet in zijn preamble staan, maar bij modellen met zwakke output-discipline zou de slice alsnog in analysedoc-proza kunnen doorwerken. | **Niet geschikt voor deze lane uit voorzorg.** Default-uit blijft; wie hem hier aanzet, krijgt het als bekende regressie. Een echte kwaliteitsmeting op deze lane is een eigen vervolgkaart (zie onder). |
 
-N=2 is een small sample; de richting (output-reductie ~36%, cache_read −5%) is eenduidig. Het analysis-leaf-risico hierboven is een **verwachting**, geen waarneming — een echte meting op een analysis-leaf-lane (bijvoorbeeld `analysis`-kaart met de slice aan en een gemeten doc-kwaliteitsscore) hoort in een eigen vervolgkaart en is geen onderdeel van deze ship.
+N=2 is een kleine steekproef. De richting van de tokencijfers is met deze steekproef niet vast te stellen — zie de trial-vergelijking hierboven. Het analysis-leaf-risico is een **verwachting**, geen waarneming; een echte meting op die lane hoort in een eigen vervolgkaart en zat niet in deze ship.
 
 ## Wat dit NIET verandert
 
@@ -76,8 +82,9 @@ N=2 is een small sample; de richting (output-reductie ~36%, cache_read −5%) is
 
 ## Vervolgkaarten
 
-- **Analyse-leaf kwaliteitsmeting** — `5934b954…` sloot de verbatim-slice-meting op een executor-lane; de analysis-leaf-claim in dit doc blijft een **verwachting**, geen waarneming. Een vervolgkaart die een echte `analysis`-kaart met de slice aan door de leaf-deliverable-pijplijn haalt (spec → plan → doc) en de doc-kwaliteit meet, hoort in Backlog zodra er een analysis-leaf-kaart in scope is.
-- **RTK-werk** — `token-saver-mechanismen-decision.md` §8 (kaart `c31333bf…`) draagt de proxy-cijfers uit 2026-07-25/08-05 voor zijn eigen RTK-context; die cijfers zijn niet wat dit doc als `cache_read` rapporteert.
+- **Tokenbesparing met genoeg runs meten** — kaart `54997750…`. De 2026-08-10-meting draagt geen besparingspercentage: bij N=2 is de spreiding tussen runs groter dan het verschil tussen de armen, doordat `cache_read` en `output` meeschalen met het aantal beurten. Die kaart draait `injector-compare` vijf keer per arm en rapporteert ook de spreiding. Het harnas is er klaar voor; het kost alleen runtijd.
+- **Analyse-leaf kwaliteitsmeting** — `5934b954…` sloot de meting op een executor-lane. De analysis-leaf-claim in dit doc blijft een **verwachting**. Een vervolgkaart die een echte `analysis`-kaart met de slice aan door de leaf-deliverable-pijplijn haalt en de dockwaliteit beoordeelt, hoort in Backlog zodra er zo'n kaart in scope is.
+- **RTK-werk** — `token-saver-mechanismen-decision.md` §8 (kaart `c31333bf…`) draagt de proxycijfers uit 2026-07-25 en 2026-08-05 voor zijn eigen RTK-context. Die cijfers zijn niet wat dit doc als `cache_read` rapporteert.
 
 ## Drift-val
 

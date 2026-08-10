@@ -73,48 +73,68 @@ EOF
 check "diff-line dedup collapses two identical + lines to one" \
     '[ "$(grep -c "^+foo$" "$TMP/diff.out.txt")" -eq 1 ]'
 
-# --- apply_injector (verbatim slice) ------------------------------------
-# These checks need the production backend on sys.path; the production
-# helper does `sys.path.insert(0, "backend")` from the cwd of the caller.
-# `prompt_injectors.py` itself imports `app.kanban.models`, so we run from
-# the real worktree root where `backend/` is a complete package — using a
-# partial fixture would fail the secondary import for the wrong reason.
-REPO_ROOT_FOR_TESTS="$(cd "$(dirname "$LIB")/.." 2>/dev/null && pwd)"
-[ -d "$REPO_ROOT_FOR_TESTS/backend/app/kanban" ] || REPO_ROOT_FOR_TESTS="/home/vdvgu/claude-cockpit/.claude/worktrees/k-feature-promp-19cc"
+# --- render_card_prompt (production build_card_prompt) -------------------
+# These checks drive the production assembler, so they need the real
+# backend/ package importable. Derive the repo root from the lib's own path:
+# $LIB is <repo>/scripts/lib/measure_token_saver_lib.sh, so dirname is
+# <repo>/scripts/lib and ../.. is <repo>. An earlier revision used `/..`
+# (one level short), which made the guard below fail in EVERY checkout and
+# silently fell through to a hardcoded worktree path that only existed in
+# the authoring session — 7 checks passed there and failed everywhere else.
+# No fallback now: an unresolvable root must fail loudly.
+REPO_ROOT_FOR_TESTS="$(cd "$(dirname "$LIB")/../.." 2>/dev/null && pwd)"
+check "test repo root resolves to a real checkout (no hardcoded fallback)" \
+    '[ -n "$REPO_ROOT_FOR_TESTS" ] && [ -d "$REPO_ROOT_FOR_TESTS/backend/app/kanban" ]'
 
 cat > "$TMP/inject_in.txt" <<'EOF'
 the user prompt body sits here
 EOF
 
-# Run apply_injector twice from a CWD where backend/ is importable.
-INJ_HASH1=$( ( cd "$REPO_ROOT_FOR_TESTS" && source "$LIB" && apply_injector "$TMP/inject_in.txt" "$TMP/inj_out1.txt" && sha256sum "$TMP/inj_out1.txt" | awk '{print $1}' ) || echo "INJ_FAIL" )
-INJ_HASH2=$( ( cd "$REPO_ROOT_FOR_TESTS" && source "$LIB" && apply_injector "$TMP/inject_in.txt" "$TMP/inj_out2.txt" && sha256sum "$TMP/inj_out2.txt" | awk '{print $1}' ) || echo "INJ_FAIL" )
+INJ_HASH1=$( ( cd "$REPO_ROOT_FOR_TESTS" && source "$LIB" && render_card_prompt "$TMP/inject_in.txt" "$TMP/inj_out1.txt" 1 && sha256sum "$TMP/inj_out1.txt" | awk '{print $1}' ) || echo "INJ_FAIL" )
+INJ_HASH2=$( ( cd "$REPO_ROOT_FOR_TESTS" && source "$LIB" && render_card_prompt "$TMP/inject_in.txt" "$TMP/inj_out2.txt" 1 && sha256sum "$TMP/inj_out2.txt" | awk '{print $1}' ) || echo "INJ_FAIL" )
+( cd "$REPO_ROOT_FOR_TESTS" && source "$LIB" && render_card_prompt "$TMP/inject_in.txt" "$TMP/inj_off.txt" 0 ) || true
 
-check "apply_injector is available (lib sources cleanly)" 'source "$LIB" && type apply_injector >/dev/null 2>&1'
-check "apply_injector produces output from production constants" '[ -s "$TMP/inj_out1.txt" ]'
-check "apply_injector is byte-stable across two runs (same inputs → same SHA-256)" \
+check "render_card_prompt is available (lib sources cleanly)" 'source "$LIB" && type render_card_prompt >/dev/null 2>&1'
+check "render_card_prompt produces output from the production assembler" '[ -s "$TMP/inj_out1.txt" ]'
+check "render_card_prompt is byte-stable across two runs (same inputs → same SHA-256)" \
     '[ "$INJ_HASH1" = "$INJ_HASH2" ] && [ -n "$INJ_HASH1" ] && [ "$INJ_HASH1" != "INJ_FAIL" ]'
-check "apply_injector output starts with the verbatim Caveman attribution header" \
-    'head -1 "$TMP/inj_out1.txt" | grep -qF "github.com/JuliusBrussee/caveman"'
-check "apply_injector output contains the verbatim Ponytail attribution header" \
+check "injector arm carries the verbatim Caveman attribution header" \
+    'grep -qF "github.com/JuliusBrussee/caveman" "$TMP/inj_out1.txt"'
+check "injector arm carries the verbatim Ponytail attribution header" \
     'grep -qF "github.com/DietrichGebert/ponytail" "$TMP/inj_out1.txt"'
-check "apply_injector output brackets the user prompt with --- separators" \
-    '[ "$(grep -c "^---$" "$TMP/inj_out1.txt")" -eq 2 ]'
-check "apply_injector output preserves the original user prompt body" \
+check "injector arm preserves the original task body" \
     'grep -qF "the user prompt body sits here" "$TMP/inj_out1.txt"'
-# Size guard: the verbatim slice should be an order of magnitude larger than
-# the 110-byte proxy. CAVEMAN + PONYTAIL ≈ ~11 KB; the proxy is ~160 bytes.
-check "apply_injector output is at least 4 KB (verbatim slice, not the proxy)" \
-    '[ "$(wc -c < "$TMP/inj_out1.txt")" -gt 4096 ]'
-# Fail-closed: a cwd with no backend/ must surface as a non-zero exit +
-# stderr, never as a silent stub. Use a tmpdir with no backend on sys.path.
-EMPTY_REPO="$TMP/empty-repo"
-mkdir -p "$EMPTY_REPO"
+# Production order (dispatch.py::build_card_prompt): persona, then BOTH
+# injector slices, then the card body. The predecessor hand-assembled the
+# preamble and put Ponytail AFTER the body — a wrong prefix, and cache_read
+# is a prefix property. This assertion is what catches that regression.
+check "injector slices sit between the persona and the card body (production order)" \
+    'python3 - "$TMP/inj_out1.txt" <<PYEOF
+import sys
+t = open(sys.argv[1]).read()
+cav = t.find("Respond terse like smart caveman")
+pon = t.find("You are a lazy senior developer")
+body = t.find("the user prompt body sits here")
+sys.exit(0 if 0 <= cav < pon < body else 1)
+PYEOF'
+check "baseline arm renders the same scaffolding without either slice" \
+    '[ -s "$TMP/inj_off.txt" ] && grep -qF "the user prompt body sits here" "$TMP/inj_off.txt" \
+     && ! grep -qF "github.com/JuliusBrussee/caveman" "$TMP/inj_off.txt" \
+     && ! grep -qF "github.com/DietrichGebert/ponytail" "$TMP/inj_off.txt"'
+# Size guard: the two arms differ by the verbatim slice only (~11 KB), not
+# by the ~160-byte apply_saver proxy.
+check "injector arm exceeds the baseline arm by at least 4 KB (verbatim slice, not the proxy)" \
+    '[ "$(( $(wc -c < "$TMP/inj_out1.txt") - $(wc -c < "$TMP/inj_off.txt") ))" -gt 4096 ]'
+# Fail-closed: an unresolvable repo root must surface as a non-zero exit +
+# stderr, never as a silent stub prompt.
+FAKE_LIB_DIR="$TMP/fake-lib"
+mkdir -p "$FAKE_LIB_DIR"
+cp "$LIB" "$FAKE_LIB_DIR/measure_token_saver_lib.sh"
 empty_rc=0
-empty_err=$( ( cd "$EMPTY_REPO" && source "$LIB" && apply_injector "$TMP/inject_in.txt" "$TMP/inj_out_fail.txt" ) 2>&1 ) || empty_rc=$?
-check "apply_injector exits non-zero when backend/ is not importable" '[ "$empty_rc" -ne 0 ]'
-check "apply_injector fail-closed error mentions the missing slice" \
-    'echo "$empty_err" | grep -qE "cannot import verbatim slice"'
+empty_err=$( ( source "$FAKE_LIB_DIR/measure_token_saver_lib.sh" && render_card_prompt "$TMP/inject_in.txt" "$TMP/inj_out_fail.txt" 1 ) 2>&1 ) || empty_rc=$?
+check "render_card_prompt exits non-zero when backend/ is not reachable from the lib" '[ "$empty_rc" -ne 0 ]'
+check "render_card_prompt fail-closed error names the unresolvable repo root" \
+    'echo "$empty_err" | grep -qE "cannot resolve repo root"'
 
 # ----------------------------------------------------------------------------
 echo "Task 2: parse_usage emits four separate usage values on stdout"
@@ -288,7 +308,8 @@ fi
 prompt=$(cat)
 variant=baseline
 case "$prompt" in
-    *"github.com/JuliusBrussee/caveman"*) variant=with-injector ;;
+    *"github.com/JuliusBrussee/caveman"*) variant=card-injector ;;
+    *"Host card id: measure-golden-task"*) variant=card-baseline ;;
     *"[SAVER:CAVEMAN]"*) variant=with-saver ;;
 esac
 line=$(grep 'r.max_sessions' backend/app/kanban/dispatch.py || true)
@@ -321,69 +342,104 @@ check "second trial reverses the variant order" \
 check "compare reports both trials" \
     '[ "$(grep -c "| trial-[12]-baseline" "$TMP/compare.out")" -eq 2 ] && [ "$(grep -c "| trial-[12]-with-saver" "$TMP/compare.out")" -eq 2 ]'
 
-# --- full-compare smoke (kaart 5934b954...) -----------------------------
+# --- injector-compare smoke (kaart 5934b954…) ---------------------------
 # Same stub claude + same fake pytest; this time the harness runs the
-# four-variant, two-trial full-compare. The stub still detects the
-# variant from the prompt body, so with-injector must surface when the
-# verbatim CAVEMAN attribution lands in the prompt. The `real-saver`
-# variant depends on an RTK binary on PATH (apply_real_saver fails closed
-# without one — see docs/cockpit/token-saver-mechanismen-decision.md §8).
-# Stub a fake `rtk` so this test exercises all four variants end-to-end
-# without needing the real binary.
-cat > "$TMP/bin/rtk" <<'EOF'
-#!/usr/bin/env bash
-echo "rtk 0.43.0"
-EOF
-chmod +x "$TMP/bin/rtk"
-
-# apply_real_saver delegates to backend.app.kanban.token_saver.write_rtk_settings_into_worktree.
-# That helper depends on app.kanban.token_saver (real module); running it from
-# the test's $TMP/bin requires the same backend/ on sys.path that apply_injector
-# uses, plus the venv-relative python deps (sqlalchemy). We exercise the
-# `apply_real_saver` plumbing indirectly by stubbing the helper at the Python
-# level via PYTHONPATH override; the harness's own PYTHONPATH setup keeps the
-# real import reachable from the real worktree root, so let apply_real_saver
-# run normally and only stub the inner Python delegation when the test runs
-# from a sandboxed env without a venv. Concretely: when the test's PWD is
-# inside $TMP, the harness's own REPO_ROOT points at the real worktree, and
-# apply_real_saver's PYTHONPATH + sys.path.insert reaches the real backend
-# module. If the venv is reachable from the host python3, this is enough.
-
+# canonical two-arm, two-trial injector-compare. Both arms come out of the
+# production build_card_prompt, so the stub distinguishes them by the
+# Caveman attribution header (injector arm) versus the card scaffolding
+# alone (baseline arm). Order is counterbalanced: trial 1 baseline-first,
+# trial 2 injector-first.
 MEASURE_CLAUDE_LOG="$TMP/full-claude.log" \
 PYTEST_CMD="$TMP/bin/fake-pytest" \
 PATH="$TMP/bin:$PATH" \
-bash "$SCRIPT_DIR/measure-token-saver.sh" full-compare > "$TMP/full-compare.out" 2> "$TMP/full-compare.err"
+bash "$SCRIPT_DIR/measure-token-saver.sh" injector-compare > "$TMP/full-compare.out" 2> "$TMP/full-compare.err"
 
-# 8 Claude runs only when the real-saver install succeeds. Without a
-# reachable venv it fails closed and emits a `.missing` row instead.
-# Either is a valid smoke outcome; both must produce the with-injector
-# rows (which is what the kaart cares about).
 CLAUDE_RUNS="$(wc -l < "$TMP/full-claude.log")"
-MISSING_REASON="$(ls "$TMP/full-compare.err" 2>/dev/null || true)"
-check "full-compare invokes 6 (real-saver fails closed) or 8 (real-saver installed) Claude runs" \
-    '[ "$CLAUDE_RUNS" -eq 6 ] || [ "$CLAUDE_RUNS" -eq 8 ]'
-check "full-compare trial 1 starts with baseline" \
-    '[ "$(sed -n 1p "$TMP/full-claude.log" | cut -d"|" -f2)" = baseline ]'
-check "full-compare trial 1 second is with-saver" \
-    '[ "$(sed -n 2p "$TMP/full-claude.log" | cut -d"|" -f2)" = with-saver ]'
-check "full-compare trial 1 third is with-injector" \
-    '[ "$(sed -n 3p "$TMP/full-claude.log" | cut -d"|" -f2)" = with-injector ]'
-check "full-compare emits both with-injector rows in the table" \
-    '[ "$(grep -c "| trial-[12]-with-injector " "$TMP/full-compare.out")" -eq 2 ]'
+check "injector-compare invokes exactly four Claude runs (2 arms × 2 trials)" \
+    '[ "$CLAUDE_RUNS" -eq 4 ]'
+check "injector-compare trial 1 starts with card-baseline" \
+    '[ "$(sed -n 1p "$TMP/full-claude.log" | cut -d"|" -f2)" = card-baseline ]'
+check "injector-compare trial 1 second is card-injector" \
+    '[ "$(sed -n 2p "$TMP/full-claude.log" | cut -d"|" -f2)" = card-injector ]'
+check "injector-compare trial 2 reverses the arm order" \
+    '[ "$(sed -n 3p "$TMP/full-claude.log" | cut -d"|" -f2)" = card-injector ] && [ "$(sed -n 4p "$TMP/full-claude.log" | cut -d"|" -f2)" = card-baseline ]'
+check "injector-compare emits both arms for both trials in the table" \
+    '[ "$(grep -c "| trial-[12]-card-injector " "$TMP/full-compare.out")" -eq 2 ] && [ "$(grep -c "| trial-[12]-card-baseline " "$TMP/full-compare.out")" -eq 2 ]'
+check "injector-compare emits a delta row per trial" \
+    '[ "$(grep -c "| trial-[12]-delta " "$TMP/full-compare.out")" -eq 2 ]'
 
-# --- single-trial with-injector smoke -----------------------------------
+# --- single-trial card-injector smoke -----------------------------------
 MEASURE_CLAUDE_LOG="$TMP/injector-only.log" \
 PYTEST_CMD="$TMP/bin/fake-pytest" \
 PATH="$TMP/bin:$PATH" \
-bash "$SCRIPT_DIR/measure-token-saver.sh" with-injector > "$TMP/injector-only.out" 2> "$TMP/injector-only.err"
+bash "$SCRIPT_DIR/measure-token-saver.sh" card-injector > "$TMP/injector-only.out" 2> "$TMP/injector-only.err"
 
-check "with-injector subcommand invokes exactly one Claude run" \
+check "card-injector subcommand invokes exactly one Claude run" \
     '[ "$(wc -l < "$TMP/injector-only.log")" -eq 1 ]'
-check "with-injector single run is detected as the verbatim-slice variant" \
-    '[ "$(sed -n 1p "$TMP/injector-only.log" | cut -d"|" -f2)" = with-injector ]'
-check "with-injector output table contains the trial-1-with-injector row" \
-    'grep -q "| trial-1-with-injector " "$TMP/injector-only.out"'
+check "card-injector single run is detected as the verbatim-slice variant" \
+    '[ "$(sed -n 1p "$TMP/injector-only.log" | cut -d"|" -f2)" = card-injector ]'
+check "card-injector output table contains the trial-1-card-injector row" \
+    'grep -q "| trial-1-card-injector " "$TMP/injector-only.out"'
 
 # ----------------------------------------------------------------------------
+# --- a timed-out run is reported as no-measurement -----------------------
+# A run killed by `timeout` stops its token counters wherever the kill
+# landed. Publishing those next to a run that finished on its own compares a
+# partial transcript with a complete one — which is how the first
+# injector-compare attempt nearly produced a table where the baseline arm had
+# run to completion in 78s and the injector arm had been killed at 300s.
+# The harness must withhold usage AND score for such a run and say why.
+cat > "$TMP/bin/claude-slow" <<'EOF'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = "--version" ]; then echo "claude-stub 0"; exit 0; fi
+cat > /dev/null
+sleep 30
+EOF
+chmod +x "$TMP/bin/claude-slow"
+mkdir -p "$TMP/bin-slow"
+cp "$TMP/bin/claude-slow" "$TMP/bin-slow/claude"
+cp "$TMP/bin/fake-pytest" "$TMP/bin-slow/fake-pytest"
+TIMEOUT_DIR="$TMP/timeout-run"
+MEASURE_RESULT_DIR="$TIMEOUT_DIR" \
+MEASURE_TIMEOUT_S=1 \
+MEASURE_CLAUDE_LOG="$TMP/timeout.log" \
+PYTEST_CMD="$TMP/bin/fake-pytest" \
+PATH="$TMP/bin-slow:$PATH" \
+bash "$SCRIPT_DIR/measure-token-saver.sh" card-baseline > "$TMP/timeout.out" 2> "$TMP/timeout.err"
+
+check "timed-out run records exit code 124" \
+    '[ "$(cat "$TIMEOUT_DIR/trial-1-card-baseline.exit" 2>/dev/null)" = 124 ]'
+check "timed-out run writes no usage file (numbers withheld)" \
+    '[ ! -s "$TIMEOUT_DIR/trial-1-card-baseline.usage" ]'
+check "timed-out run writes no score file (quality withheld)" \
+    '[ ! -s "$TIMEOUT_DIR/trial-1-card-baseline.score" ]'
+check "timed-out run explains itself in a .missing marker" \
+    'grep -q "hit the 1s timeout" "$TIMEOUT_DIR/trial-1-card-baseline.missing"'
+check "timed-out row renders as ? instead of a plausible data point" \
+    'grep -qE "\| trial-1-card-baseline .*\|[[:space:]]+\?[[:space:]]+\|" "$TMP/timeout.out"'
+check "timed-out row prints the reason under the table row" \
+    'grep -q "(reason)" "$TMP/timeout.out"'
+
+# --- card-shaped runs are sandboxed, not worktree'd ----------------------
+# A card-shaped prompt carries the real ship recipe. One measured agent
+# followed it to `git push origin HEAD:master` on the shared repo, so these
+# runs must execute in a tree with no .git, no remote, and no reachable
+# parent repository. Env-level transport blocking (GIT_SSH_COMMAND) was tried
+# and did not hold — assert the structural property instead.
+SANDBOX_TEST="$HOME/.cache/cockpit-measure-sandbox/harness-selftest-$$"
+( source "$LIB" && cleanup_prompt_sandbox "$SANDBOX_TEST" ) 2>/dev/null || true
+sandbox_rc=0
+( source "$LIB" && make_prompt_sandbox "$SCRIPT_DIR/.." HEAD "$SANDBOX_TEST" ) || sandbox_rc=$?
+check "make_prompt_sandbox exports the tree" \
+    '[ "$sandbox_rc" -eq 0 ] && [ -f "$SANDBOX_TEST/backend/app/kanban/dispatch.py" ]'
+check "sandbox contains no .git entry" '[ ! -e "$SANDBOX_TEST/.git" ]'
+check "sandbox has no reachable git repository (nothing to push to)" \
+    '! ( cd "$SANDBOX_TEST" && git rev-parse --show-toplevel >/dev/null 2>&1 )'
+check "cleanup_prompt_sandbox refuses a path outside \$HOME/.cache" \
+    '! ( source "$LIB" && cleanup_prompt_sandbox "$TMP/not-a-sandbox" ) 2>/dev/null'
+check "cleanup_prompt_sandbox removes its own sandbox" \
+    '( source "$LIB" && cleanup_prompt_sandbox "$SANDBOX_TEST" ) && [ ! -d "$SANDBOX_TEST" ]'
+
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
