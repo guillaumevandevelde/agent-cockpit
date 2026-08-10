@@ -33,9 +33,9 @@ Voordat je het weekbestand opent, controleer of het al bestaat en of het de huid
 1. Bepaal `target_file = docs/cockpit/po-digest/YYYY-Www.md` met `YYYY-Www` de ISO-week van `until`.
 2. Lees `docs/cockpit/po-digest/README.md` en tel het aantal keer dat `YYYY-Www` voorkomt in een indexregel; hetzelfde bestand kan niet twee keer geïndexeerd staan.
 3. Bestaat `target_file`?
-   - **Ja — lees de frontmatter.** Als de bestaande `since`/`until` dezelfde ISO-week dekken als `window.since`/`window.until` van deze run, dan is dit een dubbele aanroep van dezelfde cron-beurt (boot-inhaal, retry, handmatige replay). **Schrijf het bestand niet over.** Post een korte comment op de host-kaart (`<kaart-id>` is `metadata.source_card_id` of de trigger-context) met:
+   - **Ja — lees de frontmatter.** Als de bestaande `since`/`until` dezelfde ISO-week dekken als `window.since`/`window.until` van deze run, dan is dit een dubbele aanroep van dezelfde cron-beurt (boot-inhaal, retry, handmatige replay). **Schrijf het bestand niet over.** Post een korte comment op de host-kaart (het eigen kaart-id staat in de dispatch-prompt; trigger-context staat in `metadata.trigger_id`/`metadata.occurrence`) met:
      > `Botsing: docs/cockpit/po-digest/<YYYY-Www>.md dekt deze beurt al (since=<…>, until=<…>). Trigger id=2 heeft last_fired_at=<…>; sessie stopt zonder schrijven.`
-     Verplaats de kaart naar `Done` met dezelfde botsing als `summary` en beëindig de sessie. Wrijf de indexregel of de commit niet aan.
+     Verplaats de kaart naar `Done` met `outcome='no_action_needed'` (botsing, niets geschreven) en dezelfde botsing als `summary`. Wrijf de indexregel of de commit niet aan.
    - **Ja — andere week.** Dan zit er een gat in de reeks. Noteer dat in de kaart-comment maar ga door met schrijven: deze run is een inhaal van een eerder overgeslagen week.
    - **Nee.** Ga door met schrijven zoals hieronder beschreven.
 
@@ -114,7 +114,12 @@ Commit en push het weekbestand en de indexregel. Het weekbestand is canoniek; ee
 
 ## Step 5 — gebruik de Done-summary als notificatie
 
-Verplaats de host-trigger pas naar Done nadat commit en push geslaagd zijn. De `summary` bevat vier regels (één per sectie) en daarna het canonieke pad:
+Verplaats de host-trigger pas naar Done nadat commit en push geslaagd zijn. Kies `outcome` op basis van wat de run opleverde:
+
+- `outcome='filed_standalone'` als de run ≥1 standalone Backlog-kaarten filede — zet hun ids in `metadata.filed_card_ids` vóór de move.
+- `outcome='no_action_needed'` als de run niets filede — het weekbestand zelf is dan het enige deliverable.
+
+De `summary` bevat vier regels (één per sectie) en daarna het canonieke pad:
 
 1. één korte regel over opgeleverd;
 2. één korte regel over beslissingen;
