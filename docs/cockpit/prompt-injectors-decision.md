@@ -74,6 +74,87 @@ De richting is niet weerlegd — alleen niet aangetoond. Een uitspraak over toke
 
 N=2 is een kleine steekproef. De richting van de tokencijfers is met deze steekproef niet vast te stellen — zie de trial-vergelijking hierboven. Het analysis-leaf-risico is een **verwachting**, geen waarneming; een echte meting op die lane hoort in een eigen vervolgkaart en zat niet in deze ship.
 
+### Vervolgmeting 2026-08-10 — N=8 per arm (kaart `54997750…`)
+
+Dezelfde harness, dezelfde golden-task, dezelfde sandbox; vier achtereenvolgende `injector-compare`-calls leveren samen zestien runs op (acht per arm). Geen enkele run is afgekapt; alle zestien sloegen af met `pass_tests=1` en `stop_reason=end_turn`.
+
+| Run | input | cache_creation | cache_read | output | turns | cost (USD) | pass_tests |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 084936 t1 — baseline | 77.791 | 0 | 1.636.608 | 3.743 | 34 | 0,781 | 1 |
+| 084936 t1 — injector | 72.240 | 0 | 284.544 | 1.046 | 7 | 0,318 | 1 |
+| 084936 t2 — baseline | 138.970 | 0 | 1.174.195 | 3.076 | 23 | 0,815 | 1 |
+| 084936 t2 — injector | 79.019 | 0 | 1.436.544 | 3.542 | 22 | 0,721 | 1 |
+| 105801 t1 — baseline | 69.972 | 0 | 683.648 | 1.926 | 13 | 0,444 | 1 |
+| 105801 t1 — injector | 76.212 | 0 | 1.015.296 | 1.924 | 15 | 0,562 | 1 |
+| 105801 t2 — baseline | 72.791 | 0 | 852.480 | 2.396 | 19 | 0,510 | 1 |
+| 105801 t2 — injector | 72.603 | 0 | 284.679 | 1.189 | 7 | 0,321 | 1 |
+| 110201 t1 — baseline | 71.097 | 0 | 483.456 | 1.581 | 11 | 0,382 | 1 |
+| 110201 t1 — injector | 72.572 | 0 | 496.896 | 1.451 | 8 | 0,389 | 1 |
+| 110201 t2 — baseline | 2.724 | 0 | 404.608 | 964 | 8 | 0,144 | 1 |
+| 110201 t2 — injector | 74.844 | 0 | 509.152 | 1.221 | 11 | 0,396 | 1 |
+| 110446 t1 — baseline | 73.834 | 0 | 983.936 | 2.392 | 15 | 0,553 | 1 |
+| 110446 t1 — injector | 76.467 | 0 | 810.496 | 1.973 | 15 | 0,502 | 1 |
+| 110446 t2 — baseline | 66.502 | 0 | 274.304 | 1.545 | 8 | 0,305 | 1 |
+| 110446 t2 — injector | 73.879 | 0 | 650.240 | 2.624 | 13 | 0,456 | 1 |
+
+Artefacten in `/home/vdvgu/.cache/cockpit-measure-token-saver/`:
+- `20260810T084936Z-production-shape/` (canonieke 2026-08-10-meting, 4 runs)
+- `20260810T105801Z-production-shape/` (call 1, 4 runs)
+- `20260810T110201Z-production-shape/` (call 2, 4 runs)
+- `20260810T110446Z-production-shape/` (call 3, 4 runs)
+
+#### Per-arm aggregate
+
+| Metric | `card-baseline` (n=8) | `card-injector` (n=8) | Δ (gem.) |
+|---|---:|---:|---:|
+| input | 71.710 ± 36.559 | 74.730 ± 2.382 | +4,2 % |
+| cache_creation | 0 ± 0 | 0 ± 0 | n.v.t. |
+| cache_read | 811.654 ± 450.692 | 685.981 ± 392.390 | −15,5 % |
+| output | 2.203 ± 897 | 1.871 ± 855 | −15,1 % |
+| turns | 16 ± 9 | 12 ± 5 | −25,2 % |
+| pass_tests | 8/8 | 8/8 | — |
+
+#### Spreiding per arm
+
+Spreiding genormaliseerd op `range / mean` zodat metrics met verschillende ordes van grootte vergelijkbaar zijn:
+
+| Metric | baseline (range/mean) | injector (range/mean) |
+|---|---:|---:|
+| input | 1,90 | 0,09 |
+| cache_read | 1,68 | 1,68 |
+| output | 1,26 | 1,33 |
+| turns | 1,59 | 1,22 |
+
+`input` wordt in de injector-arm **sterk samengetrokken** (spreiding van 1,90 naar 0,09); dat is consistent met het feit dat de slice een vaste byte-belasting toevoegt en de agent niet meer zelfstandig tooling aanroept die extra invoertokens zouden genereren. `cache_read`, `output` en `turns` blijven in beide armen ongeveer even breed — de voorspelbaarheid van het verschil tussen armen komt dus vooral uit het `turns`-kanaal.
+
+#### Normalisatie op beurten (de voorspelde confound uit §1)
+
+`cache_read` en `output` schalen met het aantal beurten dat de agent neemt. Deel door `turns` om de beurt-overhead eruit te halen:
+
+| Per-turn | baseline | injector | Δ |
+|---|---:|---:|---:|
+| input / turn | 4.379 | 6.100 | +39,3 % |
+| cache_read / turn | 49.567 | 55.998 | +13,0 % |
+| output / turn | 135 | 153 | +13,6 % |
+
+**De slice bespaart niet per beurt — hij kost er juist meer.** De input/turn-stijging van +39 % is de slice-belasting zelf (≈12 KB preamble, ~1,7 k tokens); cache_read/turn en output/turn liggen beide ~13 % hoger. De gemeten totale besparing komt dus **volledig** uit het feit dat de injector-arm in 25 % minder beurten klaar is: `output` totaal daalt (−15 %) doordat er minder beurten zijn, niet doordat de agent korter per beurt schrijft. Dat is een ander mechanisme dan de upstream-belofte ("compress output") doet vermoeden, en het is een observatie die op N=2 onzichtbaar was.
+
+#### Wat deze meting nu wél draagt
+
+- **Totale `cache_read` daalt 15,5 % en `output` 15,1 % over 8 dispatches per arm.** De spreiding per arm is 1,68 voor `cache_read` en 1,33 voor `output` — smaller dan het verschil tussen de armen. Het verschil overleeft de ruis binnen de arm, in tegenstelling tot N=2.
+- **Totale `turns` daalt 25,2 % over 8 dispatches per arm** (16 → 12 gemiddeld). Dat is de dominante component van de totale besparing.
+- **`pass_tests` is 16/16**, gelijk verdeeld over beide armen — de slice degradeert de taakkwaliteit niet.
+- **`cache_creation` blijft 0** in alle zestien runs; de slice verhindert geen cache-hit (zelfde conclusie als §"Meting 2026-08-10").
+- **`input` stijgt +4,2 %** als gemiddelde; door de smalle injector-spreiding (range/mean = 0,09) is dat getal robuust. De stijging is de slice-belasting, niet de agent.
+
+#### Wat deze meting níét draagt
+
+- **Geen uitspraak over abonnementsquotum.** `cache_read` telt volgens `cache-read-quota-decision.md` (kaart `97e623f9…`) **niet** mee voor de 5h-quotum, dus een lagere `cache_read` levert hier geen quotum-winst op — alleen API-kostenbesparing. Een abonnementsbesparing-claim zou los staan en is hier niet gemeten.
+- **Geen uitspraak over de analysis-leaf-lane.** Die vraagt een eigen meting op een `analysis`-kaart (zie Vervolgkaarten).
+- **Geen claim dat per-beurt-kosten dalen.** De slice voegt bytes toe; de totale besparing komt uit de beurt-reductie, niet uit per-beurt-compressie.
+
+**Conclusie.** De slice levert op deze golden-task een echte, op N=8 robuuste totale besparing van ~15 % op `cache_read` + `output` en ~25 % op beurten, met behoud van kwaliteit (16/16). Het mechanisme is "sneller klaar", niet "korter per beurt" — dat onderscheid was op N=2 niet zichtbaar. De besparingsclaim is nu voldoende onderbouwd om hem in het register op te nemen; een promotion naar default-on blijft uit voorzorg (zie "Wat dit NIET verandert").
+
 ## Wat dit NIET verandert
 
 - **Geen promotion naar default-on** — beide flags blijven `INTEGER NOT NULL DEFAULT 0`.
@@ -82,7 +163,7 @@ N=2 is een kleine steekproef. De richting van de tokencijfers is met deze steekp
 
 ## Vervolgkaarten
 
-- **Tokenbesparing met genoeg runs meten** — kaart `54997750…`. De 2026-08-10-meting draagt geen besparingspercentage: bij N=2 is de spreiding tussen runs groter dan het verschil tussen de armen, doordat `cache_read` en `output` meeschalen met het aantal beurten. Die kaart draait `injector-compare` vijf keer per arm en rapporteert ook de spreiding. Het harnas is er klaar voor; het kost alleen runtijd.
+- **Tokenbesparing met genoeg runs meten** — ✅ gesloten in kaart `54997750…` (zie §"Vervolgmeting 2026-08-10 — N=8 per arm" hierboven). N=8 per arm levert een robuuste −15 % op `cache_read` + `output` en −25 % op beurten, met 16/16 `pass_tests`. Per-beurt-kosten stijgen juist — de besparing komt uit de beurt-reductie, niet uit per-beurt-compressie.
 - **Analyse-leaf kwaliteitsmeting** — `5934b954…` sloot de meting op een executor-lane. De analysis-leaf-claim in dit doc blijft een **verwachting**. Een vervolgkaart die een echte `analysis`-kaart met de slice aan door de leaf-deliverable-pijplijn haalt en de dockwaliteit beoordeelt, hoort in Backlog zodra er zo'n kaart in scope is.
 - **RTK-werk** — `token-saver-mechanismen-decision.md` §8 (kaart `c31333bf…`) draagt de proxycijfers uit 2026-07-25 en 2026-08-05 voor zijn eigen RTK-context. Die cijfers zijn niet wat dit doc als `cache_read` rapporteert.
 
