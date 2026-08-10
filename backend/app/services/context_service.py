@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 # Model context window limits (input tokens). Keys are normalized
 # substrings — `_normalize_model` strips dated suffixes before lookup.
 MODEL_CONTEXT_LIMITS: dict[str, int] = {
-    # Claude 5.x
+    # Claude 5.x — keep keys longer than any 4.x catch-all so longest-match wins
+    # (see `get_context_limit` below: claude-opus-5 must outrank claude-opus-4).
+    "claude-opus-5": 1_000_000,
     "claude-sonnet-5": 1_000_000,
     # Claude 4.7 — 1M window
     "claude-opus-4-7": 1_000_000,

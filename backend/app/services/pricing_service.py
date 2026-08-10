@@ -12,7 +12,7 @@ class PricingService:
     """Service for model pricing and cost calculation."""
 
     # Bump when MODEL_PRICING changes so cached usage aggregates are recalculated.
-    PRICING_VERSION = "2026-06-20"
+    PRICING_VERSION = "2026-07-25"
 
     # Default token threshold for tiered pricing (200k tokens)
     TIERED_THRESHOLD = 200_000
@@ -20,6 +20,14 @@ class PricingService:
     # Model pricing data (costs per token)
     # Based on LiteLLM pricing data
     MODEL_PRICING = {
+        # Claude Opus 5 (July 2026, CC 2.1.219 default Opus — 1M context, fast mode)
+        # Source: https://code.claude.com/docs/en/changelog (entry 2.1.219)
+        "claude-opus-5": {
+            "input": 10.00 / 1_000_000,
+            "output": 50.00 / 1_000_000,
+            "cache_creation": 12.50 / 1_000_000,
+            "cache_read": 1.00 / 1_000_000,
+        },
         # Claude Sonnet 5 (June 2026)
         "claude-sonnet-5": {
             "input": 3.00 / 1_000_000,

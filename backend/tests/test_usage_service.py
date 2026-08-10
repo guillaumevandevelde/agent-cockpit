@@ -102,6 +102,33 @@ class TestPricingService:
         # Total: 0.0105
         assert cost == pytest.approx(0.0105, rel=1e-3)
 
+    def test_calculate_cost_claude_opus_5(self):
+        """CC 2.1.219 makes claude-opus-5 the new default Opus at $10/$50 per Mtok."""
+        cost = self.pricing.calculate_cost(
+            input_tokens=1000,
+            output_tokens=500,
+            cache_creation_tokens=200,
+            cache_read_tokens=1000,
+            model="claude-opus-5",
+        )
+        # Input:        1000 * 10e-6  = 0.010
+        # Output:        500 * 50e-6  = 0.025
+        # Cache creation: 200 * 12.5e-6 = 0.0025
+        # Cache read:   1000 *  1e-6   = 0.001
+        # Total:                          0.0385
+        assert cost == pytest.approx(0.0385, rel=1e-3)
+
+    def test_claude_opus_5_date_suffix_resolves_pricing(self):
+        """The post-launch date-suffix variant must normalize to the same entry."""
+        pricing = self.pricing.get_model_pricing("claude-opus-5-20260724")
+        assert pricing is not None
+        assert pricing["input"] == pytest.approx(10.00 / 1_000_000)
+        assert pricing["output"] == pytest.approx(50.00 / 1_000_000)
+
+    def test_claude_opus_5_supported_models_list(self):
+        """claude-opus-5 must appear in get_supported_models() output."""
+        assert "claude-opus-5" in self.pricing.get_supported_models()
+
     def test_current_claude_code_alias_pricing(self):
         """Test current Claude Code model aliases have non-zero pricing."""
         sonnet_cost = self.pricing.calculate_cost(
