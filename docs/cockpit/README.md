@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 125 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 126 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -97,7 +97,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [`docs/cockpit/` — de canonieke spec-boom (index)](./README.md) | 🟢 active |
 | [Beslis-register — alle genomen productbeslissingen (index)](./decisions.md) | 🟢 active |
 
-### Reference (28)
+### Reference (29)
 
 | Document | Status |
 |---|---|
@@ -110,6 +110,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [CITemplateService — drie GitHub-Actions-templates voor pasgeboren projecten](./ci-templates.md) | 🟢 active |
 | [Cockpit capability-baseline](./cockpit-capability-baseline.md) | 🟢 active |
 | [Fase 1 — Validatiechecklist (werkt claude-deck onder WSL?)](./fase-1-validation.md) | 🟢 active |
+| [git stash in gedeelde worktrees — waarom niet, en wat wel](./git-stash-safety.md) | 🟢 active |
 | [Isolated component preview (light + dark screenshot)](./isolated-component-preview.md) | 🟢 active |
 | [Kanban-DB conventions](./kanban-conventions.md) | 🟢 active |
 | [Kanban — known follow-ups (post-v1)](./kanban-followups.md) | 🟢 active |
