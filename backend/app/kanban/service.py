@@ -1191,7 +1191,21 @@ async def close_parent_if_all_children_done(session, parent_id: str) -> bool:
     Only closes a parent that is actually parked — a parent still in an
     agent column (analysis in progress) or in `Impediment` is left alone.
     Callers walk the `parent_card_id` chain to handle nested decomposition
-    (a closed parent may itself be someone's child).
+    (a closed parent may itself be someone's child); see
+    :func:`try_close_ancestors` for the chain-walking helper.
+
+    Zero-children case (kaart `400d6a77…`): a parked parent with no
+    children is closed too, because there is nothing left to wait for.
+    The previous `if not children or any(...): return False` guard held
+    the parent on Awaiting Subtasks forever once the last child was
+    deleted (the routine end-of-life sweep via `DELETE
+    /api/v1/kanban/cards/{cid}` or `POST /clear-column`). On the live
+    board, five parents accumulated 6 weeks of stranded parked time
+    before being manually closed. The close-on-zero-children decision
+    is the symmetric counterpart of :func:`orphan_children_on_delete`,
+    which already repairs the *children → parent* direction when a
+    parent is deleted; this is the *parent ← child-gone* counterpart
+    triggered after a child is deleted.
 
     The roll-up records the *gedane stappen* en *opgeleverd werk* — child
     title, first sentence of each child's `done_summary`, and that
@@ -1199,7 +1213,10 @@ async def close_parent_if_all_children_done(session, parent_id: str) -> bool:
     self-contained record of what the children produced, even after a
     Clear-Done-sweep removes the children from the board (kaart
     068845bd…; convention shape: `docs/cockpit/
-    communicatie-en-weergave-analyse.md` §2.1).
+    communicatie-en-weergave-analyse.md` §2.1). When the children
+    are *already* gone, the roll-up uses a dedicated lead that names the
+    parent and explicitly states the children were removed, so a reader
+    landing on the Done-banner does not infer there was never any work.
 
     When the parent already carries its own `**Summary:** ...` comment
     (the analyst's outcome-summary posted before the card was parked),
@@ -1220,7 +1237,10 @@ async def close_parent_if_all_children_done(session, parent_id: str) -> bool:
         .order_by(KanbanCard.created_at.asc())
     )
     children = (await session.execute(siblings_stmt)).scalars().all()
-    if not children or any(c.column != "Done" for c in children):
+    # Zero children: close the parent (the parked-and-empty case is the
+    # bug being fixed; the rationale lives in the docstring above). Any
+    # non-Done child: keep waiting.
+    if any(c.column != "Done" for c in children):
         return False
 
     parent_prior_summary, _ = await enrich_done_info(session, parent_id)
@@ -1249,12 +1269,55 @@ async def close_parent_if_all_children_done(session, parent_id: str) -> bool:
     return True
 
 
+async def try_close_ancestors(session, parent_id: str | None) -> int:
+    """Walk up the `parent_card_id` chain, calling
+    :func:`close_parent_if_all_children_done` at each level, mirroring
+    the inline walk in :mod:`app.kanban.mcp_server` for genuine Done
+    moves. Returns the number of parents that were auto-closed (0 when
+    `parent_id` is None or no auto-close fired).
+
+    Extracted so the single-card delete path and the Clear-Done path
+    share the same walk as ``mcp_server.move_card`` — nested
+    decomposition must close the mid-level parent AND its grandparent
+    in one transaction, otherwise deleting a leaf child strands a
+    mid-level parent in `Awaiting Subtasks` (kaart `400d6a77…`).
+
+    The walk is bounded by :func:`close_parent_if_all_children_done`'s
+    parked-only invariant: as soon as a parent in the chain is *not*
+    parked (or has a still-pending child), the walk stops — the
+    higher-level grandparent is left alone until the mid-level actually
+    closes.
+    """
+    if not parent_id:
+        return 0
+    closed_count = 0
+    pid: str | None = parent_id
+    while pid:
+        if not await close_parent_if_all_children_done(session, pid):
+            break
+        closed_count += 1
+        grandparent = await session.get(KanbanCard, pid)
+        pid = grandparent.parent_card_id if grandparent else None
+    return closed_count
+
+
 # Markers + helpers used by `close_parent_if_all_children_done` to build
 # the roll-up. Kept private — the roll-up shape is this function's
 # concern, not a public API.
 _AUTO_CLOSE_ROLLUP_LEAD_WITHOUT_PRIOR_SUMMARY = (
     "Alle kind-kaarten van \"{parent_title}\" zijn opgeleverd via deze "
     "auto-close.\n\n"
+)
+# Lead used when the parked parent has zero children — the only way to
+# reach this branch on the live board is the delete/Clear-Done path
+# removing the parent's last child (kaart `400d6a77…`). A parked parent
+# waiting on nothing is itself the bug; the lead is honest about that so
+# a reader landing on the Done-banner knows the children existed and
+# were actively removed, rather than inferring there was never any work.
+_AUTO_CLOSE_ROLLUP_LEAD_NO_CHILDREN = (
+    "Parent \"{parent_title}\" wordt nu gesloten: de kind-kaarten waren "
+    "al van het bord verwijderd (via delete of Clear Done). Een "
+    "geparkeerde parent zonder kinderen wacht op niets meer.\n\n"
 )
 _AUTO_CLOSE_ROLLUP_FOOTER = "\n\n_auto-closed from Awaiting Subtasks._"
 _AUTO_CLOSE_ROLLUP_FIRST_SENTENCE_MAX_CHARS = 240
@@ -1322,9 +1385,21 @@ def _build_auto_close_rollup(parent, parent_prior_summary: str | None,
         synthetic productbetekenis statement ("Alle kind-kaarten van
         X zijn opgeleverd via deze auto-close") that names the parent
         so the reader knows which decomposition closed.
+      * Zero children — the roll-up uses a dedicated lead that names
+        the parent and states the children were already removed (kaart
+        `400d6a77…`). This branch is unreachable from the regular
+        all-Done path (every parent in `Awaiting Subtasks` was
+        redirected there because it had children), so seeing it means
+        the children were actively removed via delete or Clear Done.
     """
     parent_title = (parent.title or "").strip() or "(zonder titel)"
-    if parent_prior_summary:
+    if not children:
+        # Children are gone — use the explicit no-children lead so the
+        # Done-banner says so, rather than the all-Done phrasing which
+        # would mis-claim they were "opgeleverd".
+        lead = _AUTO_CLOSE_ROLLUP_LEAD_NO_CHILDREN.format(
+            parent_title=parent_title)
+    elif parent_prior_summary:
         lead = parent_prior_summary.strip()
         if not lead.endswith((".", "!", "?")):
             lead += "."

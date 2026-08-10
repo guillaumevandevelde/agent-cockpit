@@ -10,12 +10,12 @@ import logging
 import time
 
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
 from app.kanban import dep_resolver as mcp_kanban_deps
 from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
-from app.kanban.models import KanbanCard, KanbanDeliverable
+from app.kanban.models import KanbanDeliverable
 from app.kanban.operations import (
     ClaimRejected,
     _cleanup_after_commit,
@@ -592,15 +592,12 @@ async def move_card(card_id: str, column: str,
 
         # Auto-close (§3.2): this card actually reached Done (not parked) —
         # if it's someone's child, check whether that parent can now close
-        # too, and walk up the chain for nested decomposition.
+        # too, and walk up the chain for nested decomposition. The same walk
+        # is also fired from the single-card delete + Clear Done paths (kaart
+        # `400d6a77…`) so a parked parent never strands on a child that was
+        # removed via DELETE or /clear-column instead of a genuine Done.
         if final_column == "Done" and card.parent_card_id:
-            pid = card.parent_card_id
-            while pid:
-                closed = await service.close_parent_if_all_children_done(s, pid)
-                if not closed:
-                    break
-                grandparent = await s.get(KanbanCard, pid)
-                pid = grandparent.parent_card_id if grandparent else None
+            await service.try_close_ancestors(s, card.parent_card_id)
 
         await s.commit()
         logger.info("move_card: %s → %s", card_id, final_column)
