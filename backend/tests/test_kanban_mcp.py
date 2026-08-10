@@ -599,8 +599,14 @@ async def test_move_analysis_card_to_done_decomposed_with_children_is_allowed():
     parent = (await m.create_card("P", "analyse", "",
                                    work_type="analysis", confirm_new_project=True))["id"]
     # Create a child card pointing back at the parent.
-    await m.create_card("P", "child", "",
+    child = await m.create_card("P", "child", "",
                          parent_card_id=parent, confirm_new_project=True)
+    # Bind the plan_ref via add_plan_attachment so the decomposed move
+    # passes the missing-plan_ref gate (kaart 2341a40e…); the gate's own
+    # coverage lives in the test that follows this one.
+    await m.add_plan_attachment(
+        parent, "# Plan\n\nDo the thing.", [child["id"]],
+    )
     result = await m.move_card(parent, "Done",
                                 summary="split into subtasks",
                                 outcome="decomposed")
@@ -620,6 +626,33 @@ async def test_move_analysis_card_to_done_decomposed_with_children_is_allowed():
         and "**Outcome:** decomposed — split into subtasks" in (o.payload.get("text") or "")
     ]
     assert len(outcome_comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_decomposed_without_plan_ref_is_rejected():
+    """The step-3-without-step-4 silent no-op (kaart 2341a40e…): child
+    cards created but no plan_ref attached by add_plan_attachment.
+    Refusing the parent-move is the gate that prevents the parked
+    children from ever existing in the first place."""
+    parent = (await m.create_card("P", "analyse", "",
+                                   work_type="analysis", confirm_new_project=True))["id"]
+    # Create TWO children — neither has a plan_ref, so the gate must
+    # catch all of them, not just the first one.
+    child1 = (await m.create_card("P", "child1", "",
+                                   parent_card_id=parent, confirm_new_project=True))["id"]
+    child2 = (await m.create_card("P", "child2", "",
+                                   parent_card_id=parent, confirm_new_project=True))["id"]
+    result = await m.move_card(parent, "Done",
+                                summary="split into subtasks",
+                                outcome="decomposed")
+    assert result.get("error") == "missing_plan_ref", result
+    # Both offending child ids must be named in the error message —
+    # the operator needs to know which children to bind, not just that
+    # the gate fired.
+    assert child1 in result.get("message", "")
+    assert child2 in result.get("message", "")
+    card = await m.get_card(parent)
+    assert card["column"] != "Done"
 
 
 @pytest.mark.asyncio
@@ -883,6 +916,11 @@ async def test_parent_auto_closes_when_last_child_reaches_done():
                                    parent_card_id=parent, confirm_new_project=True))["id"]
     child2 = (await m.create_card("P", "child2", "",
                                    parent_card_id=parent, confirm_new_project=True))["id"]
+    # Bind the plan_refs so the decomposed move passes the
+    # missing-plan_ref gate (kaart 2341a40e…).
+    await m.add_plan_attachment(
+        parent, "# Plan\n\nDo the thing.", [child1, child2],
+    )
     await m.move_card(parent, "Done", summary="split into subtasks", outcome="decomposed")
     assert (await m.get_card(parent))["column"] == "Awaiting Subtasks"
 
@@ -921,6 +959,9 @@ async def test_parent_stays_parked_while_one_child_impeded():
                                    parent_card_id=parent, confirm_new_project=True))["id"]
     child2 = (await m.create_card("P", "child2", "",
                                    parent_card_id=parent, confirm_new_project=True))["id"]
+    await m.add_plan_attachment(
+        parent, "# Plan\n\nDo the thing.", [child1, child2],
+    )
     await m.move_card(parent, "Done", summary="split into subtasks", outcome="decomposed")
 
     await m.move_card(child1, "Done", summary="child1 done")

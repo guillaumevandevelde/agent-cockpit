@@ -1754,6 +1754,41 @@ async def enforce_move_gate(
                         "seed `metadata.filed_card_ids` first."
                     ),
                 )
+            # Every decomposed child must carry a plan_ref — without it,
+            # ``_awaiting_plan_ref`` parks the child invisibly, and the
+            # analyst's step 3 (create children) becomes a silent no-op
+            # when step 4 (add_plan_attachment) is skipped (kaart 2341a40e…:
+            # five cards stuck for 16 days). The dispatch tick now self-
+            # heals by surfacing overdue holds, but the cleanest fix is to
+            # refuse the parent-move at the gate so the analyst never
+            # leaves the parent Done with parked children.
+            children_without_plan_ref = (await session.execute(
+                select(KanbanCard.id, KanbanCard.title)
+                .where(KanbanCard.parent_card_id == card.id)
+                .where(
+                    ~select(KanbanDeliverable.id)
+                    .where(KanbanDeliverable.card_id == KanbanCard.id)
+                    .where(KanbanDeliverable.kind == "plan_ref")
+                    .exists()
+                )
+            )).all()
+            if children_without_plan_ref:
+                bad_ids = ", ".join(
+                    f"`{cid}` ({title!r})" for cid, title in children_without_plan_ref
+                )
+                raise MoveGateRejected(
+                    "missing_plan_ref",
+                    (
+                        "`outcome='decomposed'` requires every child to "
+                        "carry a `plan_ref` deliverable (the one written "
+                        "by `add_plan_attachment`). Found child without "
+                        "one: " + bad_ids + ". Without it, the dispatcher's "
+                        "`_awaiting_plan_ref` hold parks the child "
+                        "silently and it never spawns. Run `add_plan_"
+                        "attachment(child_card_ids=[…])` first, then "
+                        "retry the move."
+                    ),
+                )
         elif cleaned_outcome == "filed_standalone":
             # ``card.meta`` is a free-form JSON bag; tolerate either a plain
             # Python list (in-process) or a stringified JSON column value
