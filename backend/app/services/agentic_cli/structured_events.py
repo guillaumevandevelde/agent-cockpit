@@ -75,6 +75,7 @@ class StructuredEventType(StrEnum):
     RATE_LIMIT = "rate_limit"
     SESSION_INIT = "session_init"
     CONTEXT_USAGE = "context_usage"
+    SUBAGENT_MESSAGE = "subagent_message"
 
 
 class MessageRole(StrEnum):
@@ -298,6 +299,42 @@ class ContextUsageCost(BaseModel):
     currency: str
 
 
+class SubagentMessageEvent(_StructuredEventBase):
+    """A text/thinking frame emitted by a spawned subagent (CC 2.1.211+).
+
+    **Opt-in via ``--forward-subagent-text`` / ``CLAUDE_CODE_FORWARD_SUBAGENT_TEXT=1``**
+    (kanban card 824e6f8d…). When the flag is set, CC's ``stream-json`` output
+    carries subagent ``text`` and ``thinking`` blocks keyed by the spawning
+    ``tool_use_id`` (the outer agent's tool invocation that spawned the
+    subagent). Without the flag, the subagent stream is silently dropped from
+    the wire — exactly the regression the cc-bridge panel needs to recover
+    from.
+
+    The variant is intentionally **ACP-super-set** (cf. ``rate_limit``):
+    ACP's ``session/update`` vocabulary has no equivalent event because ACP
+    treats subagent subprocesses as first-class agent threads with their own
+    session, not as nested messages. CC's flag is a transient wish
+    (2.1.211+), so the consumer keeps the variant isolated and a future
+    ACP-backed transport is free to leave it empty.
+
+    ``parent_tool_use_id`` is the CC field from the wire; ``kind`` mirrors
+    ``MessageRole`` for subagent text vs. thinking. ``original_size`` records
+    the full text length *before* the 4 KiB / 64 KiB trim
+    (see ``map_stream_event``); the consumer emits the truncated text plus
+    an ``original_size`` so the renderer can show a ``(…N bytes truncated…)``
+    indicator without re-fetching the original. Frames larger than 64 KiB
+    are dropped with a warning (consumer-side, not here) — the variant only
+    carries survivors.
+    """
+
+    type: Literal[StructuredEventType.SUBAGENT_MESSAGE] = StructuredEventType.SUBAGENT_MESSAGE
+    parent_tool_use_id: str
+    role: MessageRole = MessageRole.ASSISTANT
+    text: str
+    original_size: int = 0
+    truncated: bool = False
+
+
 class ContextUsageEvent(_StructuredEventBase):
     """A mid-turn context-window signal (ACP ``session/update`` →
     ``usage_update``).
@@ -337,7 +374,8 @@ StructuredEvent = Annotated[
     | ErrorEvent
     | RateLimitEvent
     | SessionInitEvent
-    | ContextUsageEvent,
+    | ContextUsageEvent
+    | SubagentMessageEvent,
     Field(discriminator="type"),
 ]
 

@@ -64,7 +64,11 @@ def test_headless_run_declared_explicitly_for_all_known_clis():
 
 # --- ACP-isomorphic event model ---------------------------------------------
 
-def test_event_type_enum_covers_the_nine_variants():
+def test_event_type_enum_covers_the_ten_variants():
+    # Ten post-CC-2.1.211: ``subagent_message`` is the opt-in subagent
+    # text/thinking event (kanban card 824e6f8d…). Pin the wire string here
+    # so a typo on the enum value surfaces at test time instead of in the
+    # schema-validation handler.
     assert {t.value for t in StructuredEventType} == {
         "message_chunk",
         "tool_call",
@@ -75,6 +79,7 @@ def test_event_type_enum_covers_the_nine_variants():
         "rate_limit",
         "session_init",
         "context_usage",
+        "subagent_message",
     }
 
 
