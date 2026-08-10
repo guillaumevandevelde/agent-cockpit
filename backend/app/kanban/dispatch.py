@@ -4786,6 +4786,308 @@ class _ProgressSnapshot:
 
 _progress_liveness_state: dict[str, _ProgressSnapshot] = {}
 
+# ---- ACP idle-liveness (kaart 2fa8d501…) -----------------------------------
+#
+# ``check_progress_liveness`` covers Claude Code sessions — their transcript
+# file's mtime is the canonical "is this session still doing anything"
+# signal. ACP/opencode sessions have **no** transcript file
+# (``supports_transcript_resolution`` is False on ``OpenCodeCli``, so the
+# transcript resolver returns None and the detector's fail-open branch
+# skips them, line ~7608). They were completely uncovered by every existing
+# liveness source: ``_live_sandcastle_sessions`` / ``_live_headless_sessions``
+# / ``_live_acp_sessions`` all answer "is the subprocess alive?", which is
+# the wrong question for an agent whose CLI is up but the agent itself is
+# hung on a subagent call that died with a defect (kaart 2fa8d501…:
+# ``prompt_async failed cause=Die(ProviderModelNotFoundError)`` left four
+# dispatched sessions silent for ~24 hours, the reaper treated the
+# subprocess as alive and never fired).
+#
+# ``check_acp_idle_liveness`` reads ``MAX(time_updated)`` from the opencode
+# SQLite store for the session matching the card's worktree. Past the
+# signal threshold it posts a "stilstaand" comment (mirroring the
+# transcript detector's behaviour). Past the action threshold it routes
+# the card to ``Impediment`` — NOT ``To Resume``, because resuming would
+# replay the conversation and hit the same pending subagent call. The
+# resume-gate (see ``OpenCodeCli.can_resume_safely``) closes the second
+# leg of the same bug class for sessions that get past the reaper via a
+# different path (boot-time recovery, manual resume, ...).
+#
+# Defaults are 45 / 60 minutes — deliberately longer than the transcript
+# detector's 30 / 60 because opencode's part-level updates are batched
+# between turns (a long bash command may show no ``time_updated`` advance
+# for a minute or two). 45 min of silence in opencode is genuinely
+# anomalous; 60 min is "operator needs to know".
+
+ACP_IDLE_LIVENESS_SIGNAL_SECONDS = 45 * 60
+ACP_IDLE_LIVENESS_ACTION_SECONDS = 60 * 60
+
+# Parallel state tracker for ACP-idle-liveness. Same shape and lifecycle as
+# ``_progress_liveness_state`` — see that block's docstring for the
+# keyed-by-card-id + in-memory-by-design rationale. Keeping it in a
+# separate dict so the two detectors can't accidentally share a stall
+# baseline (they look at different CLI stores).
+_acp_idle_state: dict[str, _ProgressSnapshot] = {}
+
+
+# Activity-comment copy for the ACP-idle case. Same Dutch-with-emoji
+# register as ``_STILLESTAAND_COMMENT_TEMPLATE``; distinct prefix so an
+# operator reading the activity feed can tell which detector flagged it.
+_ACP_IDLE_COMMENT_TEMPLATE = (
+    "⏸️ Geen opencode-activiteit voor ~{minutes} min in sessie {name} — "
+    "mogelijk stilstaand (subagent-call die geen resultaat terugkrijgt, "
+    "zie kaart 2fa8d501). Wordt rond {action_minutes} min stilstand naar "
+    "Impediment verplaatst omdat hervatten de hang zou reproduceren; "
+    "reageer in de pane als de sessie nog productief is."
+)
+
+# Comment posted when ACP-idle routes a card to Impediment. Lead with the
+# structural reason (resume would hang) and the cause class (no
+# subagent-result), so an operator reading the activity feed knows the
+# card isn't parked because of a normal limit / failure.
+_ACP_IDLE_IMPEDIMENT_COMMENT_TEMPLATE = (
+    "🛑 acp-idle: sessie {name} was {minutes} min volledig stil "
+    "(ACP-proces leefde maar opencode schreef niets meer — typisch beeld "
+    "van een subagent-call die als defect stierf en geen resultaat "
+    "teruggeeft). Verplaatst naar Impediment omdat hervatten de hang zou "
+    "reproduceren; ``resume_session_id`` is bewust NIET gezet. Kaart "
+    "2fa8d501…, zie ook ``OpenCodeCli.can_resume_safely`` voor de gate. "
+    "Actie: bekijk de opencode-sessie en beslis handmatig of de kaart "
+    "opnieuw gedispatcht mag worden."
+)
+
+
+async def _route_acp_idle_card_to_impediment(
+    session, *, card, project_key: str, session_name: str,
+    stalled_seconds: float,
+) -> None:
+    """Move an ACP-idle card to Impediment with a structured comment.
+
+    The release + move + comment sequence mirrors
+    ``_move_to_impediment_after_repeated_failures``'s shape but with a
+    distinct comment prefix (``acp-idle``) so the activity feed can tell
+    this apart from dispatch-failure routing and the existing
+    rate-limit / dangling-dep comments.
+
+    Crucially: NO ``resume_session_id`` is written. Resuming the same
+    session would replay the conversation and hit the same pending
+    subagent call — the exact failure mode this detector exists to
+    prevent. Operators who want to retry must manually clear the card
+    back to Backlog / a fresh dispatch column; that human-in-the-loop is
+    the point.
+    """
+    minutes = int(stalled_seconds // 60)
+    text = _ACP_IDLE_IMPEDIMENT_COMMENT_TEMPLATE.format(
+        name=session_name, minutes=minutes,
+    )
+    from app.kanban.operations import apply_operation
+    await apply_operation(
+        session, op_type="comment", entity_type="comment",
+        project_key=project_key, entity_id=card.id, payload={"text": text},
+    )
+    labels = list(card.labels or [])
+    if ERROR_LABEL not in labels:
+        labels.append(ERROR_LABEL)
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key=project_key, entity_id=card.id,
+            payload={"labels": labels},
+        )
+    await apply_operation(
+        session, op_type="move", entity_type="card",
+        project_key=project_key, entity_id=card.id,
+        payload={"column": "Impediment"},
+    )
+    await apply_operation(
+        session, op_type="release", entity_type="card",
+        project_key=project_key, entity_id=card.id, payload={},
+    )
+    logger.warning(
+        "acp-idle: card %s session %s stalled ~%.0fs — routed to Impediment "
+        "(no resume_session_id written; would reproduce hang)",
+        card.id, session_name, stalled_seconds,
+    )
+
+
+async def check_acp_idle_liveness(
+    session, *, project_key: str, cards: Iterable[KanbanCard],
+    project_path: str | None = None,
+    acp_live: set[str] | None = None,
+    now: float | None = None,
+    signal_seconds: int | None = None,
+    action_seconds: int | None = None,
+) -> set[str]:
+    """ACP/opencode silence-despite-life detector (kaart 2fa8d501…).
+
+    Mirror of ``check_progress_liveness`` for ACP transports. Reads
+    ``MAX(time_updated)`` from the opencode SQLite store (via
+    ``OpenCodeCli.last_session_write``) for every ACP-live card whose CLI
+    is opencode, and escalates on sustained silence. Past the signal
+    threshold: posts a "stilstaand" activity comment. Past the action
+    threshold: routes the card to ``Impediment`` via
+    ``_route_acp_idle_card_to_impediment`` — does **not** use
+    ``_move_to_resume``, because resuming would replay the conversation
+    and hit the same pending subagent call that caused the hang.
+
+    Carve-outs:
+
+    - ``project_path is None``: fail-open, no action (nothing to resolve
+      against).
+    - Card whose effective CLI is not opencode: skipped — that's the
+      transcript detector's lane (Claude Code) or the relevant other
+      detector's lane. We only fill the ACP/opencode gap.
+    - Session not in ``acp_live``: skipped — ``reap_stale_claims`` owns
+      dead ACP sessions; this detector fires only when ACP says the
+      subprocess is alive AND the opencode store is silent, which is the
+      exact bug-class signature.
+    - No opencode.db / no session row for the worktree: fail-open, no
+      action (transient DB absence must not be mistaken for "every
+      opencode session is stale").
+
+    ``now``, ``signal_seconds``, ``action_seconds`` are injectable for
+    deterministic tests; production callers pass none and read the module
+    defaults ``ACP_IDLE_LIVENESS_SIGNAL_SECONDS`` /
+    ``ACP_IDLE_LIVENESS_ACTION_SECONDS``.
+
+    Returns the set of ``session_name``s that had any action this tick
+    (signal comment posted, or card routed to Impediment). Same shape as
+    ``check_progress_liveness`` so the caller can use the truthy/non-empty
+    result as a "refetch the cards list" gate.
+    """
+    from app.kanban.schemas import COLUMNS
+
+    if project_path is None:
+        return set()
+    if now is None:
+        now = time.time()
+    if signal_seconds is None:
+        signal_seconds = ACP_IDLE_LIVENESS_SIGNAL_SECONDS
+    if action_seconds is None:
+        action_seconds = ACP_IDLE_LIVENESS_ACTION_SECONDS
+
+    acp_live = acp_live or set()
+
+    # Snapshot to a list — same defence-in-depth as ``check_progress_liveness``
+    # and ``reap_stale_claims``: ``cards`` is documented as Iterable, and a
+    # future refactor that turns it into a streaming generator would
+    # otherwise be silently consumed.
+    cards = list(cards)
+
+    # Prune state for cards that no longer have an ``agent:`` claim, same
+    # pattern as ``check_progress_liveness``.
+    active_card_ids = {c.id for c in cards}
+    for stale_id in [cid for cid in _acp_idle_state if cid not in active_card_ids]:
+        _acp_idle_state.pop(stale_id, None)
+
+    acted: set[str] = set()
+
+    # Resolve the opencode CLI once — every iteration below routes through
+    # the same instance, so caching avoids re-doing the registry lookup per
+    # card. Module-level import would couple this module to the agentic_cli
+    # package at import time; the lazy import keeps the optional
+    # dependency footprint narrow.
+    from app.services.agentic_cli import get_agentic_cli
+
+    try:
+        opencode_cli = get_agentic_cli("open-code")
+    except ValueError:
+        logger.warning("check_acp_idle_liveness: open-code cli not registered")
+        return set()
+
+    for card in cards:
+        if card.column in COLUMNS:
+            continue
+        name = _claimant_session(card)
+        if name is None:
+            continue
+        if name not in acp_live:
+            # Dead ACP sessions are reap_stale_claims's lane; this detector
+            # only fires for the "alive in pidfile but silent in opencode.db"
+            # case, which is the exact bug class.
+            continue
+        # Only the opencode CLI's store has a ``time_updated`` column we can
+        # query; every other ACP CLI exposes a different shape and gets
+        # routed through a future dedicated helper (or stays in
+        # ``check_progress_liveness``'s lane for Claude Code).
+        if _effective_resume_cli_id(card) != "open-code":
+            continue
+
+        worktree = Path(project_path) / ".claude" / "worktrees" / name
+        last_write_ms = opencode_cli.last_session_write(str(worktree))
+        if last_write_ms is None:
+            # Fail-open: no resolvable store / no session row / unreadable
+            # DB. Better to risk one missed detection than to false-positive
+            # on transient absence.
+            continue
+
+        current_mtime = float(last_write_ms) / 1000.0  # ms → seconds
+        snapshot = _acp_idle_state.get(card.id)
+        if snapshot is None:
+            # First observation — record the baseline but don't act yet. A
+            # signal at the very first tick would be a "stalled since spawn"
+            # assertion with no information about whether the agent was ever
+            # productive.
+            _acp_idle_state[card.id] = _ProgressSnapshot(
+                observation_time=now, observed_mtime=current_mtime,
+            )
+            continue
+
+        if current_mtime > snapshot.observed_mtime:
+            # opencode wrote something since the last observation — reset
+            # the snapshot and clear the one-shot signal flag.
+            _acp_idle_state[card.id] = _ProgressSnapshot(
+                observation_time=now, observed_mtime=current_mtime,
+            )
+            continue
+
+        # current_mtime <= snapshot.observed_mtime: no growth. Stall is
+        # measured against our own observation cadence so a session that
+        # wrote once at spawn and then went silent doesn't get pre-charged
+        # with the time-since-spawn.
+        stalled_seconds = now - snapshot.observation_time
+
+        if stalled_seconds >= action_seconds:
+            logger.warning(
+                "acp-idle: card %s session %s stalled ~%.0fs (action "
+                "threshold %.0fs) — routing to Impediment (no resume, "
+                "would reproduce hang)",
+                card.id, name, stalled_seconds, action_seconds,
+            )
+            await _route_acp_idle_card_to_impediment(
+                session, card=card, project_key=project_key,
+                session_name=name, stalled_seconds=stalled_seconds,
+            )
+            _acp_idle_state.pop(card.id, None)
+            acted.add(name)
+            continue
+
+        if stalled_seconds >= signal_seconds:
+            if snapshot.signal_posted:
+                # Already posted for this stall window — don't spam.
+                continue
+            _acp_idle_state[card.id] = _ProgressSnapshot(
+                observation_time=snapshot.observation_time,
+                observed_mtime=snapshot.observed_mtime,
+                signal_posted=True,
+            )
+            minutes = int(stalled_seconds // 60)
+            text = _ACP_IDLE_COMMENT_TEMPLATE.format(
+                minutes=minutes, name=name,
+                action_minutes=action_seconds // 60,
+            )
+            posted = await _post_rate_limit_activity_comment(
+                session, card=card, project_key=project_key, text=text,
+            )
+            if posted:
+                logger.info(
+                    "acp-idle: card %s session %s stalled ~%.0fs — posted "
+                    "stilstaand comment (signal threshold %.0fs)",
+                    card.id, name, stalled_seconds, signal_seconds,
+                )
+                acted.add(name)
+
+    return acted
+
+
 # Activity-comment copy. Format kwargs: ``minutes`` (rounded stall duration),
 # ``name`` (session name), ``action_minutes`` (configured action threshold).
 # Mirrors the Dutch-with-emoji convention used by the rate-limit / spillover
@@ -6994,6 +7296,29 @@ async def _move_to_resume(
         return False
 
     session_id, project_folder = target
+
+    # Resume-gate (kaart 2fa8d501…): for opencode, refuse to resume a
+    # session whose last ``part`` is an unresolved tool call. Replaying
+    # the conversation would hit the same pending subagent call and
+    # hang again — the exact second-round bug the card describes.
+    # Fail-open on the CLI lookup (unknown / unregistered CLI id, or a
+    # non-opencode CLI) and on the gate helper itself: only the opencode
+    # lane has a structured ``part`` store to query; every other CLI
+    # falls through to the existing resume path unchanged.
+    cli_id = _effective_resume_cli_id(card)
+    if cli_id == "open-code":
+        try:
+            from app.services.agentic_cli import get_agentic_cli
+            cli = get_agentic_cli(cli_id)
+        except ValueError:
+            cli = None
+        if cli is not None and not cli.can_resume_safely(session_id):
+            await _route_card_to_impediment_for_resume_gate(
+                session, card=card, project_key=project_key,
+                session_name=session_name, session_id=session_id,
+            )
+            return False
+
     await apply_operation(
         session, op_type="update", entity_type="card", project_key=project_key,
         entity_id=card.id,
@@ -7015,6 +7340,70 @@ async def _move_to_resume(
         card.id, card.column, session_name, session_id, project_folder,
     )
     return True
+
+
+_ACP_RESUME_GATE_COMMENT_TEMPLATE = (
+    "🛑 resume-gate: sessie {name} heeft een onopgeloste tool-call als "
+    "laatste bericht (``state.status NOT IN {{completed, error}}``). "
+    "Hervatten zou de hang reproduceren waar kaart 2fa8d501… over gaat — "
+    "``resume_session_id`` is bewust NIET gezet. De claim is vrijgegeven "
+    "en de kaart staat in Impediment; bekijk de opencode-sessie handmatig "
+    "en beslis of de kaart opnieuw gedispatcht mag worden. Laatste "
+    "session_id die geweigerd werd: ``{session_id}``."
+)
+
+
+async def _route_card_to_impediment_for_resume_gate(
+    session, *, card, project_key: str,
+    session_name: str, session_id: str,
+) -> None:
+    """Move a card whose resume was refused by the opencode resume-gate
+    to Impediment with a structured comment (kaart 2fa8d501…).
+
+    Mirrors ``_route_acp_idle_card_to_impediment``'s shape — release +
+    move + comment, with the ``ERROR_LABEL`` stamp so the board shows
+    this as a red Impediment card. Distinct comment prefix (``resume-gate``)
+    so the activity feed tells the gate's two reject paths apart:
+    ``acp-idle`` (silence-despite-life detector) vs ``resume-gate``
+    (resume-time unresolved-tool-call check).
+
+    Crucially: NO ``resume_session_id`` is written — that is the entire
+    point of the gate. The session id is logged inside the comment so an
+    operator can correlate against the opencode store.
+    """
+    from app.kanban.operations import apply_operation
+    text = _ACP_RESUME_GATE_COMMENT_TEMPLATE.format(
+        name=session_name, session_id=session_id,
+    )
+    await apply_operation(
+        session, op_type="comment", entity_type="comment",
+        project_key=project_key, entity_id=card.id, payload={"text": text},
+    )
+    labels = list(card.labels or [])
+    if ERROR_LABEL not in labels:
+        labels.append(ERROR_LABEL)
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key=project_key, entity_id=card.id,
+            payload={"labels": labels},
+        )
+    await apply_operation(
+        session, op_type="move", entity_type="card",
+        project_key=project_key, entity_id=card.id,
+        payload={"column": "Impediment"},
+    )
+    # Kill the orphaned tmux session so the next dispatch tick doesn't
+    # see it in ``live_sessions`` and re-claim the card.
+    _kill_agent_session(session_name)
+    await apply_operation(
+        session, op_type="release", entity_type="card",
+        project_key=project_key, entity_id=card.id, payload={},
+    )
+    logger.warning(
+        "resume-gate: card %s session %s refused (session_id=%s) — "
+        "last part is an unresolved tool call; routed to Impediment",
+        card.id, session_name, session_id,
+    )
 
 
 def _resume_target_from_cwd(cwd: str) -> tuple[str, str] | None:
@@ -8173,6 +8562,26 @@ async def dispatch_project(
             live_sessions=live_sessions,
             sandcastle_live=sandcastle_live,
             headless_live=headless_live,
+            acp_live=acp_live,
+        ):
+            cards = await list_cards(session, project_key)
+
+    # ACP idle-liveness sweep: parallel to ``check_progress_liveness`` for
+    # ACP/opencode sessions (kaart 2fa8d501…). The transcript detector
+    # above covers Claude Code (transcript mtime); opencode sessions have
+    # no transcript file, so they were the silent-class the original
+    # detector missed — every existing liveness source answered "is the
+    # subprocess alive?", which is the wrong question for an agent whose
+    # CLI is up but the agent is hung on a subagent call that died with a
+    # defect (``prompt_async failed cause=Die(...)``). Reads
+    # ``MAX(time_updated)`` from the opencode SQLite store and routes
+    # silent sessions to ``Impediment`` (NOT ``To Resume`` — resuming
+    # would replay the pending subagent call). Carve-out matches
+    # ``check_progress_liveness``'s ``project_path is not None`` gate.
+    if project_path is not None and live_sessions is not None:
+        if await check_acp_idle_liveness(
+            session, project_key=project_key, cards=cards,
+            project_path=project_path,
             acp_live=acp_live,
         ):
             cards = await list_cards(session, project_key)

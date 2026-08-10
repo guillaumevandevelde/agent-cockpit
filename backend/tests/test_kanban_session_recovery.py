@@ -1,5 +1,6 @@
 # backend/tests/test_kanban_session_recovery.py
 """Resume interrupted agent sessions after a host/backend restart."""
+import json
 import os
 
 import pytest
@@ -705,3 +706,104 @@ async def test_reap_pending_spawn_orphans_ignores_cards_without_pending_field(mo
 
     assert killed == []
     assert stats == {"killed": 0, "stale_cleared": 0, "matched_cleared": 0}
+
+
+# ---- recover_project resume-gate (kaart 2fa8d501…) ----------------------
+
+@pytest.mark.asyncio
+async def test_recover_project_opencode_skips_resume_when_last_part_unresolved(tmp_path, monkeypatch):
+    """Boot-time ``recover_project`` must skip an opencode session whose
+    last ``part`` is an unresolved tool call — replaying at boot would
+    reproduce the hang (kaart 2fa8d501…). The card is left unrecovered
+    for the dispatch-tick reaper to pick up via the same gate in
+    ``_move_to_resume``."""
+    from app.services.agentic_cli import open_code
+
+    worktree = tmp_path / "repo" / ".claude" / "worktrees" / "k-dead-oc"
+    worktree.mkdir(parents=True)
+    pending_part = json.dumps({
+        "type": "tool",
+        "tool": "bash",
+        "callID": "call_xyz",
+        "state": {"status": "pending", "input": {}, "output": ""},
+    })
+    _build_pending_opencode_db(
+        tmp_path, str(worktree),
+        session_id="ses_unresolved",
+        last_part_json=pending_part,
+    )
+    monkeypatch.setattr(
+        open_code, "get_opencode_data_home", lambda: tmp_path / "open-code",
+    )
+
+    calls = []
+
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
+        calls.append(card_id)
+        return {"card_id": card_id, "session_name": "k-new"}
+
+    def fake_resolve(project_path, session_name, *, cli_id):
+        return ("ses_unresolved", str(worktree.resolve()))
+
+    async with KanbanSessionLocal() as s:
+        dead = await _make_card(
+            s, title="open-code hung", column="engineer",
+            executor_agent_id="open-code",
+        )
+        await _claim(s, dead, "agent:k-dead-oc")
+        await s.commit()
+        recovered = await recovery.recover_project(
+            s, project_key=PK, project_path=str(tmp_path / "repo"),
+            live_sessions=set(),
+            resolve=fake_resolve, redispatch=fake_redispatch,
+        )
+        await s.commit()
+
+    # Gate refused: not recovered, redispatch never called.
+    assert recovered == []
+    assert calls == []
+
+
+def _build_pending_opencode_db(tmp_path, worktree, *, session_id, last_part_json):
+    """Local helper for the resume-gate test — mirrors the schema used in
+    ``tests/test_acp_idle_liveness.py::_build_opencode_db`` but keeps
+    this test file self-contained (no cross-file fixture imports)."""
+    import sqlite3
+    data_dir = tmp_path / "open-code"
+    data_dir.mkdir(exist_ok=True)
+    db = data_dir / "opencode.db"
+    try:
+        db.unlink()
+    except FileNotFoundError:
+        pass
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        CREATE TABLE session (
+            id TEXT PRIMARY KEY,
+            directory TEXT NOT NULL,
+            time_updated INTEGER NOT NULL,
+            time_archived INTEGER,
+            parent_id TEXT
+        );
+        CREATE TABLE part (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        );
+        """
+    )
+    con.execute(
+        "INSERT INTO session(id, directory, time_updated) VALUES (?, ?, ?)",
+        (session_id, worktree, 2000),
+    )
+    con.execute(
+        "INSERT INTO part(id, message_id, session_id, time_created, time_updated, data) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("p_pending", "msg-x", session_id, 2000, 2000, last_part_json),
+    )
+    con.commit()
+    con.close()

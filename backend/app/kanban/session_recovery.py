@@ -256,6 +256,34 @@ async def recover_project(
             )
             continue
         session_id, project_folder = target
+
+        # Resume-gate (kaart 2fa8d501…): for opencode, refuse to
+        # auto-recover a session whose last ``part`` is an unresolved
+        # tool call. Replaying the conversation at boot would hit the
+        # same pending subagent call and hang again — the exact
+        # second-round bug the card describes. The reaper's resume
+        # path (``_move_to_resume`` in ``backend/app/kanban/dispatch.py``)
+        # carries the same gate; this is the boot-time equivalent so
+        # the same protection covers both surfaces. Fail-open on the
+        # CLI lookup and on the gate helper itself — only the opencode
+        # lane has a structured ``part`` store to query; every other
+        # CLI falls through unchanged.
+        cli_id_resolved = cli_id
+        if cli_id_resolved == "open-code":
+            try:
+                from app.services.agentic_cli import get_agentic_cli as _get_cli
+                _cli = _get_cli(cli_id_resolved)
+            except ValueError:
+                _cli = None
+            if _cli is not None and not _cli.can_resume_safely(session_id):
+                logger.info(
+                    "no resume for card %s (session %s, cli=%s) — "
+                    "last part is an unresolved tool call; "
+                    "leaving for reaper's resume-gate",
+                    card.id, session_name, cli_id_resolved,
+                )
+                continue
+
         await apply_operation(
             session, op_type="update", entity_type="card", project_key=project_key,
             entity_id=card.id,
