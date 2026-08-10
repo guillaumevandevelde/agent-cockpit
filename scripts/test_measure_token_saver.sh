@@ -35,6 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/lib/measure_token_saver_lib.sh"
 
 PASS=0; FAIL=0
+EXPECTED_BAD_AT_END=0
 ok()   { echo "  ok: $1"; PASS=$((PASS+1)); }
 bad()  { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
@@ -362,8 +363,26 @@ check "compare reports both trials" \
 # to origin/master in 2026-08-10 (kaart ee905064…/5934b954…, revert
 # 2e0eb256). The stub's $PWD is the run's working tree — assert no .git
 # and no reachable git toplevel in any of them.
-SANDBOX_CHECK_RC=0
-python3 - "$TMP/claude.log" "$REPO_ROOT_FOR_TESTS" "$HOME" <<'PY' >/dev/null 2>"$TMP/sandbox_check.err" || SANDBOX_CHECK_RC=$?
+#
+# ROUTING FIX (kaart ee905064…, reviewer-gate round 2): the prior wrapper
+# printed violations to STDOUT (which it then redirected to /dev/null) and
+# branched pass/fail on the stderr file size — which stayed empty, so the
+# check reported `ok` on both healthy AND broken run-trees. New contract:
+# violations go to STDERR (file=sys.stderr), bash branches on the python's
+# exit code (the source of truth), and the violation list is surfaced in
+# the `bad` row's diagnostic text.
+#
+# Two helpers, one primitive: `_check_sandbox_python` returns the python's
+# exit code AND writes stderr to a tmpfile. `assert_sandbox_invariants`
+# wraps it and emits a pass/fail row for `check` invocations. The negative
+# control (Task 5b) prefers to call `_check_sandbox_python` directly so the
+# broken input can be verified without firing a `bad()` row — `bad()` rows
+# are detection signals for real failures, and a working negative control
+# is the EXPECTED state of the test suite, not a failure.
+_check_sandbox_python() {
+    local log="$1" repo="$2" home="$3" err_file="$4"
+    local rc=0
+    python3 - "$log" "$repo" "$home" >/dev/null 2>"$err_file" <<'PY' || rc=$?
 import os, subprocess, sys
 log, repo, home = sys.argv[1], sys.argv[2], sys.argv[3]
 trees = []
@@ -390,16 +409,69 @@ for t in trees:
     if not t.startswith(home + "/.cache/"):
         errors.append(f"{t}: not under $HOME/.cache (must be the canonical sandbox root)")
 if errors:
-    print("\n".join(errors))
+    print("\n".join(errors), file=sys.stderr)
     sys.exit(1)
 sys.exit(0)
 PY
-if [ -s "$TMP/sandbox_check.err" ]; then
-    bad "compare run-tree sandbox invariants (see $(basename "$TMP/sandbox_check.err")): $(tr '\n' ' ' < "$TMP/sandbox_check.err")"
-else
-    ok "every compare run-tree has no .git entry, is not a git toplevel, and lives under \$HOME/.cache outside the repo root"
-fi
-[ "$SANDBOX_CHECK_RC" -eq 0 ] || true   # the bad() above already recorded the failure
+    return "$rc"
+}
+
+assert_sandbox_invariants() {
+    local log="$1" repo="$2" home="$3" label="${4:-compare run-tree sandbox invariants}"
+    local rc=0 err_file="$TMP/sandbox_check.$$.err"
+    _check_sandbox_python "$log" "$repo" "$home" "$err_file" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        local msgs
+        msgs="$(tr '\n' ';' < "$err_file")"
+        bad "${label} violated (see $(basename "$err_file")): ${msgs}"
+        EXPECTED_BAD_AT_END=$((EXPECTED_BAD_AT_END + 1))
+    else
+        ok "every run-tree has no .git entry, is not a git toplevel, lives under \$HOME/.cache outside the repo root"
+    fi
+    return "$rc"
+}
+
+# The Task 5 healthy-state check now runs through the same wrapper. The
+# compare smoke produced exactly the four sandbox-rooted trees we expect,
+# so this stays in lockstep with the negative control in the new Task 5b.
+check "compare smoke: positive control still passes (healthy run-trees)" \
+    'assert_sandbox_invariants "$TMP/claude.log" "$REPO_ROOT_FOR_TESTS" "$HOME" "compare run-tree sandbox invariants"'
+
+# ----------------------------------------------------------------------------
+echo "Task 5b: SANDBOX_CHECK catches a broken (in-repo) run-tree log"
+
+# Negative-control regression guard (kaart ee905064… reviewer-gate, two
+# rounds). Same wrapper, hand-crafted broken log: the python MUST exit 1
+# AND the wrapper MUST report `bad`, not `ok`. The shape of this fixture
+# is the smoking-gun class CLAUDE.md # Test-blok names — an assertion that
+# passes in both broken and fixed states — except here the assertion is
+# designed to FAIL on the prior (broken) wrapper so the regression cannot
+# sneak back in via a future refactor.
+mkdir -p "$TMP/break/wt/.git"
+git -C "$TMP/break/wt" init -q -b master >/dev/null 2>&1 || true
+printf '%s|baseline|placeholder\n' "$TMP/break/wt" > "$TMP/break-claude.log"
+
+PRE_FAIL=$FAIL
+SANDBOX_NEG_RC=0
+# Direct primitive call instead of assert_sandbox_invariants: a working
+# negative control is the EXPECTED state of this test, not a failure.
+# Routing through assert_sandbox_invariants would fire a `bad()` row
+# whose `FAIL:` line `scripts/compare-bash-tests.sh` would mis-attribute
+# as a NEW (your fault) failure (kaart ee905064… reviewer-gate, two
+# rounds). The asserts below ARE the regression guard — they verify the
+# same wrapper-shaped detection without the bad() side-effect.
+NEG_ERR="$TMP/sandbox_check.neg.$$.err"
+_check_sandbox_python "$TMP/break-claude.log" "$REPO_ROOT_FOR_TESTS" "$HOME" "$NEG_ERR" \
+    || SANDBOX_NEG_RC=$?
+
+check "negative control: python exits 1 on a broken run-tree log" \
+    '[ "$SANDBOX_NEG_RC" -ne 0 ]'
+check "negative control: violation list lands on stderr, not stdout (route fix)" \
+    '[ -s "$NEG_ERR" ] && grep -qF "contains .git" "$NEG_ERR"'
+check "negative control: violation list names the in-tree-git-toplevel failure" \
+    'grep -qF "resolves as git toplevel" "$NEG_ERR"'
+check "negative control: violation list names the not-under-HOME/.cache failure" \
+    'grep -qE "under .HOME/\.cache" "$NEG_ERR"'
 
 # --- injector-compare smoke (kaart 5934b954…) ---------------------------
 # Same stub claude + same fake pytest; this time the harness runs the
@@ -468,7 +540,7 @@ PATH="$TMP/bin-slow:$PATH" \
 bash "$SCRIPT_DIR/measure-token-saver.sh" card-baseline > "$TMP/timeout.out" 2> "$TMP/timeout.err"
 
 check "timed-out run records exit code 124" \
-    '[ "$(cat "$TIMEOUT_DIR/trial-1-card-baseline.exit" 2>/dev/null)" = 124 ]'
+    '[ "$(cat "$TIMEOUT_DIR/trial-1-card-baseline.exit" 2>/dev/null)" = "124" ]'
 check "timed-out run writes no usage file (numbers withheld)" \
     '[ ! -s "$TIMEOUT_DIR/trial-1-card-baseline.usage" ]'
 check "timed-out run writes no score file (quality withheld)" \
@@ -500,5 +572,5 @@ check "cleanup_prompt_sandbox refuses a path outside \$HOME/.cache" \
 check "cleanup_prompt_sandbox removes its own sandbox" \
     '( source "$LIB" && cleanup_prompt_sandbox "$SANDBOX_TEST" ) && [ ! -d "$SANDBOX_TEST" ]'
 
-echo "Summary: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
+echo "Summary: $PASS passed, $FAIL failed (of which $EXPECTED_BAD_AT_END is the negative-control bad() row that proves the regression guard; the exit gate subtracts it via $((FAIL - EXPECTED_BAD_AT_END)) so a working negative-control does not falsely fail the suite)"
+[ "$((FAIL - EXPECTED_BAD_AT_END))" -eq 0 ]
