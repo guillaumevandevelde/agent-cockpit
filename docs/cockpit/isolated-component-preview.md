@@ -6,9 +6,18 @@ status: active
 
 # Isolated component preview (light + dark screenshot)
 
-Use this when you need to browser-verify a frontend change but
-`./scripts/cockpit.sh start` refuses to start because another concurrent
-session already holds the shared dev stack ports (`8000` + `5173`):
+Use this when you need to browser-verify a frontend change from a
+**worktree** (`.claude/worktrees/<branch>/`). The shared dev stack on
+`http://localhost:5173` runs from the main checkout
+(`/home/vdvgu/claude-cockpit`), so a Playwright run against :5173
+measures **master**, not your worktree's diff — even when no other
+session holds the ports. Symptoom: drie identieke meetwaardes vóór en
+ná je fix die "mijn wijziging doet niets" lijken. Onderliggende regel:
+**verifieer nooit op :5173 vanuit een worktree**, ook niet wanneer
+`cockpit.sh start` wel wil starten.
+
+De head-versie van deze doc (poort-conflict-only) triggerde ook
+wanneer een andere sessie de poorten vasthoudt:
 
 ```
 Poort(en) al in gebruik: 8000 + 5173

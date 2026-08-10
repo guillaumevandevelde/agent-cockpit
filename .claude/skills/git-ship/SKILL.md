@@ -146,6 +146,16 @@ frontend-test voedde, maar de tegels kwamen uit `/teams` zonder
 enrichment. Twee groene tests, twee blinde vlekken, en het enige dat
 het had gevonden is één regel Playwright in de draaiende app.
 
+**Worktree-waarschuwing.** Als je in een worktree werkt
+(`.claude/worktrees/<branch>/`) doet de gedeelde dev-stack op
+`http://localhost:5173` de **hoofd-checkout** (master), niet jouw
+diff — ook wanneer geen andere sessie de poorten vasthoudt. Drie
+identieke meetwaardes vóór en ná je fix zijn het typerende
+symptoom. Gebruik vanuit een worktree **altijd** een eigen Vite op
+een vrije poort vanuit je worktree (zie
+[`isolated-component-preview.md`](../cockpit/isolated-component-preview.md)),
+ook wanneer `cockpit.sh start` wel wil starten.
+
 **Wanneer dit geldt.** De kaart voegt een **nieuwe zichtbare
 UI-affordance** toe: een knop, link, indicator, paneel, dialoog,
 route, of een element dat op het scherm verschijnt wanneer het er
