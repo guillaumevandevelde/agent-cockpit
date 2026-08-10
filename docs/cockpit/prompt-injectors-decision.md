@@ -141,19 +141,19 @@ Spreiding genormaliseerd op `range / mean` zodat metrics met verschillende ordes
 
 #### Wat deze meting nu wél draagt
 
-- **Totale `cache_read` daalt 15,5 % en `output` 15,1 % over 8 dispatches per arm.** De spreiding per arm is 1,68 voor `cache_read` en 1,33 voor `output` — smaller dan het verschil tussen de armen. Het verschil overleeft de ruis binnen de arm, in tegenstelling tot N=2.
-- **Totale `turns` daalt 25,2 % over 8 dispatches per arm** (16 → 12 gemiddeld). Dat is de dominante component van de totale besparing.
+- **`cache_creation` blijft 0** in alle zestien runs — de slice verhindert geen cache-hit (zelfde conclusie als §"Meting 2026-08-10").
 - **`pass_tests` is 16/16**, gelijk verdeeld over beide armen — de slice degradeert de taakkwaliteit niet.
-- **`cache_creation` blijft 0** in alle zestien runs; de slice verhindert geen cache-hit (zelfde conclusie als §"Meting 2026-08-10").
+- **Per-beurt kost de slice juist méér** (zie de normalisatie-tabel hierboven): `input/turn` +39,3 %, `cache_read/turn` +13,0 %, `output/turn` +13,6 %. De ~12 KB preamble weegt zwaarder dan welke per-beurt-besparing dan ook; dat is het echte werkingsmechanisme, niet compressie.
 - **`input` stijgt +4,2 %** als gemiddelde; door de smalle injector-spreiding (range/mean = 0,09) is dat getal robuust. De stijging is de slice-belasting, niet de agent.
 
 #### Wat deze meting níét draagt
 
+- **Geen besparingspercentage.** De gemiddelden (`cache_read` −15,5 %, `output` −15,1 %, `turns` −25,2 %) suggereren een besparing, maar de **spreiding binnen elke arm is groter dan het verschil tussen de armen**: `range/mean` = 1,68 voor `cache_read` en 1,33 voor `output` — uitgedrukt als percentage van het gemiddelde is dat 168 % respectievelijk 133 %, ruim tien keer groter dan het gemeten effect van ~15 %. De zinsnede "smaller dan het verschil tussen de armen" uit de eerste versie van deze alinea was een rekenfout — `range/mean` is een dimensieloze fractie, geen percentage. Eén enkel paar (`084936 t1` — 34 → 7 beurten, hergebruikt uit de N=2-meting) draagt het hele gemiddelde; zonder dat paar kantelt `cache_read` naar **+2,3 %** over de zes runs die deze kaart wél zelf draaide. Een effect onder de ruis is geen effect.
 - **Geen uitspraak over abonnementsquotum.** `cache_read` telt volgens `cache-read-quota-decision.md` (kaart `97e623f9…`) **niet** mee voor de 5h-quotum, dus een lagere `cache_read` levert hier geen quotum-winst op — alleen API-kostenbesparing. Een abonnementsbesparing-claim zou los staan en is hier niet gemeten.
 - **Geen uitspraak over de analysis-leaf-lane.** Die vraagt een eigen meting op een `analysis`-kaart (zie Vervolgkaarten).
-- **Geen claim dat per-beurt-kosten dalen.** De slice voegt bytes toe; de totale besparing komt uit de beurt-reductie, niet uit per-beurt-compressie.
+- **Geen claim dat per-beurt-kosten dalen.** De slice voegt bytes toe; de gemeten totale besparing in §"Per-arm aggregate" komt uit de beurt-reductie, niet uit per-beurt-compressie, en overleeft de ruis niet.
 
-**Conclusie.** De slice levert op deze golden-task een echte, op N=8 robuuste totale besparing van ~15 % op `cache_read` + `output` en ~25 % op beurten, met behoud van kwaliteit (16/16). Het mechanisme is "sneller klaar", niet "korter per beurt" — dat onderscheid was op N=2 niet zichtbaar. De besparingsclaim is nu voldoende onderbouwd om hem in het register op te nemen; een promotion naar default-on blijft uit voorzorg (zie "Wat dit NIET verandert").
+**Conclusie.** Het effect is kleiner dan de ruis. De drie bevindingen die de data wél dragen: `cache_creation` blijft 0 (geen cache-busting), `pass_tests` is 16/16 (geen kwaliteitsverlies), en per-beurt kost de slice juist 13-39 % méér. Geen van die drie staat of valt met een besparingsgetal, en geen rechtvaardigt een promotion naar default-on (zie "Wat dit NIET verandert"). Het register krijgt geen besparingspercentage; de N=8-meting bevestigt de N=2-conclusie ("geen percentage te claimen") op een grotere steekproef.
 
 ## Wat dit NIET verandert
 
@@ -163,7 +163,7 @@ Spreiding genormaliseerd op `range / mean` zodat metrics met verschillende ordes
 
 ## Vervolgkaarten
 
-- **Tokenbesparing met genoeg runs meten** — ✅ gesloten in kaart `54997750…` (zie §"Vervolgmeting 2026-08-10 — N=8 per arm" hierboven). N=8 per arm levert een robuuste −15 % op `cache_read` + `output` en −25 % op beurten, met 16/16 `pass_tests`. Per-beurt-kosten stijgen juist — de besparing komt uit de beurt-reductie, niet uit per-beurt-compressie.
+- **Tokenbesparing met genoeg runs meten** — ✅ gesloten in kaart `54997750…` (zie §"Vervolgmeting 2026-08-10 — N=8 per arm" hierboven). N=8 per arm levert geen robuuste besparing — de spreiding binnen elke arm (`range/mean` 1,68 / 1,33 / 1,22-1,59) is groter dan het gemiddelde verschil tussen de armen, en één enkel paar draagt het hele effect. De drie bevindingen die de N=8 wél dragen: `cache_creation` blijft 0 (geen cache-busting), `pass_tests` is 16/16 (geen kwaliteitsverlies), per-beurt kost de slice juist 13-39 % méér. Het register krijgt geen besparingspercentage.
 - **Analyse-leaf kwaliteitsmeting** — `5934b954…` sloot de meting op een executor-lane. De analysis-leaf-claim in dit doc blijft een **verwachting**. Een vervolgkaart die een echte `analysis`-kaart met de slice aan door de leaf-deliverable-pijplijn haalt en de dockwaliteit beoordeelt, hoort in Backlog zodra er zo'n kaart in scope is.
 - **RTK-werk** — `token-saver-mechanismen-decision.md` §8 (kaart `c31333bf…`) draagt de proxycijfers uit 2026-07-25 en 2026-08-05 voor zijn eigen RTK-context. Die cijfers zijn niet wat dit doc als `cache_read` rapporteert.
 
