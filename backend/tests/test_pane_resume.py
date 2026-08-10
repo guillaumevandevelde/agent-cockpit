@@ -139,6 +139,13 @@ def _patch_auto_resume(monkeypatch):
         def cancel(self, *a, **kw):
             return True
 
+        # Required by handle_rate_limit_signal since kaart 9c7ef6b1… —
+        # the pane-resume path reads the per-cwd message override via
+        # auto_resume_service.get_message(cwd) so operators can pick a
+        # project-specific nudge text without forking call sites.
+        def get_message(self, cwd, *a, **kw):
+            return "Continue where you left off."
+
     monkeypatch.setattr(ar_module, "auto_resume_service", _Stub())
 
 

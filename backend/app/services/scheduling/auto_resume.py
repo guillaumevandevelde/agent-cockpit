@@ -57,8 +57,20 @@ def _resolve_year(month: int, day: int, now: datetime) -> int:
             return year
     return now.year
 
-# Default continuation message when auto-resuming
-DEFAULT_RESUME_MESSAGE = "Continue where you left off."
+# Default continuation message when auto-resuming.
+#
+# Intentionally short ("OK") for two reasons:
+# - Looks like a human operator's acknowledgement, not a workprompt — keeps
+#   a passing glance at the pane from reading as "magical automation".
+# - Doesn't nudge Claude back into work mode on a routine auto-resume; the
+#   longer "Continue where you left off." burned input-tokens and pulled the
+#   session away from its original task.
+#
+# Operators that want a longer message (to give the session context, for
+# instance) override per-cwd via ``AutoResumeService.set_message`` — the same
+# pattern as ``set_enabled`` for the auto-resume toggle itself. Pinning the
+# length is in ``TestDefaultResumeMessage`` (kaart 9c7ef6b1…).
+DEFAULT_RESUME_MESSAGE = "OK"
 
 # Conservative dispatch-pause duration when a limit notification is recognized
 # but its reset time can't be parsed (e.g. a weekly/model cap with different
@@ -79,12 +91,33 @@ class AutoResumeService:
     def __init__(self) -> None:
         self._scheduled: dict[str, str] = {}  # cwd -> job_id
         self._enabled: dict[str, bool] = {}   # cwd -> enabled
+        self._messages: dict[str, str] = {}   # cwd -> per-cwd message override
 
     def is_enabled(self, cwd: str) -> bool:
         return self._enabled.get(cwd, False)
 
     def set_enabled(self, cwd: str, enabled: bool) -> None:
         self._enabled[cwd] = enabled
+
+    def get_message(self, cwd: str) -> str:
+        """Return the resume-nudge text for ``cwd``.
+
+        Falls back to ``DEFAULT_RESUME_MESSAGE`` when no per-cwd override has
+        been set. Read by ``schedule_resume`` to fill in the message when the
+        caller didn't pass one explicitly.
+        """
+        return self._messages.get(cwd, DEFAULT_RESUME_MESSAGE)
+
+    def set_message(self, cwd: str, message: str) -> None:
+        """Set a per-cwd override for the resume-nudge text.
+
+        Operators use this to give the resumed session context (or to pick
+        their own short acknowledgement) without forking a call site. Analog
+        of ``set_enabled`` for the auto-resume toggle itself. An explicit
+        ``message`` argument to ``schedule_resume`` still wins over this
+        per-cwd setting — see ``TestScheduleResumeMessagePropagation``.
+        """
+        self._messages[cwd] = message
 
     def is_limit_notification(self, message: str | None) -> bool:
         """Check if a notification message indicates a session rate limit.
@@ -272,15 +305,25 @@ class AutoResumeService:
         cwd: str,
         reset_time: datetime,
         tz_name: str,
-        message: str = DEFAULT_RESUME_MESSAGE,
+        message: str | None = None,
         session_id: str | None = None,
         project_folder: str | None = None,
     ) -> str:
         """Schedule an auto-resume job at the given reset time.
 
+        The ``message`` argument is the explicit-override route: a caller
+        like the session-hooks router can hand-craft a one-off nudge. When
+        omitted, ``schedule_resume`` falls back to the per-cwd setting via
+        ``get_message`` and finally to ``DEFAULT_RESUME_MESSAGE`` — so an
+        operator's ``set_message(cwd, ...)`` reaches the pane without any
+        call-site change.
+
         Returns the job_id for tracking.
         """
         from app.services.scheduling.scheduler import scheduler_service
+
+        if message is None:
+            message = self.get_message(cwd)
 
         job_id = f"auto-resume-{hash(cwd) % 100000}"
 
