@@ -36,6 +36,30 @@ bestond alleen om contextverlies tussen die rollen te overbruggen en is niet mee
 Dít Agent Mail is iets anders: **machine-breed, tussen willekeurige sessies**, niet aan
 kanban-dispatch gekoppeld.
 
+## Wat Agent Mail niet is
+
+Claude Code 2.1.224 shipte native `SendMessage`/`ListAgents` — ad-hoc
+cross-session messaging tussen willekeurige CC-sessies op macOS/Linux,
+zonder Cockpit of kanban. Agent Mail vervangt die niet; beide bestaan
+naast elkaar met aanvullende scope.
+
+Agent Mail is **kanban-coupled** (elke message landt in `kanban_ops`
+als activity-feed entry, gekoppeld aan een `repo_id` + dispatched run)
+en voert een `kind`-taxonomie (`context_request`/`handoff`/`answer`)
+met `request_status`-lifecycle. CC native is **identity-loos** (sessies
+ontdekken elkaar via `name`) en heeft alleen platte messages. Geen
+`mail_team_members`-roster, geen externe-tool-actor-model, geen
+wakeability-loop, geen Frontend inbox-UI binnen Cockpit.
+
+Een operator die buiten Cockpit meerdere CC-sessies op meerdere
+machines laat praten, gebruikt vandaag terecht CC native. Agent Mail
+verplicht eerst een Cockpit-deployment — bewust, want de doelgroep is
+operator-die-Cockpit-gebruikt, niet willekeurige-CC-gebruiker.
+
+Volledige capability-mapping en de afweging (a) keep, (b) deprecate,
+(c) integrate staat in
+[`cc-native-cross-session-decision.md`](cc-native-cross-session-decision.md).
+
 ## Wat hergebruikt wordt (i.p.v. herbouwd)
 
 Upstream bouwde voor Agent Mail een aantal subsystemen die deze fork al **in andere vorm**
