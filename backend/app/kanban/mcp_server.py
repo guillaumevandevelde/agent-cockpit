@@ -1040,6 +1040,17 @@ async def permission_prompt(card_id: str, tool_name: str,
     decisions (sessie eindigt); this is for permission decisions (sessie
     blijft). See analysis doc §4 for the rolverdeling.
 
+    Layering — runs *after* the platform Inference-hooks layer (Anthropic
+    Enterprise beta, aug 2026). Inference hooks beoordelen de hele governed
+    prompt server-side vóór inferentie; CC 2.1.222's auto-mode classifier
+    beoordeelt de tool-call voordat die dit gate bereikt; deze tool geeft
+    de lokale mens het laatste woord op één tool-call. Een Inference-hook-deny
+    stopt de tool-call niet eens — de hele prompt sterft eerder. Een deny hier
+    stopt alleen de specifieke tool-call die de classifier als ``ask`` heeft
+    gemarkeerd. Drie lagen chainen, ze concurreren niet. Zie
+    ``docs/cockpit/inference-hooks-vs-permission-prompt.md`` voor de
+    composability-tabel en de afbakening.
+
     The gate renders in the kanban-UI via ``gate.question`` (Markdown), which
     carries both the tool name and a JSON dump of the args so a human can
     see exactly which call they're being asked to approve.
