@@ -113,14 +113,18 @@ is bovendien hetzelfde woord dat elders (Impediment) "een mens moet ingrijpen" b
 | `725fbdd3` | B↔C-correlatie /plans/overview | `c0cccd74` | levende Backlog-zuster (ready) | 🟢 gezond |
 | `528c5ca2` | `kanban_plans` uitfaseren | `9e33a359` | in `engineer`-kolom, actief geclaimd (in progress) | 🟢 gezond |
 
-**Meetcommando** (reproduceer de inventaris tegen de kanban-DB):
+**Meetcommando** (zoals oorspronkelijk gedraaid op peildatum 2026-07-17 — hieronder
+ter illustratie; de kanban-DB leeft in `~/.claude-registry/kanban.db` en de
+`project_key` wordt tegenwoordig via `resolve_project_key` afgeleid uit de
+git-remote, dus een verse reproduceer van deze inventaris vraagt eerst om een
+`resolve_project_key`-call op de werkboom en gebruikt dat pad + key):
 
 ```bash
 # per Backlog-kaart met depends_on: toont elke dep-id + of die nog bestaat en z'n kolom
 python3 -c '
 import sqlite3
-con = sqlite3.connect("file:backend/claude_registry.db?mode=ro", uri=True)
-for row in con.execute("SELECT c.id, c.title, c.depends_on FROM kanban_cards c WHERE c.project_key=\"git:github.com/guillaumevandevelde/claude-cockpit\" AND c.column=\"Backlog\" AND c.depends_on IS NOT NULL AND c.depends_on != \"[]\""):
+con = sqlite3.connect("file:~/.claude-registry/kanban.db?mode=ro", uri=True)
+for row in con.execute("SELECT c.id, c.title, c.depends_on FROM kanban_cards c WHERE c.project_key=\"<resolved key>\" AND c.column=\"Backlog\" AND c.depends_on IS NOT NULL AND c.depends_on != \"[]\""):
     print(row)
 '
 # een dep-id is 'dangling' als deze query 0 rijen geeft:
