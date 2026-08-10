@@ -149,7 +149,8 @@ jobs:
       - name: Doc broken-link drift
         id: doc-links
         # Signal-only: surfaces relative Markdown links inside
-        # docs/cockpit/*.md that don't resolve to an existing file.
+        # docs/cockpit/*.md, .claude/skills/**/*.md, and
+        # .claude/agents/*.md that don't resolve to an existing file.
         # Pure anchors, absolute paths, and URI schemes are skipped.
         # Advisory by design.
         run: |

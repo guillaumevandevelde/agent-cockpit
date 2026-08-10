@@ -117,7 +117,7 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Docs / decision register
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
 ./scripts/check-doc-frontmatter.sh            # Flag docs/cockpit/*.md zonder OKF-frontmatter of met onbekende type/status (advisory; --strict = exit 1)
-./scripts/check-doc-links.sh                  # Flag relatieve Markdown-links in docs/cockpit/*.md met ontbrekend target (advisory; --strict = exit 1)
+./scripts/check-doc-links.sh                  # Flag relatieve Markdown-links in docs/cockpit/*.md, .claude/skills/**/*.md en .claude/agents/*.md met ontbrekend target (advisory; --strict = exit 1)
 ./scripts/check-test-harness-coverage.sh      # Flag scripts/test_*.sh niet in de # Test-blok van CLAUDE.md (of vice-versa); advisory + --strict (zie kaart 5e988e4e)
 ./scripts/check-ci-health.sh                   # CI-doesn't-run / consecutive-red Acts-detector (zie kaart 4cae38ff…); advisory + --strict; fixtures via CI_HEALTH_FIXTURES_DIR=<dir>
 ./scripts/check-doc-readability.py            # Meet de leesbaarheidsnorm uit docs/cockpit/taalgebruik-conventies.md: zinnen >40 woorden, alinea's >150 woorden, hybride werkwoorden (advisory; --strict = exit 1)

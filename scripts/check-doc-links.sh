@@ -104,13 +104,22 @@ while IFS=$'\t' read -r file line target; do
 done < <(
   printf '%s\0' "${source_files_args[@]}" \
     | xargs -0 perl -ne '
-        if (/^[ \t]{0,3}(```|~~~)/) { $fenced = !$fenced; next }
-        next if $fenced;
-        $line = $_;
-        $line =~ s/`[^`]*`//g;
-        while ($line =~ /!?\[[^]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))(?:\s+[^)]*)?\s*\)/g) {
-          $target = defined($1) ? $1 : $2;
-          print "$ARGV\t$.\t$target\n";
+        # Per-file reset runs at the very end of the body. Earlier versions
+        # had it after the regex loop, but two `next`-takken above skipped
+        # it when a file ended on (or inside) a fenced block — the previous
+        # file'\''s $. then bled into the next and $fenced stayed non-zero,
+        # silently skipping the next file'\''s links as if they were code
+        # (kanban card 216c8ada…). Without `next` the if/elsif chain always
+        # reaches the eof reset; the reset runs AFTER the link extraction
+        # so $. still carries the real line number at print-time.
+        if (/^[ \t]{0,3}(```|~~~)/) { $fenced = !$fenced }
+        elsif (! $fenced) {
+          $line = $_;
+          $line =~ s/`[^`]*`//g;
+          while ($line =~ /!?\[[^]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))(?:\s+[^)]*)?\s*\)/g) {
+            $target = defined($1) ? $1 : $2;
+            print "$ARGV\t$.\t$target\n";
+          }
         }
         if (eof) { close ARGV; $. = 0; $fenced = 0 }
       '
