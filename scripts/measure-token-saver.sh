@@ -7,11 +7,20 @@
 # without a prompt-mutating saver applied.
 #
 # Subcommands:
-#   compare     — default; runs two counterbalanced trials with three variants
-#   baseline    — runs only the no-saver variant
-#   with-saver  — runs only the prompt-mutated proxy variant
-#   real-saver  — runs only the real-RTK-hook variant (requires RTK on PATH or
-#                 COCKPIT_RTK_BIN; fails closed if no binary resolves)
+#   compare       — default; runs two counterbalanced trials with three variants
+#   baseline      — runs only the no-saver variant
+#   with-saver    — runs only the prompt-mutated proxy variant
+#   with-injector — runs only the verbatim Caveman + Ponytail slice variant
+#                   (loads the production constants from
+#                   backend/app/kanban/prompt_injectors.py and injects them
+#                   into the prompt file, mirroring build_card_prompt's
+#                   preamble assembly)
+#   real-saver    — runs only the real-RTK-hook variant (requires RTK on PATH or
+#                   COCKPIT_RTK_BIN; fails closed if no binary resolves)
+#   full-compare  — runs four variants × two counterbalanced trials
+#                   (baseline / with-saver / with-injector / real-saver);
+#                   the canonical kaart 5934b954... measurement for the
+#                   verbatim slice over ≥2 dispatches same column
 #
 # See docs/cockpit/token-saver-meet-harnas.md for the design rationale and
 # docs/superpowers/specs/2026-07-24-token-saver-integration-design.md §8.4
@@ -27,19 +36,28 @@ source "$SCRIPT_DIR/lib/worktree-trap.sh"
 
 CMD="${1:-compare}"
 case "$CMD" in
-    baseline|with-saver|real-saver|compare) ;;
+    baseline|with-saver|with-injector|real-saver|compare|full-compare) ;;
     -h|--help|help)
         cat <<EOF
-Usage: $0 [baseline|with-saver|real-saver|compare]
+Usage: $0 [baseline|with-saver|with-injector|real-saver|compare|full-compare]
 
 Subcommands:
-  compare     default; runs two isolated trials in counterbalanced order with
-              baseline / with-saver / real-saver variants
-  baseline    runs one isolated no-saver variant
-  with-saver  runs one isolated saver-mutated variant (prompt-mutation proxy)
-  real-saver  runs one isolated variant with the actual RTK hook installed
-              into the scratch worktree's .claude/settings.json. Fails closed
-              if no RTK binary resolves (COCKPIT_RTK_BIN, cache, or PATH).
+  compare       default; runs two isolated trials in counterbalanced order with
+                baseline / with-saver / real-saver variants
+  full-compare  runs two isolated trials with four variants (baseline /
+                with-saver / with-injector / real-saver). Use this when you
+                need the verbatim Caveman+Ponytail slice on top of the
+                proxy + RTK; the canonical run for kaart 5934b954...
+  baseline      runs one isolated no-saver variant
+  with-saver    runs one isolated saver-mutated variant (prompt-mutation proxy)
+  with-injector runs one isolated variant with the verbatim upstream
+                Caveman + Ponytail slices loaded from
+                backend/app/kanban/prompt_injectors.py and injected into
+                the prompt file. Fails closed (non-zero) when the import
+                cannot resolve the production module.
+  real-saver    runs one isolated variant with the actual RTK hook installed
+                into the scratch worktree's .claude/settings.json. Fails closed
+                if no RTK binary resolves (COCKPIT_RTK_BIN, cache, or PATH).
 
 Output: a Markdown table with one row per trial/variant and separate input,
 cache_creation, cache_read, output, pass_tests, and pass_diff columns.
@@ -48,7 +66,9 @@ The harness creates a fresh scratch git worktree and reapplies the
 backend/app/kanban/dispatch.py golden-task revert for every variant. In
 compare mode each trial runs baseline / with-saver / real-saver (in that
 order on trial 1, reverse on trial 2) so neither worktree state nor variant
-order is a confounder. Scratch worktrees are removed on exit.
+order is a confounder. In full-compare the four-variant set runs in the
+order baseline → with-saver → with-injector → real-saver on trial 1 and
+the reverse on trial 2. Scratch worktrees are removed on exit.
 
 Requires: claude CLI on PATH, git, pytest (via venv or system). Each variant
 runs in its own detached scratch worktree created from the resolved baseline
@@ -64,7 +84,7 @@ EOF
         exit 0
         ;;
     *)
-        echo "error: unknown subcommand '$CMD' (expected baseline|with-saver|real-saver|compare)" >&2
+        echo "error: unknown subcommand '$CMD' (expected baseline|with-saver|with-injector|real-saver|compare|full-compare)" >&2
         exit 2
         ;;
 esac
@@ -140,6 +160,22 @@ run_one() {
     if [ "$variant" = "with-saver" ]; then
         local mutated="$prompt_file.mutated"
         apply_saver "$prompt_file" "$mutated"
+        raw_prompt="$mutated"
+    elif [ "$variant" = "with-injector" ]; then
+        # Verbatim slice from production constants — see apply_injector in
+        # measure_token_saver_lib.sh. Refuses to fall back to a stub when
+        # the import can't resolve, mirroring apply_real_saver's
+        # fail-closed contract: a no-op measurement here would emit
+        # numbers that aren't the verbatim slice and is exactly the bug
+        # this helper exists to fix.
+        local mutated="$prompt_file.injected"
+        if ! apply_injector "$prompt_file" "$mutated" 2> "${result_prefix}.injector.err"; then
+            printf 'with-injector apply failed (rc=%s): %s\n' "$?" \
+                "$(tr '\n' ' ' < "${result_prefix}.injector.err")" \
+                > "${result_prefix}.missing"
+            cleanup_scratch_worktree "$REPO_ROOT" "$wt"
+            return 0
+        fi
         raw_prompt="$mutated"
     elif [ "$variant" = "real-saver" ]; then
         # Install the RTK hook into the scratch worktree's .claude/settings.json
@@ -221,7 +257,7 @@ emit_table() {
     printf '|--------------------|--------------|------------------|--------------|----------|-------------|------------|\n'
     local trial variant
     for trial in "$@"; do
-        for variant in baseline with-saver real-saver; do
+        for variant in baseline with-saver with-injector real-saver; do
             if [ -s "$RESULT_DIR/trial-${trial}-${variant}.json" ] \
                 || [ -s "$RESULT_DIR/trial-${trial}-${variant}.score" ] \
                 || [ -s "$RESULT_DIR/trial-${trial}-${variant}.missing" ]; then
@@ -250,6 +286,10 @@ case "$CMD" in
         run_one 1 with-saver
         emit_table 1
         ;;
+    with-injector)
+        run_one 1 with-injector
+        emit_table 1
+        ;;
     real-saver)
         run_one 1 real-saver
         emit_table 1
@@ -259,6 +299,20 @@ case "$CMD" in
         run_one 1 with-saver
         run_one 1 real-saver
         run_one 2 real-saver
+        run_one 2 with-saver
+        run_one 2 baseline
+        emit_table 1 2
+        ;;
+    full-compare)
+        # Kaart 5934b954... — verbatim Caveman+Ponytail over ≥2 dispatches in
+        # the same column. Trial 1 forward, trial 2 reverse, so neither
+        # worktree state nor variant order is a confounder.
+        run_one 1 baseline
+        run_one 1 with-saver
+        run_one 1 with-injector
+        run_one 1 real-saver
+        run_one 2 real-saver
+        run_one 2 with-injector
         run_one 2 with-saver
         run_one 2 baseline
         emit_table 1 2
