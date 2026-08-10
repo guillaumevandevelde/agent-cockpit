@@ -204,26 +204,40 @@ check "fence-end → names the dead link target" \
   'echo "$out" | grep -qF "./does-not-exist.md"'
 
 # ----------------------------------------------------------------------------
-echo "Task 13: even line count — clean run no false reports"
-fence_clean="$TMP/fence-clean"; mkdir -p "$fence_clean"
+echo "Task 13: closing fence — line numbers correct when file A ends on a closing fence"
+# Repro for kanban card 216c8ada…'s measured symptom: a file ending on a
+# CLOSING fence (even fence count) used to skip the per-file reset via
+# `next`, leaving $. inflated by the previous file's line count. Task 12
+# covers an opening-fence end (silent-skip); this task covers the case
+# the card actually measured — a closing fence that inflates the next
+# file's line numbers by +N.
+#
+# File A: 4 lines, opens and closes a fence (even fence count → $fenced
+#         ends at 0, so the silent-skip failure mode doesn't fire; only
+#         the inflated-$. mode does).
+# File B: dead link on line 2.
+#   Old code: reports `:6` (4 + 2).
+#   New code: reports `:2` ($. reset at eof).
+fence_close="$TMP/fence-close"; mkdir -p "$fence_close"
 {
-  printf '# A\n'
-  printf '```bash\n'
-  printf 'echo inside fence\n'
-  printf '```\n'
-  printf 'plain link to existing\n'
-} > "$fence_clean/aaa-fenced-clean.md"
-cat > "$fence_clean/bbb-clean.md" <<'EOF'
+  printf '# A — opens and closes a fence\n'
+  printf '```bash\n'        # line 2: opening fence
+  printf 'echo in fence\n'   # line 3
+  printf '```\n'            # line 4: closing fence — file ends here
+} > "$fence_close/aaa-close-fence.md"
+cat > "$fence_close/bbb-dead-link.md" <<'EOF'
 # B
-[a link to nothing special](./does-not-exist.md)
+[missing](./does-not-exist.md)
 EOF
-# No expected false negatives here. The dead link in bbb-clean.md should
-# still be reported with its real line number (line 2), not the sum of
-# aaa-fenced-clean.md's line count + 2.
-out=$(run_scope "$fence_clean" 2>&1); rc=$?
-check "fence-clean → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
-check "fence-clean → reports the EXPECTED line number 2" \
-  'echo "$out" | grep -qE "bbb-clean.md:2\b"'
+out=$(run_scope "$fence_close" 2>&1); rc=$?
+check "fence-close → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
+check "fence-close → prints WARNING" 'echo "$out" | grep -qE "WARNING:"'
+check "fence-close → reports the EXPECTED line number 2" \
+  'echo "$out" | grep -qE "bbb-dead-link.md:2\b"'
+check "fence-close → does NOT report an inflated line 6" \
+  '! echo "$out" | grep -qE "bbb-dead-link.md:6\b"'
+check "fence-close → names the dead link target" \
+  'echo "$out" | grep -qF "./does-not-exist.md"'
 
 # ----------------------------------------------------------------------------
 echo "Task 14: odd fence count — second file is NOT silently skipped"
