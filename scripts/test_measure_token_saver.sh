@@ -342,6 +342,53 @@ check "second trial reverses the variant order" \
 check "compare reports both trials" \
     '[ "$(grep -c "| trial-[12]-baseline" "$TMP/compare.out")" -eq 2 ] && [ "$(grep -c "| trial-[12]-with-saver" "$TMP/compare.out")" -eq 2 ]'
 
+# Every compare run must execute inside the structural sandbox, not a linked
+# git worktree inside $REPO_ROOT. The card-shaped variants already require
+# this (their prompt carries the real ship recipe); baseline/with-saver
+# don't today, but the prompt that drives them is a property the operator
+# can edit, and a prompt edit is the same class of regression that pushed
+# to origin/master in 2026-08-10 (kaart ee905064…/5934b954…, revert
+# 2e0eb256). The stub's $PWD is the run's working tree — assert no .git
+# and no reachable git toplevel in any of them.
+SANDBOX_CHECK_RC=0
+python3 - "$TMP/claude.log" "$REPO_ROOT_FOR_TESTS" "$HOME" <<'PY' >/dev/null 2>"$TMP/sandbox_check.err" || SANDBOX_CHECK_RC=$?
+import os, subprocess, sys
+log, repo, home = sys.argv[1], sys.argv[2], sys.argv[3]
+trees = []
+with open(log) as fh:
+    for line in fh:
+        pwd, _, _ = line.rstrip("\n").partition("|")
+        if pwd and pwd not in trees:
+            trees.append(pwd)
+errors = []
+for t in trees:
+    if os.path.exists(os.path.join(t, ".git")):
+        errors.append(f"{t}: contains .git")
+    try:
+        r = subprocess.run(
+            ["git", "-C", t, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            errors.append(f"{t}: resolves as git toplevel ({r.stdout.strip()})")
+    except Exception as exc:
+        errors.append(f"{t}: git probe failed ({exc})")
+    if t.startswith(repo + "/") or t == repo:
+        errors.append(f"{t}: lives inside repo root (must be a sandbox)")
+    if not t.startswith(home + "/.cache/"):
+        errors.append(f"{t}: not under $HOME/.cache (must be the canonical sandbox root)")
+if errors:
+    print("\n".join(errors))
+    sys.exit(1)
+sys.exit(0)
+PY
+if [ -s "$TMP/sandbox_check.err" ]; then
+    bad "compare run-tree sandbox invariants (see $(basename "$TMP/sandbox_check.err")): $(tr '\n' ' ' < "$TMP/sandbox_check.err")"
+else
+    ok "every compare run-tree has no .git entry, is not a git toplevel, and lives under \$HOME/.cache outside the repo root"
+fi
+[ "$SANDBOX_CHECK_RC" -eq 0 ] || true   # the bad() above already recorded the failure
+
 # --- injector-compare smoke (kaart 5934b954…) ---------------------------
 # Same stub claude + same fake pytest; this time the harness runs the
 # canonical two-arm, two-trial injector-compare. Both arms come out of the

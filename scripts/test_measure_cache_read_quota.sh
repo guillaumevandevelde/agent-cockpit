@@ -65,6 +65,17 @@ case "$out" in
   *)           ok  "fit tolerates a window reset (util drop)" ;;
 esac
 
+# --- source-grep: amplify's containment is the only thing between it and
+# the operator's repo (cwd = operator-cwd, the script does not isolate the
+# spawn). The invariant: claude is invoked with `--allowedTools ""` so
+# the agent has zero tools and therefore zero write surface. This test
+# borgt that flag against a future refactor (kaart ee905064…).
+if grep -qF -- '--allowedTools ""' "$SCRIPT"; then
+    ok "amplify subcommand pins --allowedTools \"\" (zero-tool containment)"
+else
+    bad "amplify subcommand pins --allowedTools \"\" (zero-tool containment)"
+fi
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]
