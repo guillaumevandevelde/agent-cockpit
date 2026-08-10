@@ -121,6 +121,28 @@ check "slow-crash guard tripped"              '[ "$GUARD2" -ge 1 ]'
 rm -rf "$TMP_W2"
 
 echo ""
+echo "Task 4d: long-running-but-never-healthy runs trip the guard (regression)"
+# Each run outlives COCKPIT_WINDOW but the health URL never answers, so the
+# watchdog kills it. Uptime-based recovery reset fails=0 every time and the
+# guard never fired (kaart 917fdef6…); recovery now needs an observed
+# successful health check.
+TMP_W2B="$(mktemp -d)"
+timeout 40 bash -c '
+    export COCKPIT_NO_MAIN=1
+    source "'"$SCRIPT_DIR"'/cockpit.sh"
+    COCKPIT_BACKOFF_BASE=0 COCKPIT_WINDOW=0 \
+    COCKPIT_HEALTH_GRACE=0 COCKPIT_HEALTH_INTERVAL=0 \
+    COCKPIT_HEALTH_TIMEOUT=1 COCKPIT_HEALTH_MAXFAIL=1 \
+    LOG_DIR="'"$TMP_W2B"'" RUN_DIR="'"$TMP_W2B"'/.run" \
+        watch_service hungflap "sleep 60" "http://127.0.0.1:1/nope"
+' >/dev/null 2>&1
+RC2B=$?
+GUARD2B="$(grep -c 'crash-loop' "$TMP_W2B/supervisor.log" 2>/dev/null || echo 0)"
+check "never-healthy guard terminated (no hang)" '[ "$RC2B" -ne 124 ]'
+check "never-healthy guard tripped"              '[ "$GUARD2B" -ge 1 ]'
+rm -rf "$TMP_W2B"
+
+echo ""
 echo "Task 4c: watch_service stops cleanly on TERM (no orphan/respawn)"
 TMP_W3="$(mktemp -d)"
 ( export COCKPIT_NO_MAIN=1
