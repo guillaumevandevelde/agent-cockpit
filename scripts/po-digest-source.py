@@ -95,7 +95,6 @@ REVERSAL_MARKER = "↩︎ herzien door"
 DEFAULT_KANBAN_DB = "~/.claude-registry/kanban.db"
 
 # Path the collector walks for the prior-week file when --since is omitted.
-# Path the collector walks for the prior-week file when --since is omitted.
 # Mirrors the spec §6.1 contract: doc-based, not state-based.
 DEFAULT_DIGEST_DIRNAME = "docs/cockpit/po-digest"
 
@@ -243,9 +242,9 @@ def _resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime, dict[
             if p.is_file() and p.suffix == ".md"
         ]
         files.sort(key=lambda p: (
-            # Non-week files sort last so they are tried only after every
-            # parseable week file has been skipped over.
-            _WEEK_FILE_RE.match(p.stem) is None,
+            # Week files sort first and newest-first. Non-week files follow,
+            # so an incidental `until:` line in README.md cannot win.
+            _WEEK_FILE_RE.match(p.stem) is not None,
             p.stem,
         ), reverse=True)
         for candidate in files:
@@ -260,11 +259,14 @@ def _resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime, dict[
             # looking. README.md / out-of-band notes never had one.
         # Walked the whole digest dir without finding a usable until.
         if files:
-            errors["window_fallback"] = (
-                "no prior week file in "
-                f"{digest_dir} has a parseable `until:` frontmatter; "
-                "falling back to now − 7d"
-            )
+            reason = "no prior week file has a parseable `until:` frontmatter"
+        else:
+            reason = "digest directory contains no Markdown files"
+    else:
+        reason = "digest directory does not exist"
+    errors["window_fallback"] = (
+        f"{reason} at {digest_dir}; falling back to now − 7d"
+    )
     return now - timedelta(days=7), explicit_until, errors
 
 

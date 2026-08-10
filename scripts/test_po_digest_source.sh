@@ -483,6 +483,42 @@ assert \"until\" in err.lower() or \"frontmatter\" in err.lower(), err
 "'
 
 # ----------------------------------------------------------------------------
+echo "Task 13: fallback is visible for missing/empty dirs and non-week files never outrank week files"
+db13="$TMP/t13.db"; seed_db "$db13"
+NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+out=$(PO_DIGEST_DIR="$TMP/missing-digest-dir" python3 "$SUT" --kanban-db "$db13" --project-key "pk" --until "$NOW_ISO" 2>&1); rc=$?
+check "missing-dir → exit 0" '[ "$rc" -eq 0 ]'
+check "missing-dir → errors.window_fallback explains missing directory" 'echo "$out" | pycheck "
+err=d.get(\"errors\",{}).get(\"window_fallback\",\"\")
+assert err and \"does not exist\" in err, err
+"'
+
+mkdir -p "$TMP/empty-digest-dir"
+out=$(PO_DIGEST_DIR="$TMP/empty-digest-dir" python3 "$SUT" --kanban-db "$db13" --project-key "pk" --until "$NOW_ISO" 2>&1); rc=$?
+check "empty-dir → exit 0" '[ "$rc" -eq 0 ]'
+check "empty-dir → errors.window_fallback explains no markdown files" 'echo "$out" | pycheck "
+err=d.get(\"errors\",{}).get(\"window_fallback\",\"\")
+assert err and \"no Markdown files\" in err, err
+"'
+
+mkdir -p "$TMP/non-week-until"
+cat > "$TMP/non-week-until/2026-W33.md" <<'EOF'
+---
+until: "2026-08-10T06:00:49Z"
+---
+EOF
+cat > "$TMP/non-week-until/README.md" <<'EOF'
+Example metadata:
+until: "2099-01-01T00:00:00Z"
+EOF
+out=$(PO_DIGEST_DIR="$TMP/non-week-until" python3 "$SUT" --kanban-db "$db13" --project-key "pk" --until "$NOW_ISO" 2>&1); rc=$?
+check "non-week-until → exit 0" '[ "$rc" -eq 0 ]'
+check "non-week-until → week file outranks README until line" 'echo "$out" | pycheck "
+assert d[\"window\"][\"since\"].startswith(\"2026-08-10T06:00:49\"), d[\"window\"]
+"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
