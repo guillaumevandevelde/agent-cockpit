@@ -126,12 +126,18 @@ echo "Task 4d: long-running-but-never-healthy runs trip the guard (regression)"
 # watchdog kills it. Uptime-based recovery reset fails=0 every time and the
 # guard never fired (kaart 917fdef6…); recovery now needs an observed
 # successful health check.
+# GRACE=2 is load-bearing: it makes each run last ~2s, so it genuinely
+# outlives COCKPIT_WINDOW=0. With GRACE=0 the watchdog killed the run within
+# the same second (ran=0), which the OLD uptime rule also counted as failed —
+# the assertion passed in both the broken and the fixed state and proved
+# nothing. Measured: GRACE=2 fails on 04b18639^ (RC=124, 0 crash-loop lines)
+# and passes on 04b18639.
 TMP_W2B="$(mktemp -d)"
 timeout 40 bash -c '
     export COCKPIT_NO_MAIN=1
     source "'"$SCRIPT_DIR"'/cockpit.sh"
     COCKPIT_BACKOFF_BASE=0 COCKPIT_WINDOW=0 \
-    COCKPIT_HEALTH_GRACE=0 COCKPIT_HEALTH_INTERVAL=0 \
+    COCKPIT_HEALTH_GRACE=2 COCKPIT_HEALTH_INTERVAL=1 \
     COCKPIT_HEALTH_TIMEOUT=1 COCKPIT_HEALTH_MAXFAIL=1 \
     LOG_DIR="'"$TMP_W2B"'" RUN_DIR="'"$TMP_W2B"'/.run" \
         watch_service hungflap "sleep 60" "http://127.0.0.1:1/nope"
