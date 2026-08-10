@@ -66,11 +66,12 @@
 - [Beslissing — Leaf-spike maakt zijn eigen vervolgkaarten aan (autonomie i.p.v. review-round-trip)](./autonomous-leaf-spike-followup.md): type=decision status=decided
 - [Beslissing — Bordkaart-layout: titel leest volledig, metadata scant op één regel, lege lanes worden rails](./board-card-layout-decision.md): type=decision status=decided
 - [Telt cache_read mee in het Claude-abonnementsquotum? — gecontroleerde meting](./cache-read-quota-decision.md): type=decision status=decided
-- [CC 2.1.224 native cross-session SendMessage + ListAgents — adopt, integrate, or position against Agent Mail?](./cc-native-cross-session-decision.md): type=decision status=besloten
+- [CC 2.1.224 native cross-session SendMessage + ListAgents — adopt, integrate, or position against Agent Mail?](./cc-native-cross-session-decision.md): type=decision status=decided
 - [Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie](./code-knowledge-graph-navigation-decision.md): type=decision status=decided
 - [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md): type=decision status=decided
 - [Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies](./headless-session-retro-decision.md): type=decision status=decided
 - [Beslissing: human-takeover-UX voor headless sessies](./human-takeover-headless-decision.md): type=decision status=decided
+- [Anthropic Inference hooks (Aug 5, 2026, Enterprise beta) vs. Cockpit's permission_prompt — composability, overlap, and what we do](./inference-hooks-vs-permission-prompt.md): type=decision status=decided
 - [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md): type=decision status=superseded
 - [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md): type=decision status=superseded
 - [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md): type=decision status=decided
