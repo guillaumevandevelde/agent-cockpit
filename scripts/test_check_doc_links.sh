@@ -172,6 +172,89 @@ check "agents clean → exit 0" '[ "$rc" -eq 0 ]'
 check "agents clean → prints OK" 'echo "$out" | grep -qE "^OK:"'
 
 # ----------------------------------------------------------------------------
+echo "Task 12: fence-on-last-line — next file's line numbers are correct"
+# Repro for kanban card 216c8ada…: a file ending on a fence line previously
+# skipped the per-file reset and either inflated line numbers or (worse)
+# silently skipped the next file because $fenced stayed non-zero. The
+# filenames sort a-z, so the fence-end file is always processed before
+# the link-bearing one.
+fence_end="$TMP/fence-end"; mkdir -p "$fence_end"
+{
+  printf '# Doc A — ends on a fenced block\n'
+  printf 'paragraph one\n'
+  for i in $(seq 3 116); do printf 'line %d\n' "$i"; done
+  printf '```bash\n'    # line 117 — file ends here, on a fence
+} > "$fence_end/aaa-fence-end.md"
+cat > "$fence_end/bbb-dead-link.md" <<'EOF'
+# Doc B — broken link on a known line
+intro
+[missing reference](./does-not-exist.md)
+EOF
+out=$(run_scope "$fence_end" 2>&1); rc=$?
+check "fence-end → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
+check "fence-end → prints WARNING" 'echo "$out" | grep -qE "WARNING:"'
+# The actual line of the link is 3 in bbb-dead-link.md. The bug would
+# either (a) report an inflated line (117 + 3 = 120) or (b) silently
+# skip the file (no warning at all).
+check "fence-end → reports the EXPECTED line number 3" \
+  'echo "$out" | grep -qE "bbb-dead-link.md:3\b"'
+check "fence-end → does NOT report an inflated line 120" \
+  '! echo "$out" | grep -qE "bbb-dead-link.md:120\b"'
+check "fence-end → names the dead link target" \
+  'echo "$out" | grep -qF "./does-not-exist.md"'
+
+# ----------------------------------------------------------------------------
+echo "Task 13: even line count — clean run no false reports"
+fence_clean="$TMP/fence-clean"; mkdir -p "$fence_clean"
+{
+  printf '# A\n'
+  printf '```bash\n'
+  printf 'echo inside fence\n'
+  printf '```\n'
+  printf 'plain link to existing\n'
+} > "$fence_clean/aaa-fenced-clean.md"
+cat > "$fence_clean/bbb-clean.md" <<'EOF'
+# B
+[a link to nothing special](./does-not-exist.md)
+EOF
+# No expected false negatives here. The dead link in bbb-clean.md should
+# still be reported with its real line number (line 2), not the sum of
+# aaa-fenced-clean.md's line count + 2.
+out=$(run_scope "$fence_clean" 2>&1); rc=$?
+check "fence-clean → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
+check "fence-clean → reports the EXPECTED line number 2" \
+  'echo "$out" | grep -qE "bbb-clean.md:2\b"'
+
+# ----------------------------------------------------------------------------
+echo "Task 14: odd fence count — second file is NOT silently skipped"
+# A file with an UNMATCHED opening fence leaves $fenced = 1 across the
+# file boundary under the old code. The next file's body would `next if
+# $fenced;` for every line and report zero broken links — a silent false
+# negative even when the next file genuinely has dead links.
+unbalanced="$TMP/unbalanced"; mkdir -p "$unbalanced"
+{
+  printf '# First — opens a fence but never closes\n'
+  printf '```bash\n'
+  printf 'echo orphan code block\n'
+} > "$unbalanced/aaa-unbalanced-fence.md"
+cat > "$unbalanced/bbb-real-dead-link.md" <<'EOF'
+# Second — has a real dead link
+intro line
+[missing](./nope.md)
+trailer
+EOF
+out=$(run_scope "$unbalanced" 2>&1); rc=$?
+check "unbalanced-fence → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
+check "unbalanced-fence → prints WARNING (link NOT silently skipped)" \
+  'echo "$out" | grep -qE "WARNING:"'
+check "unbalanced-fence → names bbb-real-dead-link.md" \
+  'echo "$out" | grep -qF "bbb-real-dead-link.md"'
+check "unbalanced-fence → reports the link target" \
+  'echo "$out" | grep -qF "./nope.md"'
+check "unbalanced-fence → reports the EXPECTED line 3 (not 5+)" \
+  'echo "$out" | grep -qE "bbb-real-dead-link.md:3\b"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
