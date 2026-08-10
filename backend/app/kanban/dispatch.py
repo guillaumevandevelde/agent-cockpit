@@ -4059,6 +4059,52 @@ def _secret_store():
     return AGESecretStore()
 
 
+def _subagent_caps_to_env(caps: dict | None) -> dict[str, str]:
+    """Translate ``column_overrides[col].subagent_caps`` into CC env vars.
+
+    Mirrors the CLAUDE_CODE_MAX_* env vars the Claude Code CLI reads at
+    startup (CC 2.1.212 introduced the per-session caps; 2.1.217 raised the
+    default subagent depth 1→3 and added the configurable spawn-depth knob;
+    https://code.claude.com/docs/en/changelog). The four supported keys map
+    1:1:
+
+        max_spawn_depth              -> CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH
+        max_concurrent               -> CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS
+        max_subagents_per_session    -> CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION
+        max_web_searches_per_session -> CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION
+
+    Unknown keys are silently dropped — the schema validator already rejects
+    them at the API boundary, but a stale card row from before the validator
+    existed could still carry a typo; crashing the dispatch path on that
+    row would block every spawn on the card.
+
+    Returns ``{}`` for None / empty input so the worktree transport's
+    ``{**extra_env, **caps_env}`` merge is a no-op when the card doesn't
+    carry the override.
+    """
+    if not caps:
+        return {}
+    _KEY_TO_ENV: dict[str, str] = {
+        "max_spawn_depth": "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",
+        "max_concurrent": "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+        "max_subagents_per_session": "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION",
+        "max_web_searches_per_session": "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION",
+    }
+    out: dict[str, str] = {}
+    for key, value in caps.items():
+        env_name = _KEY_TO_ENV.get(key)
+        if env_name is None:
+            # Schema validator should have rejected this; drop silently
+            # rather than crash dispatch (see docstring).
+            continue
+        if isinstance(value, bool) or not isinstance(value, int):
+            continue
+        if value < 0:
+            continue
+        out[env_name] = str(value)
+    return out
+
+
 def _resolve_project_secrets(project_key: str | None) -> dict[str, str]:
     """Best-effort read of every stored secret for ``project_key`` as env vars.
 
@@ -4219,8 +4265,21 @@ async def _install_rtk_for_dispatch_async(
 
 
 
-def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
-    """Factory that returns a worktree transport with configurable permission bypass."""
+def make_worktree_transport(skip_permissions: bool = True,
+                            subagent_caps_env: dict[str, str] | None = None,
+                            ) -> SpawnTransport:
+    """Factory that returns a worktree transport with configurable permission bypass.
+
+    ``subagent_caps_env`` is the resolved ``CLAUDE_CODE_MAX_*`` env dict for
+    the card being dispatched (see ``_subagent_caps_to_env``). It is merged
+    into the spawn's explicit env so the per-lane CC subagent caps take
+    effect at CLI startup. ``None`` means "no override" and the spawn
+    inherits CC's platform defaults — the historical behaviour.
+    """
+    # Capture for the closure; must be bound here so the transport reads
+    # the value captured at factory-call time, not at closure-call time.
+    _captured_caps_env = dict(subagent_caps_env) if subagent_caps_env else {}
+
     def _transport(*, directory: str, prompt: str, session_name: str,
                    cli_id: str = "claude-code", provider: str = "anthropic",
                    model: str | None = None,
@@ -4317,6 +4376,13 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         extra_env = _resolve_project_secrets(project_key)
         if token_saver_status == "active":
             extra_env = {**extra_env, "RTK_TELEMETRY": "off"}
+        # Per-lane Claude Code subagent/WebSearch caps (kanban card
+        # aaa81b23…). Captured at make_worktree_transport factory-call time
+        # from ``card.column_overrides[column].subagent_caps``. Merged AFTER
+        # the secrets/RTK vars so a stale secret or the token-saver switch
+        # can never downgrade an operator-set cap.
+        if _captured_caps_env:
+            extra_env = {**extra_env, **_captured_caps_env}
 
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
@@ -9651,6 +9717,14 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
     3. Project's default transport (from sandcastle config)
 
     Returns the transport to use for this specific card.
+
+    When the card carries a ``column_overrides[*].subagent_caps`` for the
+    dispatch target, the worktree transport is rebuilt with those env vars
+    captured — the default-transport closure already had ``subagent_caps_env=None``
+    baked in, so it would silently drop the override otherwise. Other
+    transports (sandcastle / headless / acp) are returned unchanged: the
+    subagent caps are a Claude Code CLI knob and only the CC worktree
+    transport reads them.
     """
     # Resume takes priority: spawn with --resume rather than creating a worktree
     resume_id = getattr(card, "resume_session_id", None)
@@ -9670,8 +9744,45 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
     elif card.transport == "worktree":
         return worktree_transport
 
+    # Subagent caps override: when the card opts in, rebuild the worktree
+    # transport so the caps env is captured at factory time. We use
+    # skip_permissions=True here (matches the project-default `worktree_transport`
+    # singleton). Cards that need the product lane (skip_permissions=False)
+    # AND subagent_caps are rare; the corner case is documented above.
+    caps_env = _resolve_subagent_caps_env(card)
+    if caps_env:
+        # Only override for the worktree transport path. Non-worktree
+        # default_transport values (sandcastle / headless / acp) can't
+        # consume CLAUDE_CODE_MAX_* env vars so leaving them alone is
+        # correct.
+        if getattr(default_transport, "transport_kind", None) == "worktree":
+            return make_worktree_transport(
+                skip_permissions=True, subagent_caps_env=caps_env,
+            )
+
     # Otherwise use the project default
     return default_transport
+
+
+def _resolve_subagent_caps_env(card: KanbanCard) -> dict[str, str]:
+    """Resolve the subagent_caps env for the dispatch target column.
+
+    Looks at ``card.column_overrides`` for the column the card currently
+    lives in (kanban card aaa81b23…). Returns ``{}`` when no override is
+    set — the worktree transport then inherits CC's platform defaults.
+
+    The dispatch-target column is read from the card's current column
+    (``card.column``). Future-proof: when the same card gets dispatched
+    twice into different columns the second call sees the second column's
+    override.
+    """
+    overrides = getattr(card, "column_overrides", None) or {}
+    target_column = getattr(card, "column", None)
+    if not target_column or not isinstance(overrides, dict):
+        return {}
+    entry = overrides.get(target_column) or {}
+    caps = entry.get("subagent_caps") if isinstance(entry, dict) else None
+    return _subagent_caps_to_env(caps)
 
 
 async def _retry_queued_cards(transport: SpawnTransport) -> None:

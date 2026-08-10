@@ -1107,6 +1107,92 @@ async def test_dispatch_without_column_overrides_is_backwards_compatible():
         await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
         await s.commit()
     assert len(transport.calls) == 1
+
+
+# ---- subagent_caps env injection (kanban card aaa81b23…) ------------------
+#
+# The dispatch path translates ``card.column_overrides[target].subagent_caps``
+# into CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH / CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS
+# (and the two session-cap siblings) so per-lane caps take effect at CC spawn
+# time. The helper is pure and the wire-up runs in the worktree transport's
+# extra_env — captured via ``dispatch._subagent_caps_to_env`` directly here
+# (it is the unit-level contract) plus a RecordingTransport-level smoke
+# (the dispatch path itself doesn't crash when the override is set).
+
+_SUBAGENT_CAPS_TO_ENV_DEPTH_AND_CONCURRENT = {
+    "max_spawn_depth": 3,
+    "max_concurrent": 20,
+}
+
+
+@pytest.mark.asyncio
+async def test_subagent_caps_to_env_maps_known_keys():
+    """The helper emits the documented env vars for the two load-bearing keys
+    (max_spawn_depth -> MAX_SUBAGENT_SPAWN_DEPTH; max_concurrent ->
+    MAX_CONCURRENT_SUBAGENTS). Without this wire the override would round-trip
+    through the API but never reach the spawned CLI."""
+    from app.kanban.dispatch import _subagent_caps_to_env
+    env = _subagent_caps_to_env(_SUBAGENT_CAPS_TO_ENV_DEPTH_AND_CONCURRENT)
+    assert env["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] == "3"
+    assert env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] == "20"
+
+
+@pytest.mark.asyncio
+async def test_subagent_caps_to_env_maps_session_cap_keys():
+    """The session-cap siblings (per-session subagent + web search) are emitted
+    when the override sets them — Claude Code 2.1.212 introduced these and they
+    are part of the same caps family."""
+    from app.kanban.dispatch import _subagent_caps_to_env
+    env = _subagent_caps_to_env({
+        "max_subagents_per_session": 50,
+        "max_web_searches_per_session": 10,
+    })
+    assert env["CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION"] == "50"
+    assert env["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] == "10"
+
+
+@pytest.mark.asyncio
+async def test_subagent_caps_to_env_returns_empty_for_none_or_empty():
+    """None / empty input -> empty dict, so the worktree transport's
+    ``{**extra_env, **subagent_caps_env}`` merge is a no-op when the card
+    doesn't carry the override."""
+    from app.kanban.dispatch import _subagent_caps_to_env
+    assert _subagent_caps_to_env(None) == {}
+    assert _subagent_caps_to_env({}) == {}
+
+
+@pytest.mark.asyncio
+async def test_subagent_caps_to_env_ignores_unknown_keys():
+    """The schema already rejects unknown keys at the API boundary; the
+    helper is the last line of defence and silently drops anything that
+    somehow slips through (e.g. a stale card row from before the schema
+    validator existed). A crash here would block every spawn on that card."""
+    from app.kanban.dispatch import _subagent_caps_to_env
+    env = _subagent_caps_to_env({"max_banana": 5, "max_spawn_depth": 2})
+    assert "CLAUDE_CODE_MAX_BANANA" not in env
+    assert env["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_with_subagent_caps_does_not_crash():
+    """Smoke: a card carrying column_overrides[col].subagent_caps dispatches
+    end-to-end without raising. The env wire-up lives in the worktree
+    transport closure, which is NOT this test's transport (RecordingTransport
+    bypasses it); the helper above covers the actual env generation, and this
+    test guards against the card-level path crashing before the closure runs."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"column_overrides": {
+                "engineer": {
+                    "subagent_caps": {"max_spawn_depth": 3, "max_concurrent": 20},
+                },
+            }})
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
     assert transport.calls[0]["provider"] == "anthropic"
     assert transport.calls[0]["model"] is None
 

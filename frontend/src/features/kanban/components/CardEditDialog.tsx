@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
 import { fetchEndpoints, fetchResumableSessions } from "@/features/cc-bridge/api";
 import { useProviderContext } from "@/contexts/ProviderContext";
-import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider, MINIMAX_MODEL_SUGGESTIONS, type Priority, type WorkType, type ColumnOverride, type KanbanColumn } from "../types";
+import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider, MINIMAX_MODEL_SUGGESTIONS, type Priority, type WorkType, type ColumnOverride, type SubagentCaps, type KanbanColumn } from "../types";
 import { kanbanApi } from "../api";
 import type { EndpointResponse } from "@/features/cc-bridge/types";
 import type { ResumableSession } from "@/types/sessions";
@@ -47,10 +47,30 @@ const COMPATIBLE_PROVIDER = "anthropic-compatible";
 // Form-side shape for one per-column override row. Provider uses the sentinel
 // above to mean "no override"; the model is free text. Serialized to the
 // ColumnOverride API shape ({model, provider} with nulls) on submit.
+//
+// subagent_caps_draft is the *form* shape (empty strings for unset fields
+// so the inputs stay controlled). Serialised to the SubagentCaps API shape
+// (undefined for unset) on submit; the backend validator handles the
+// rest (kaart aaa81b23…).
+type SubagentCapsDraft = {
+  max_spawn_depth: string;
+  max_concurrent: string;
+  max_subagents_per_session: string;
+  max_web_searches_per_session: string;
+};
+
 type OverrideDraft = {
   model: string;
   provider: string;
   endpoint_name: string;
+  subagent_caps_draft: SubagentCapsDraft;
+};
+
+const EMPTY_SUBAGENT_CAPS_DRAFT: SubagentCapsDraft = {
+  max_spawn_depth: "",
+  max_concurrent: "",
+  max_subagents_per_session: "",
+  max_web_searches_per_session: "",
 };
 
 function draftsFromOverrides(
@@ -58,13 +78,55 @@ function draftsFromOverrides(
 ): Record<string, OverrideDraft> {
   const out: Record<string, OverrideDraft> = {};
   for (const [name, ov] of Object.entries(overrides ?? {})) {
+    const caps = ov?.subagent_caps ?? null;
     out[name] = {
       model: ov?.model ?? "",
       provider: ov?.provider ?? DEFAULT_PROVIDER_SENTINEL,
       endpoint_name: ov?.endpoint_name ?? "",
+      subagent_caps_draft: {
+        max_spawn_depth:
+          caps?.max_spawn_depth !== undefined && caps?.max_spawn_depth !== null
+            ? String(caps.max_spawn_depth)
+            : "",
+        max_concurrent:
+          caps?.max_concurrent !== undefined && caps?.max_concurrent !== null
+            ? String(caps.max_concurrent)
+            : "",
+        max_subagents_per_session:
+          caps?.max_subagents_per_session !== undefined &&
+          caps?.max_subagents_per_session !== null
+            ? String(caps.max_subagents_per_session)
+            : "",
+        max_web_searches_per_session:
+          caps?.max_web_searches_per_session !== undefined &&
+          caps?.max_web_searches_per_session !== null
+            ? String(caps.max_web_searches_per_session)
+            : "",
+      },
     };
   }
   return out;
+}
+
+function _subagent_caps_draft_to_value(
+  draft: SubagentCapsDraft,
+): SubagentCaps | null {
+  // Empty / invalid fields -> omitted; non-empty ints keep their value.
+  // We only emit the dict when at least one field has a non-empty integer;
+  // otherwise the wire payload stays clean (no empty `subagent_caps: {}`
+  // round-trip that would confuse the next save).
+  const out: SubagentCaps = {};
+  for (const [key, raw] of Object.entries(draft) as [
+    keyof SubagentCapsDraft,
+    string,
+  ][]) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) continue;
+    out[key] = n;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 function overridesFromDrafts(
@@ -77,7 +139,12 @@ function overridesFromDrafts(
       d.provider === DEFAULT_PROVIDER_SENTINEL ? null : d.provider;
     const endpoint_name =
       provider === COMPATIBLE_PROVIDER ? (d.endpoint_name.trim() || null) : null;
-    if (model || provider) out[name] = { model, provider, endpoint_name };
+    const subagent_caps = _subagent_caps_draft_to_value(d.subagent_caps_draft);
+    if (model || provider || subagent_caps) {
+      const entry: ColumnOverride = { model, provider, endpoint_name };
+      if (subagent_caps) entry.subagent_caps = subagent_caps;
+      out[name] = entry;
+    }
   }
   return Object.keys(out).length ? out : null;
 }
@@ -160,6 +227,13 @@ export function CardEditDialog({
   const [executorAgentId, setExecutorAgentId] = useState<string>(initial?.executor_agent_id ?? AUTO);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(
     !!(initial?.analyst_agent_id || initial?.executor_agent_id)
+  );
+  // Subagent caps: auto-open when an override already carries caps so an
+  // operator re-opening a card doesn't have to discover the disclosure.
+  const [showSubagentCaps, setShowSubagentCaps] = useState<boolean>(
+    () => Object.values(initial?.column_overrides ?? {}).some(
+      (ov) => ov && ov.subagent_caps && Object.keys(ov.subagent_caps).length > 0,
+    )
   );
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
   const [endpoints, setEndpoints] = useState<EndpointResponse[]>([]);
@@ -275,6 +349,7 @@ export function CardEditDialog({
         model: "",
         provider: DEFAULT_PROVIDER_SENTINEL,
         endpoint_name: "",
+        subagent_caps_draft: { ...EMPTY_SUBAGENT_CAPS_DRAFT },
       };
       return { ...prev, [name]: { ...base, ...patch } };
     });
@@ -600,6 +675,114 @@ export function CardEditDialog({
                     </div>
                   );
                 })}
+              </div>
+
+              <div className="mt-3 rounded-md border p-2">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between text-xs font-medium"
+                  onClick={() => setShowSubagentCaps((v) => !v)}
+                >
+                  <span>Subagent caps (advanced)</span>
+                  <span className="text-xs text-muted-foreground">{showSubagentCaps ? "Verbergen" : "Tonen"}</span>
+                </button>
+                {showSubagentCaps && (
+                  <div className="space-y-2 pt-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      Per-column Claude Code subagent/WebSearch caps (kaart aaa81b23…).
+                      Wordt omgezet naar CLAUDE_CODE_MAX_* env vars bij dispatch.
+                      Leeg = CC platform-default.
+                    </p>
+                    <div className="space-y-2">
+                      {agentColumns.map((col) => {
+                        const draft = overrideDrafts[col.name];
+                        const capsDraft: SubagentCapsDraft =
+                          draft?.subagent_caps_draft ?? EMPTY_SUBAGENT_CAPS_DRAFT;
+                        return (
+                          <div
+                            key={`caps-${col.id}`}
+                            className="grid grid-cols-[7rem_1fr_1fr] items-center gap-2"
+                          >
+                            <span className="text-xs font-medium truncate" title={col.name}>
+                              {col.name}
+                            </span>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={3}
+                              aria-label={`max_spawn_depth for ${col.name}`}
+                              placeholder="max_spawn_depth (1-3)"
+                              className="h-8 text-xs"
+                              value={capsDraft.max_spawn_depth}
+                              onChange={(e) =>
+                                setOverride(col.name, {
+                                  subagent_caps_draft: {
+                                    ...capsDraft,
+                                    max_spawn_depth: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`max_concurrent for ${col.name}`}
+                              placeholder="max_concurrent"
+                              className="h-8 text-xs"
+                              value={capsDraft.max_concurrent}
+                              onChange={(e) =>
+                                setOverride(col.name, {
+                                  subagent_caps_draft: {
+                                    ...capsDraft,
+                                    max_concurrent: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                            <span className="text-[10px] text-muted-foreground col-span-3 -mt-1 ml-[7rem]">
+                              max_subagents_per_session
+                            </span>
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`max_subagents_per_session for ${col.name}`}
+                              placeholder="max_subagents_per_session"
+                              className="h-8 text-xs col-span-2"
+                              value={capsDraft.max_subagents_per_session}
+                              onChange={(e) =>
+                                setOverride(col.name, {
+                                  subagent_caps_draft: {
+                                    ...capsDraft,
+                                    max_subagents_per_session: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                            <span className="text-[10px] text-muted-foreground col-span-3 -mt-1 ml-[7rem]">
+                              max_web_searches_per_session
+                            </span>
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`max_web_searches_per_session for ${col.name}`}
+                              placeholder="max_web_searches_per_session"
+                              className="h-8 text-xs col-span-2"
+                              value={capsDraft.max_web_searches_per_session}
+                              onChange={(e) =>
+                                setOverride(col.name, {
+                                  subagent_caps_draft: {
+                                    ...capsDraft,
+                                    max_web_searches_per_session: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

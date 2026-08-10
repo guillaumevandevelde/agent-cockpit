@@ -46,10 +46,22 @@ export const PROVIDER_LABELS: Record<string, string> = {
 // backend shape: card.column_overrides = { "<column-name>": ColumnOverride }.
 // At dispatch time the resolved target column's entry wins over the column
 // defaults for both model and provider (see backend dispatch.py).
+export interface SubagentCaps {
+  // Mirrors the four CLAUDE_CODE_MAX_* env vars the CC CLI reads at
+  // startup (CC 2.1.212+ / 2.1.217+). Keys are camelCase to match the
+  // JSON shape sent to PATCH /api/v1/kanban/cards; backend validator
+  // accepts exactly these four. Any other key would 422 (kaart aaa81b23…).
+  max_spawn_depth?: number;
+  max_concurrent?: number;
+  max_subagents_per_session?: number;
+  max_web_searches_per_session?: number;
+}
+
 export interface ColumnOverride {
   model: string | null;
   provider: string | null;
   endpoint_name: string | null;
+  subagent_caps?: SubagentCaps | null;
 }
 
 // CLI ids the subscription pool can route on. Mirrors the backend's
