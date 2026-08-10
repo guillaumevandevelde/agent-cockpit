@@ -40,14 +40,14 @@ something weird while doing my actual work"; use `session-problem-scan` for
 **This is the step most likely to silently fail.** Kanban cards are bucketed
 by a free-form `project` string with no validation — a typo or a
 differently-derived key creates an invisible parallel board.
-This was verified the hard way while building this skill:
-`list_cards(project= "claude-cockpit")` returned an empty board even
-though real cards existed, because the live board for this repo is keyed
-`git:github.com/guillaumevandevelde/claude-cockpit` — derived from the git
-remote, not typed by hand.
-A card filed under any other string (a guessed slug, a display name, a
-different-cased string) is orphaned: invisible from the real board, and it
-makes future dedupe checks against it silently miss.
+This was verified the hard way while building this skill: a hand-typed
+project string (a guessed slug, a display name, even a close-but-not-exact
+copy of the remote URL) returned an empty board even though real cards
+existed — because the live key is derived from the git remote, not typed by
+hand. Resolving it for real is the only path that lands you on the board
+that everyone else is reading.
+A card filed under any other string is orphaned: invisible from the real
+board, and it makes future dedupe checks against it silently miss.
 
 Resolve it for real, don't guess. If the `cockpit-kanban` MCP server is
 available, call its `resolve_project_key` tool with this repo's working
