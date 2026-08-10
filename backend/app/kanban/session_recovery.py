@@ -6,17 +6,15 @@ dispatch reaper would release those claims and orphan the cards; a subsequent
 redispatch then builds a *fresh* worktree, throwing away the work-in-progress and
 the prior CLI conversation.
 
-Instead, at startup (before the dispatch scheduler runs, so the reaper never gets
-to release the claim first) we detect cards whose agent session is gone but whose
-worktree still has a vendor-owned resumable session record, tag them with that
-session id, and re-dispatch them in *resume* mode through the original CLI adapter.
+At startup — before the dispatch scheduler, so the reaper never releases a
+claim first — we detect cards whose agent session is gone but whose worktree
+still has a vendor-owned resumable session record. We tag them with that id
+and re-dispatch in *resume* mode through the original CLI adapter.
 
-The ``reap_pending_spawn_orphans`` helper closes the narrower interrupt-window
-leak: when the backend dies in the ~37s between ``tmux new-session`` and the
-post-spawn commit, the tmux session is alive but nothing in the DB points at it
-(the claim either never committed or the post-spawn bookkeeping never ran). The
-``pending_spawn_session`` field, written BEFORE the spawn, is the durable
-bookmark this sweep reads.
+``reap_pending_spawn_orphans`` closes the narrower interrupt-window leak: a
+backend crash between ``tmux new-session`` and the post-spawn commit leaves a
+live tmux session with no DB-side claim. ``pending_spawn_session``, written
+BEFORE the spawn, is the durable bookmark this sweep reads.
 """
 from __future__ import annotations
 
