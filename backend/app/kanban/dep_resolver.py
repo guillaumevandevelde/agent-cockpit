@@ -119,6 +119,24 @@ HOLD_GATED = "gated"                          # operator set metadata["gated_on"
 HOLD_DANGLING_DEP = "dangling_dep"            # depends_on points at a deleted card
 HOLD_MISSING_PARENT = "missing_parent"        # parent_card_id points at a deleted card
 HOLD_AWAITING_PLAN_REF = "awaiting_plan_ref"  # child still owed a plan by its analyst
+
+# Overdue threshold for the awaiting_plan_ref hold. The race window between
+# an analyst's step 3 (create_card) and step 4 (add_plan_attachment) is
+# genuinely seconds wide — but the hold had no upper bound, so a crashed
+# analyst run parked its children indefinitely without a single signal. The
+# card-five-stuck-for-16-days report (kanban kaart 2341a40e…) is the
+# originating incident.
+#
+# Why 10 minutes (600s):
+#   - Comfortably longer than the wide-tail real-world analyst run (typical
+#     decomposition cycle is 1–5 minutes, the upper outlier still under 10).
+#   - Far shorter than the incident we are fixing (16 days). Anything that
+#     sits here longer than 10 minutes is, by the rules the dispatcher already
+#     applies, either a crashed session or a step the prompt forgot —
+#     neither is recoverable without a human-visible signal.
+#   - Single source of truth: any future adjustment lands here, and the
+#     dispatch tick + the stock sweeper both read this constant.
+PLAN_REF_DEADLINE_SECONDS = 600
 HOLD_AWAITING_REVIEW = "awaiting_review"      # review-card sibling (metadata.reviewed_card_id) is still open
 HOLD_DEPENDENT = "dependent"                  # depends_on a live, not-yet-Done card
 HOLD_SCHEDULED = "scheduled"                  # scheduled_at names a future time

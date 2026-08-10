@@ -38,6 +38,7 @@ from app.kanban.dep_resolver import (
     HOLD_GATED,
     HOLD_MISSING_PARENT,
     HOLD_SCHEDULED,
+    PLAN_REF_DEADLINE_SECONDS,
     classify_hold,
     dangling_dep_ids,
     has_plan_ref,
@@ -6734,6 +6735,22 @@ async def _persist_holds(session, cards, live_ids: set[str] | None = None) -> No
         reason = hold.reason if hold else None
         blocker = list(hold.blocker_ids) if hold else None
 
+        # The plan-ref overdue marker is a one-shot signal — once the hold
+        # leaves awaiting_plan_ref (plan_ref attached, parent deleted, …
+        # anything that re-classifies the hold), the marker must NOT survive
+        # into the next hold cycle or a future re-occurrence of the same bug
+        # on this card would silently inherit the "already escalated" state
+        # and stay invisible. Clear it here so the next tick re-arms.
+        # Runs on every iteration, before the early-return below, so a
+        # hold that is *still* awaiting_plan_ref but has just had its
+        # marker cleared (e.g. between the `_persist_holds` calls in two
+        # consecutive ticks) re-arms naturally.
+        if reason != HOLD_AWAITING_PLAN_REF:
+            meta = dict(card.meta or {})
+            if meta.pop("plan_ref_overdue_at", None) is not None:
+                card.meta = meta
+                changed = True
+
         if card.held_reason == reason and (card.held_blocker or None) == blocker:
             continue
         if card.held_reason != reason or (reason and not card.held_since):
@@ -6747,6 +6764,90 @@ async def _persist_holds(session, cards, live_ids: set[str] | None = None) -> No
 
     if changed:
         await session.flush()
+
+
+PLAN_REF_OVERDUE_PREFIX = "**Plan overdue:** "
+
+
+async def _escalate_overdue_plan_ref(
+    session, *, project_key: str, cards,
+    now: datetime | None = None,
+) -> list[str]:
+    """Escalate every ``awaiting_plan_ref`` hold older than the deadline.
+
+    ``_persist_holds`` already stamps ``held_since`` on the card; this walks
+    that timestamp and, for the overdue subset, posts a single activity
+    comment and tags ``metadata["plan_ref_overdue_at"]`` so the next tick
+    within the same hold is a no-op.
+
+    The chosen route is **comment + idempotent marker** (kanban kaart
+    2341a40e…, acceptance criterion 1 — three options were on the table):
+
+      - Comment — keeps the card dispatchable the moment the plan_ref lands
+        (the race-window case still self-heals).
+      - Impediment — overkill here: the card is otherwise healthy and the
+        only thing missing is the analyst's step 4; Impediment would require
+        a human to clear it before the next dispatch tick could even
+        *consider* the card.
+      - Auto-detach (like ``orphan_children_on_delete``) — wrong shape: the
+        parent is alive, the analyst session is the broken half. Detaching
+        would lose the parent-child link and the child's plan-context
+        dependency, and there is no recovery path for a re-attached plan.
+
+    The marker is cleared by ``_persist_holds`` any time the hold transitions
+    away from ``awaiting_plan_ref``, so a future re-occurrence re-escalates.
+
+    Returns the ids of cards that were escalated in this call (for tests +
+    log lines; the activity feed is the operator-facing signal).
+    """
+    from app.kanban.operations import apply_operation
+
+    now = now or datetime.now(UTC)
+    escalated: list[str] = []
+    for card in cards:
+        if getattr(card, "held_reason", None) != HOLD_AWAITING_PLAN_REF:
+            continue
+        held_since_raw = getattr(card, "held_since", None)
+        if not held_since_raw:
+            continue
+        try:
+            held_since = datetime.fromisoformat(held_since_raw)
+        except ValueError:
+            continue
+        if held_since.tzinfo is None:
+            held_since = held_since.replace(tzinfo=UTC)
+        age = (now - held_since).total_seconds()
+        if age < PLAN_REF_DEADLINE_SECONDS:
+            continue
+        meta = dict(getattr(card, "meta", None) or {})
+        if meta.get("plan_ref_overdue_at"):
+            continue
+        meta["plan_ref_overdue_at"] = now.isoformat()
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key=project_key, entity_id=card.id,
+            payload={"metadata": meta},
+        )
+        # The audit comment names WHAT is missing and WHO can supply it —
+        # a bare "this card is held" is the same invisible failure mode the
+        # activity-feed comment contract was designed to avoid (kaart
+        # 4358fe0a… / 8b3ce64c…).
+        parent_id = getattr(card, "parent_card_id", None) or "?"
+        text = (
+            f"{PLAN_REF_OVERDUE_PREFIX}kind `{card.title!r}` has been "
+            f"waiting for its analyst's `plan_ref` deliverable for "
+            f"{int(age // 60)} min {int(age % 60)} s — past the "
+            f"{PLAN_REF_DEADLINE_SECONDS}-s deadline. The analyst run on "
+            f"parent `{parent_id}` never delivered `add_plan_attachment`. "
+            f"Until that lands, dispatch is held; resume the analyst run "
+            f"or open its plan-attachment so this child can start."
+        )
+        await apply_operation(
+            session, op_type="comment", entity_type="comment",
+            project_key=project_key, entity_id=card.id, payload={"text": text},
+        )
+        escalated.append(card.id)
+    return escalated
 
 
 def _next_card(
@@ -8705,6 +8806,17 @@ async def dispatch_project(
     # one. This is the tick's only chance to say so: after the filters run, a
     # held card is indistinguishable from one that was never a candidate.
     await _persist_holds(session, cards, board_ids)
+
+    # Escalate any awaiting_plan_ref hold that has been on the wall longer
+    # than the deadline. Without this, the race-window guard becomes a
+    # hold-with-no-upper-bound: a crashed analyst run parks its children
+    # for days, invisible until a human manually unblocks them (kanban
+    # kaart 2341a40e…). Post-comment + idempotent marker, light-touch so
+    # the card stays in Backlog and the moment the plan_ref arrives the
+    # child is dispatchable again.
+    await _escalate_overdue_plan_ref(
+        session, project_key=project_key, cards=cards,
+    )
 
     # Fill every dispatchable card in this tick. The per-column cap (when set)
     # is the only structural limit at this level; the hardware/OS-level cap
