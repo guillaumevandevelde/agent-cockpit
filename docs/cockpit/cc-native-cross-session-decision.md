@@ -1,7 +1,7 @@
 ---
 title: "CC 2.1.224 native cross-session SendMessage + ListAgents — adopt, integrate, or position against Agent Mail?"
 type: decision
-status: besloten
+status: decided
 ---
 
 **Datum:** 2026-08-10
