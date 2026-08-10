@@ -1407,6 +1407,42 @@ async def _on_rate_limit_event(event: RateLimitEvent, *, provider: str) -> None:
 # isolation. Adding a new stream-json event type means adding one ``elif`` arm
 # + one new mapping test — no behavior change to anything else.
 
+# Subagent-text trim constants (kanban card 824e6f8d…). CC 2.1.211+ emits
+# subagent text/thinking frames keyed by ``parent_tool_use_id`` when
+# ``--forward-subagent-text`` is set (or the matching env var). Three knobs
+# picked from the acceptance criteria:
+#   - 4 KiB soft cap per frame — enough to surface useful subagent reasoning
+#     without ballooning the cc-bridge panel.
+#   - 64 KiB hard cap — frames larger than this are dropped with a warning so
+#     a runaway subagent (depth 3, 200 search calls) can't OOM the renderer
+#     or the UI.
+#   - UTF-8 bytestream — the cap is bytes, not characters, so a multi-byte
+#     subagent payload measures the same on the wire as in storage.
+SUBAGENT_TEXT_SOFT_CAP_BYTES = 4 * 1024
+SUBAGENT_TEXT_HARD_CAP_BYTES = 64 * 1024
+
+
+def _truncate_subagent_text(text: str) -> tuple[str, int, bool]:
+    """Apply the 4 KiB / 64 KiB trim to a subagent frame.
+
+    Returns ``(text, original_size, truncated)``. The hard cap is applied
+    first: a frame >64 KiB is dropped downstream (callers log a warning and
+    skip the mapping). The returned tuple is the *trimmed* text plus the
+    metadata the renderer needs to surface the truncation indicator.
+    """
+    encoded = text.encode("utf-8")
+    original_size = len(encoded)
+    if original_size <= SUBAGENT_TEXT_SOFT_CAP_BYTES:
+        return text, original_size, False
+    truncated_bytes = encoded[:SUBAGENT_TEXT_SOFT_CAP_BYTES]
+    # ``decode(errors="ignore")`` is intentional — a multi-byte char split
+    # mid-sequence at the cap boundary is acceptable for a truncated preview;
+    # the renderer carries the byte-count indicator so the reader can see
+    # "more was here".
+    truncated_text = truncated_bytes.decode("utf-8", errors="ignore")
+    return truncated_text, original_size, True
+
+
 def map_stream_event(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Map a raw stream-json payload to the dict shape ``parse_structured_event`` accepts.
 
@@ -1424,6 +1460,8 @@ def map_stream_event(payload: Mapping[str, Any]) -> dict[str, Any]:
     - ``user`` content ``tool_result`` → ``tool_call`` completed/failed
     - ``rate_limit_event`` → ``rate_limit`` (camelCase → snake_case)
     - ``result`` is_error → ``usage_result`` or ``error``
+    - ``assistant`` with ``parent_tool_use_id`` → ``subagent_message``
+      (CC 2.1.211+, ``--forward-subagent-text`` flag — kanban card 824e6f8d…)
     """
     ptype = payload.get("type")
 
@@ -1439,6 +1477,44 @@ def map_stream_event(payload: Mapping[str, Any]) -> dict[str, Any]:
     if ptype == "assistant":
         message = payload.get("message") or {}
         content = message.get("content") or []
+        # Subagent text/thinking (CC 2.1.211+). When the wire carries a
+        # ``parent_tool_use_id`` the message originates from a spawned
+        # subagent, not the outer agent — the cc-bridge panel nests these
+        # under the parent tool_use_id. Apply the 4 KiB / 64 KiB trim before
+        # emitting; the renderer needs ``original_size`` + ``truncated`` to
+        # surface the ``(…N bytes truncated…)`` indicator (acceptance
+        # criterion). Frames >64 KiB are dropped with a warning so a runaway
+        # subagent can't OOM the bridge.
+        parent_tool_use_id = payload.get("parent_tool_use_id")
+        is_subagent = isinstance(parent_tool_use_id, str) and parent_tool_use_id
+        if is_subagent:
+            for block in content:
+                btype = block.get("type")
+                if btype not in ("text", "thinking"):
+                    continue
+                raw_text = block.get("text") if btype == "text" else block.get("thinking", "")
+                raw_bytes = len(raw_text.encode("utf-8"))
+                if raw_bytes > SUBAGENT_TEXT_HARD_CAP_BYTES:
+                    logger.warning(
+                        "dropping subagent frame of %d bytes from parent_tool_use_id=%s (>%d byte hard cap)",
+                        raw_bytes, parent_tool_use_id, SUBAGENT_TEXT_HARD_CAP_BYTES,
+                    )
+                    return {"type": ptype, **payload}
+                trimmed, original_size, truncated = _truncate_subagent_text(raw_text)
+                return {
+                    "type": StructuredEventType.SUBAGENT_MESSAGE.value,
+                    "parent_tool_use_id": parent_tool_use_id,
+                    "role": (
+                        MessageRole.ASSISTANT.value if btype == "text"
+                        else MessageRole.THOUGHT.value
+                    ),
+                    "text": trimmed,
+                    "original_size": original_size,
+                    "truncated": truncated,
+                }
+            # Subagent frame with no text/thinking block — fall through to
+            # the outer-agent path so future block types don't silently
+            # vanish (matches the existing "unknown sub-block" fallback).
         # Find the first meaningful content block — assistant messages can
         # carry multiple types in one event; we emit one structured event per
         # block but the test suite pins a single-block shape, so mapping

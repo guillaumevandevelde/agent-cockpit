@@ -3,6 +3,7 @@ import { ThinkingBlock } from './blocks/ThinkingBlock'
 import { ToolUseBlock } from './blocks/ToolUseBlock'
 import { ToolResultBlock } from './blocks/ToolResultBlock'
 import { ImageBlock } from './blocks/ImageBlock'
+import { SubagentMessageBlock } from './blocks/SubagentMessageBlock'
 import type { ContentBlock } from '@/types/sessions'
 
 interface Props {
@@ -37,6 +38,17 @@ export function ContentBlockRenderer({ block }: Props) {
 
     case 'image':
       return <ImageBlock source={block.source || {}} />
+
+    case 'subagent_message':
+      return (
+        <SubagentMessageBlock
+          parent_tool_use_id={block.parent_tool_use_id || ''}
+          role={block.role || 'assistant'}
+          text={block.text || block.thinking || ''}
+          original_size={block.original_size}
+          truncated={block.truncated}
+        />
+      )
 
     default:
       return (

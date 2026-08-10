@@ -131,6 +131,18 @@ def _validate_column_overrides_value(value: Any) -> Any:
         # for the full rule set.
         if "subagent_caps" in override:
             _validate_subagent_caps(override["subagent_caps"], column=column)
+        # Per-column opt-in for ``--forward-subagent-text`` (CC 2.1.211+).
+        # Bool; ``None`` means "fall back to platform default (off)". When
+        # true the dispatch path sets ``CLAUDE_CODE_FORWARD_SUBAGENT_TEXT=1``
+        # so the spawned CC CLI emits subagent text/thinking frames and the
+        # cc-bridge panel can render them. See kanban card 824e6f8d…
+        if "forward_subagent_text" in override:
+            value = override["forward_subagent_text"]
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"column_overrides[{column!r}].forward_subagent_text must be a "
+                    f"boolean or null; got {type(value).__name__}",
+                )
     return value
 
 # Fixed kanban columns. Cards on a fixed column are never auto-dispatched

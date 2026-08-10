@@ -34,6 +34,7 @@ from app.services.agentic_cli.structured_events import (
     RateLimitType,
     SessionInitEvent,
     StructuredEventType,
+    SubagentMessageEvent,
     ToolCallEvent,
     ToolCallStatus,
     UsageResultEvent,
@@ -438,6 +439,79 @@ def test_mapping_rate_limit_event_carries_resets_at_unix():
     assert event.utilization == 0.97
     assert event.is_using_overage is False
     assert event.surpassed_threshold == 0.9
+
+
+def test_mapping_subagent_text_to_subagent_message():
+    # CC 2.1.211+: when ``--forward-subagent-text`` is set, child agent
+    # text/thinking frames carry ``parent_tool_use_id`` so the bridge can
+    # nest them under the spawning tool_use. Acceptance criterion: the
+    # mapper emits a ``subagent_message`` event with the parent id
+    # preserved, role=assistant, and the trim metadata zero on a small
+    # payload (≤4 KiB → no truncation).
+    raw = {
+        "type": "assistant",
+        "parent_tool_use_id": "toolu_subagent_01",
+        "message": {"content": [{"type": "text", "text": "subagent reasoning"}]},
+    }
+    event = parse_structured_event(hr.map_stream_event(raw))
+    assert isinstance(event, SubagentMessageEvent)
+    assert event.type == StructuredEventType.SUBAGENT_MESSAGE
+    assert event.parent_tool_use_id == "toolu_subagent_01"
+    assert event.role is MessageRole.ASSISTANT
+    assert event.text == "subagent reasoning"
+    assert event.original_size == len(b"subagent reasoning")
+    assert event.truncated is False
+
+
+def test_mapping_subagent_thinking_to_subagent_message_thought():
+    # Thinking blocks from a subagent keep the role=thought distinction so
+    # the renderer can format them differently from text.
+    raw = {
+        "type": "assistant",
+        "parent_tool_use_id": "toolu_subagent_02",
+        "message": {"content": [{"type": "thinking", "thinking": "weighing options"}]},
+    }
+    event = parse_structured_event(hr.map_stream_event(raw))
+    assert isinstance(event, SubagentMessageEvent)
+    assert event.role is MessageRole.THOUGHT
+    assert event.text == "weighing options"
+
+
+def test_mapping_subagent_text_truncated_above_4kib():
+    # Acceptance criterion: frames >4 KiB are truncated with a
+    # ``(…N bytes truncated…)`` indicator and the ``original_size`` field.
+    # The consumer emits the trimmed text plus the byte count so the
+    # renderer can show the size without re-fetching the original.
+    large_text = "a" * (hr.SUBAGENT_TEXT_SOFT_CAP_BYTES + 100)
+    raw = {
+        "type": "assistant",
+        "parent_tool_use_id": "toolu_big_01",
+        "message": {"content": [{"type": "text", "text": large_text}]},
+    }
+    event = parse_structured_event(hr.map_stream_event(raw))
+    assert isinstance(event, SubagentMessageEvent)
+    assert event.truncated is True
+    assert event.original_size == len(large_text.encode("utf-8"))
+    assert len(event.text) < len(large_text)
+    # The trimmed text ends at the cap, not the start.
+    assert len(event.text.encode("utf-8")) == hr.SUBAGENT_TEXT_SOFT_CAP_BYTES
+
+
+def test_mapping_subagent_text_dropped_above_64kib():
+    # Acceptance criterion: frames >64 KiB are dropped with a warning
+    # (logged, not raised). The mapper falls through to the unknown-payload
+    # shape so the schema's ValidationError surfaces the original payload
+    # if the schema ever needs it — for the live path the consumer simply
+    # skips the unknown event.
+    huge_text = "b" * (hr.SUBAGENT_TEXT_HARD_CAP_BYTES + 1)
+    raw = {
+        "type": "assistant",
+        "parent_tool_use_id": "toolu_huge_01",
+        "message": {"content": [{"type": "text", "text": huge_text}]},
+    }
+    result = hr.map_stream_event(raw)
+    assert result["type"] == "assistant"
+    assert "parent_tool_use_id" in result
 
 
 # ---- 429 pause: rate_limit_event.resets_at drives the pause ---------------

@@ -4267,6 +4267,7 @@ async def _install_rtk_for_dispatch_async(
 
 def make_worktree_transport(skip_permissions: bool = True,
                             subagent_caps_env: dict[str, str] | None = None,
+                            forward_subagent_text: bool = False,
                             ) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass.
 
@@ -4275,10 +4276,18 @@ def make_worktree_transport(skip_permissions: bool = True,
     into the spawn's explicit env so the per-lane CC subagent caps take
     effect at CLI startup. ``None`` means "no override" and the spawn
     inherits CC's platform defaults — the historical behaviour.
+
+    ``forward_subagent_text`` flips the per-lane opt-in for
+    ``CLAUDE_CODE_FORWARD_SUBAGENT_TEXT=1`` (CC 2.1.211+, kanban card
+    824e6f8d…). When true the spawned CC CLI emits subagent text/thinking
+    frames keyed by the spawning ``tool_use_id`` so the cc-bridge panel
+    can surface them. Default false = no behavioural change for un-overridden
+    columns (the env var is opt-in for cost + log-shape reasons).
     """
     # Capture for the closure; must be bound here so the transport reads
     # the value captured at factory-call time, not at closure-call time.
     _captured_caps_env = dict(subagent_caps_env) if subagent_caps_env else {}
+    _captured_forward_subagent_text = bool(forward_subagent_text)
 
     def _transport(*, directory: str, prompt: str, session_name: str,
                    cli_id: str = "claude-code", provider: str = "anthropic",
@@ -4383,6 +4392,14 @@ def make_worktree_transport(skip_permissions: bool = True,
         # can never downgrade an operator-set cap.
         if _captured_caps_env:
             extra_env = {**extra_env, **_captured_caps_env}
+        # Per-lane opt-in for subagent text/thinking forwarding (CC 2.1.211+,
+        # kanban card 824e6f8d…). When the column override flips the flag on,
+        # set ``CLAUDE_CODE_FORWARD_SUBAGENT_TEXT=1`` so the CLI emits
+        # parent_tool_use_id-keyed subagent frames. Consumed by the
+        # ``claude_code`` transport's NDJSON consumer (see
+        # ``map_stream_event``) and rendered by the cc-bridge panel.
+        if _captured_forward_subagent_text:
+            extra_env = {**extra_env, "CLAUDE_CODE_FORWARD_SUBAGENT_TEXT": "1"}
 
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
@@ -9750,14 +9767,18 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
     # singleton). Cards that need the product lane (skip_permissions=False)
     # AND subagent_caps are rare; the corner case is documented above.
     caps_env = _resolve_subagent_caps_env(card)
-    if caps_env:
+    forward_subagent_text = _resolve_forward_subagent_text(card)
+    if caps_env or forward_subagent_text:
         # Only override for the worktree transport path. Non-worktree
         # default_transport values (sandcastle / headless / acp) can't
         # consume CLAUDE_CODE_MAX_* env vars so leaving them alone is
-        # correct.
+        # correct. Same applies to CLAUDE_CODE_FORWARD_SUBAGENT_TEXT —
+        # only the worktree transport runs a CLI that reads it.
         if getattr(default_transport, "transport_kind", None) == "worktree":
             return make_worktree_transport(
-                skip_permissions=True, subagent_caps_env=caps_env,
+                skip_permissions=True,
+                subagent_caps_env=caps_env,
+                forward_subagent_text=forward_subagent_text,
             )
 
     # Otherwise use the project default
@@ -9783,6 +9804,25 @@ def _resolve_subagent_caps_env(card: KanbanCard) -> dict[str, str]:
     entry = overrides.get(target_column) or {}
     caps = entry.get("subagent_caps") if isinstance(entry, dict) else None
     return _subagent_caps_to_env(caps)
+
+
+def _resolve_forward_subagent_text(card: KanbanCard) -> bool:
+    """Resolve the per-lane ``forward_subagent_text`` flag (kanban card 824e6f8d…).
+
+    Looks at ``card.column_overrides[column].forward_subagent_text`` for the
+    column the card currently lives in. Returns ``False`` when no override is
+    set — the worktree transport then inherits CC's platform default (off),
+    matching the "no behavioural change for un-overridden columns" acceptance
+    criterion.
+    """
+    overrides = getattr(card, "column_overrides", None) or {}
+    target_column = getattr(card, "column", None)
+    if not target_column or not isinstance(overrides, dict):
+        return False
+    entry = overrides.get(target_column) or {}
+    if not isinstance(entry, dict):
+        return False
+    return bool(entry.get("forward_subagent_text", False))
 
 
 async def _retry_queued_cards(transport: SpawnTransport) -> None:

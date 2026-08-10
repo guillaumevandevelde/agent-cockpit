@@ -12,6 +12,15 @@ export interface ContentBlock {
   content?: string | Record<string, unknown> | unknown[]
   is_error?: boolean
   source?: Record<string, string>
+  // Subagent text/thinking frame (CC 2.1.211+, --forward-subagent-text).
+  // ``parent_tool_use_id`` is the spawning tool_use_id from the outer
+  // agent; ``role`` mirrors assistant vs. thought; ``original_size`` is
+  // the pre-trim byte count and ``truncated`` is the indicator flag the
+  // renderer uses to surface ``(…N bytes truncated…)``.
+  parent_tool_use_id?: string
+  role?: string
+  original_size?: number
+  truncated?: boolean
 }
 
 export interface SessionMessage {
