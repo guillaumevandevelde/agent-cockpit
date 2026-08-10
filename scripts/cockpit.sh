@@ -111,8 +111,11 @@ sup_log() {
 # reports "running" while every request times out. Poll an HTTP health URL and,
 # after $maxfail consecutive failures, kill the process tree so watch_service's
 # normal restart path brings it back. Exits on its own once the target dies.
+# $4 (optional): marker file. Created on the first successful health check and
+# removed again when the watchdog kills the target, so watch_service can tell a
+# genuinely healthy run apart from one that merely ran long before being killed.
 health_watch() {
-    local target_pid="$1" url="$2" name="$3"
+    local target_pid="$1" url="$2" name="$3" marker="${4:-}"
     local grace="${COCKPIT_HEALTH_GRACE:-30}"       # let startup finish first
     local interval="${COCKPIT_HEALTH_INTERVAL:-10}"
     local timeout="${COCKPIT_HEALTH_TIMEOUT:-5}"
@@ -122,11 +125,13 @@ health_watch() {
     while kill -0 "$target_pid" 2>/dev/null; do
         if curl -fsS -o /dev/null --max-time "$timeout" "$url" 2>/dev/null; then
             fails=0
+            [ -n "$marker" ] && : > "$marker"
         else
             fails=$((fails + 1))
             sup_log "$name health check faalde ($fails/$maxfail) op $url"
             if [ "$fails" -ge "$maxfail" ]; then
                 sup_log "$name reageert niet (vastgelopen proces pid $target_pid) — kill voor herstart"
+                [ -n "$marker" ] && rm -f "$marker"
                 kill_tree "$target_pid" 2>/dev/null
                 return 0
             fi
@@ -143,6 +148,7 @@ watch_service() {
     local name="$1" cmd="$2" health_url="${3:-}"
     local svc_dir="$LOG_DIR/$name"
     local pidf="$RUN_DIR/$name.pid"
+    local healthyf="$RUN_DIR/$name.healthy"
     local base="${COCKPIT_BACKOFF_BASE:-1}"
     local window="${COCKPIT_WINDOW:-30}"
     local max_fails=5
@@ -165,7 +171,8 @@ watch_service() {
         # Self-heal: watchdog kills the child if it stops answering health checks.
         local hpid=""
         if [ -n "$health_url" ]; then
-            health_watch "$child" "$health_url" "$name" &
+            rm -f "$healthyf"
+            health_watch "$child" "$health_url" "$name" "$healthyf" &
             hpid=$!
         fi
         wait "$child"; local code=$?
@@ -174,15 +181,25 @@ watch_service() {
         restart=$((restart + 1))
         sup_log "$name exited code=$code (ran ${ran}s, restart #$restart)"
 
-        # A run that stayed up past the health threshold counts as recovery.
-        if [ "$ran" -gt "$window" ]; then
+        # Recovery = observed health, not mere uptime. With a health URL the run
+        # only counts as recovered when the watchdog saw at least one successful
+        # check and did not kill the run itself (it removes the marker before
+        # killing). Uptime alone made every watchdog-killed run (~51s > 30s
+        # window) reset the counter, so the crash-loop guard never fired.
+        local recovered=0
+        if [ -n "$health_url" ]; then
+            [ -f "$healthyf" ] && recovered=1
+        elif [ "$ran" -gt "$window" ]; then
+            recovered=1
+        fi
+        if [ "$recovered" -eq 1 ]; then
             fails=0
         else
             fails=$((fails + 1))
         fi
         if [ "$fails" -ge "$max_fails" ]; then
-            sup_log "$name crash-loop ($fails opeenvolgende snelle crashes) — gestopt met herstarten, kijk in $svc_dir/latest.log"
-            rm -f "$pidf"
+            sup_log "$name crash-loop ($fails opeenvolgende mislukte runs) — gestopt met herstarten, kijk in $svc_dir/latest.log"
+            rm -f "$pidf" "$healthyf"
             return 0
         fi
         # Backoff: base, 2*base, capped at 5*base.
