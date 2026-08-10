@@ -401,4 +401,54 @@ check "fsc -> exit 0 (clean)"         '[ "$rc" -eq 0 ]'
 check "fsc -> prints OK"              'echo "$out" | grep -qE "^OK:"'
 check "fsc -> does NOT name the card" '! echo "$out" | grep -qF "FSC00001"'
 
+# ----------------------------------------------------------------------------
+echo "Task 20: decomposed_then_swept witness — historical child-create op in kanban_ops (kaart 85f231f0…, §10)"
+dts="$TMP/dts.db"; seed_db "$dts"
+# Parent analysis card: Done with no live children and no label, no Outcome
+# comment, no metadata.filed_card_ids — every other witness must be absent,
+# so the historical-children op is the ONLY thing keeping this card out of
+# the "verdampte analyse" bucket.
+card "$dts" "DTS00001" "Analysis with swept children"     "Done" "null" "analysis" "engineer" "" "2026-08-01 10:00:00"
+# The child-create op carries the parent's id in payload.parent_card_id —
+# the kanban_ops analogue of `kanban_cards.parent_card_id` that survives
+# single-card delete + Clear Done (kaart 85f231f0… §10). The op() helper
+# hardcodes entity_type='comment', so the §10 witness needs entity_type=
+# 'card' — write the row directly via Python.
+python3 - "$dts" <<'PY'
+import sqlite3, sys, json
+db = sys.argv[1]
+con = sqlite3.connect(db)
+con.execute(
+    """INSERT INTO kanban_ops VALUES
+        (?, 'dev', 1, 'hlc', 'proj', 'card', ?, ?, ?, ?)""",
+    ("op-dts1", "DTS-CHILD-X", "create",
+     json.dumps({"parent_card_id": "DTS00001", "title": "swept child"}),
+     "2026-08-01 10:00:01"),
+)
+con.commit(); con.close()
+PY
+out=$(run "$dts"); rc=$?
+check "dts -> exit 0 (clean)"             '[ "$rc" -eq 0 ]'
+check "dts -> prints OK"                  'echo "$out" | grep -qE "^OK:"'
+check "dts -> does NOT name the card"     '! echo "$out" | grep -qF "DTS00001"'
+
+# ----------------------------------------------------------------------------
+echo "Task 21: decomposed_then_swept witness — WITHOUT historical children, card IS a hit (strict mode)"
+dtn="$TMP/dtn.db"; seed_db "$dtn"
+card "$dtn" "DTN00001" "Honest no-follow-up analysis" "Done" "null" "analysis" "engineer" "" "2026-08-01 10:00:00"
+out=$(run "$dtn" --strict); rc=$?
+check "dtn -> exit 1 in strict mode"      '[ "$rc" -eq 1 ]'
+check "dtn -> names the card"             'echo "$out" | grep -qF "DTN00001"'
+check "dtn -> lists historical_children in missing CSV" 'echo "$out" | grep -qF "historical_children"'
+
+# ----------------------------------------------------------------------------
+echo "Task 22: **Outcome:** decomposed_then_swept comment -> NOT a hit (any outcome comment counts)"
+dsc="$TMP/dsc.db"; seed_db "$dsc"
+card "$dsc" "DSC00001" "Analysis with decomposed_then_swept comment" "Done" "null" "analysis" "engineer" "" "2026-08-01 10:00:00"
+op    "$dsc" "op-dsc1"  "DSC00001" "comment" '{"text":"**Outcome:** decomposed_then_swept — children finished and were swept"}' "2026-08-01 10:00:00"
+out=$(run "$dsc"); rc=$?
+check "dsc -> exit 0 (clean)"         '[ "$rc" -eq 0 ]'
+check "dsc -> prints OK"              'echo "$out" | grep -qE "^OK:"'
+check "dsc -> does NOT name the card" '! echo "$out" | grep -qF "DSC00001"'
+
 [ "$FAIL" -eq 0 ]

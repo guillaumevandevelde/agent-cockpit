@@ -262,3 +262,46 @@ Twee afgewezen routes:
 
 - Een trigger-flow die om een of andere reden toch kinderen met `parent_card_id = trigger` filete (oudere skill-versie, multi-card decompositie), krijgt op `outcome='decomposed'` de huidige parent-parking-blokkade. Dat is een **andere** route dan deze — heropenen zodra iemand die ook wil ondersteunen. Tot dan is `filed_standalone` de canonieke cadans-uitkomst.
 - Een REST-caller (UI-drag, scripted PATCH) omzeilt de poort zoals altijd (§5); de sweeper blijft het vangnet. Geen nieuw oppervlak, geen nieuwe aanvals-vector.
+
+---
+
+## 10. Aanvulling 2026-08-10 — `decomposed_then_swept` voor parent-park-blokkades na `Clear Done`
+
+**Aanleiding.** Een analyse die netjes decomponeerde (`decomposed`, kind-kaarten gefiled) en waarvan alle kinderen later van het bord zijn geveegd (typisch door `Clear Done` op de Done-kolom) kan niet meer eerlijk sluiten. Op 2026-08-10 zijn **vijf** analyse-kaarten in deze toestand beland: `a4a091fa`, `1fafd87c`, `0767c57a`, `6f862f6c`, `8489ff9b`. Geen enkele waarde in de bestaande enum past:
+
+| `outcome` | Probleem voor deze kaart |
+|---|---|
+| `decomposed` | Verifieert ≥1 kind met `parent_card_id == card.id`. Geveegde kinderen resolven niet meer in `kanban_cards` → weigert met `no_children`. |
+| `not_feasible` | Betekent "niet doen" — semantisch onzin voor een analyse die al klaar is en resultaat opleverde. |
+| `no_action_needed` | Passeert de poort maar **ligt**: de analyse leverde 1–4 kind-kaarten op, dat labelen als "geen actie nodig" is een audittrail-leugen die `scripts/check-analysis-outcomes.sh` zou meten als "verdampte analyse". |
+| `filed_standalone` | Verifieert `metadata.filed_card_ids` — een trigger-specifiek veld, niet van toepassing op een reguliere analyse-decompositie. |
+
+Het gevolg: een sessie die de poort eerlijk wil nemen moet **liegen** (de vijf kaarten kozen `no_action_needed`) of de kaart in `Awaiting Subtasks` laten hangen zonder kinderen om op te wachten. Dat is precies het type gedrag dat §1 van dit doc de "verloren analyse" noemt.
+
+**Beslissing — vijfde uitkomst `decomposed_then_swept`.**
+
+| `outcome` (nieuw) | Betekenis | Verificatie | Neerslag |
+|---|---|---|---|
+| `decomposed_then_swept` | De analyse decomposeerde in kinderen die sindsdien van het bord zijn geveegd (Clear Done, single-card delete) | Twee checks: (1) **geen levende kinderen** (`SELECT 1 FROM kanban_cards WHERE parent_card_id = ?` moet 0 rijen geven); (2) **≥1 historische `create` op** in `kanban_ops` met `payload.parent_card_id = ?` — de append-only op-log bewaart de `create`-events van kinderen die later zijn gesweept | Geen extra label (analoog aan §9: card-relationship-uitkomst, geen outcome-taxonomie); `**Outcome:**`-comment zoals de andere vier |
+
+Twee checks zijn bewust — één check is genoeg voor één bug, twee checks voor twee bugs die dezelfde oppervlakkige fout produceren:
+
+1. **Levende kinderen → `live_children_still_present`**. Een parent in flight kan niet claimen "mijn kinderen zijn weg" als er nog een kind live op het bord staat. De operator moet dan `decomposed` kiezen (parent parkeert in `Awaiting Subtasks`). Zonder deze check zou een parent in flight de kinderen kunnen verwaarlozen en de parent-Done-move kunnen claimen met de nieuwe uitkomst — exact de bug die §1 van dit doc beschrijft.
+2. **Geen historische kinderen → `no_historical_children`**. De anti-lie-check. Een analyse die nooit decomponeerde mag de nieuwe uitkomst niet claimen, ook al heeft 'ie 0 levende kinderen. De op-log is hier de natuurlijke bron van waarheid: `kanban_ops` is append-only en overleeft kaart-deletes, dus zelfs als elk kind van het bord is verdwenen blijven de oorspronkelijke `create`-events bewaard. Dit maakt verificatie **sterk** zonder FK-relatie (vergelijkbaar met §9 `filed_standalone`).
+
+De query die de tweede check uitvoert is exact dezelfde als de nieuwe witness in `scripts/check-analysis-outcomes.sh` — twee onafhankelijke lezers van dezelfde waarheid, geen gedeelde implementatie nodig.
+
+**Carve-outs (ter heropening):**
+
+- Een analyse-kaart die ooit kinderen had maar nu geen levende kinderen en geen historische kinderen in `kanban_ops` heeft, kan de nieuwe uitkomst niet gebruiken — ook al zou de sessie "ik heb gedecomponeerd en het is klaar" willen zeggen. Dit is met opzet streng: het kan alleen eerlijk zijn als er bewijs in de op-log zit. Als de op-log ooit gepruned wordt (zie `sync-hlc-freeze-vs-prune.md`), kan die bewijslast verdwijnen en wordt de kaart effectief onbewijsbaar. Tegen die tijd kan een `metadata.historical_children` field een tweede bron van waarheid worden.
+- Een trigger-flow die kinderen filete met `parent_card_id = trigger` (de §9 carve-out die expliciet afgewezen is) blijft afgewezen. Het `decomposed_then_swept`-pad dekt dat niet — kinderen mét `parent_card_id` zijn geen "swept" kinderen, dat zijn kinderen waar de trigger expliciet ouder van is.
+
+**Wijzigingen.**
+
+1. `backend/app/kanban/service.py` — `OUTCOMES` += `"decomposed_then_swept"`; nieuwe verificatie-branch in `enforce_move_gate`; docstring-updates bij `OUTCOMES`, `enforce_move_gate`, en de `outcome_required`-foutmelding. Geen wijziging aan `apply_outcome_side_effects` — `OUTCOME_LABELS` blijft bij de twee taxonomie-waarden (`not_feasible`, `no_action_needed`), `decomposed_then_swept` krijgt net als `filed_standalone` alleen een `**Outcome:**`-comment.
+2. `backend/app/kanban/mcp_server.py` — `move_card`-docstring: opsomming van de vijf waarden + de bijbehorende foutcodes.
+3. `scripts/check-analysis-outcomes.sh` — nieuwe vierde-naar-vijfde witness: `kanban_ops` met `op_type='create'` en `payload.parent_card_id = card.id`. Past de header-tabel, de SQL-`OR`-keten, en de "missing"-CSV aan. Geen drempel-datum-shift — de historische bucket blijft op `2026-07-16` enkel de gate-commit; de §10-uitbreiding verandert niets aan wat de gate heeft afgedwongen vóór zijn komst.
+4. `backend/tests/test_kanban_mcp.py` — vijf nieuwe tests (drie voor de nieuwe outcome, één voor de geüpdatete 5-waarde-`allowed`-set, één voor de geüpdatete `outcome_required`-message); twee bestaande tests gemarkeerd als `_legacy` (subset-pin, blijven groen zolang de originele vier waarden niet uit de enum verdwijnen).
+5. De vijf historische kaarten (`a4a091fa`, `1fafd87c`, `0767c57a`, `6f862f6c`, `8489ff9b`) — voor elke kaart een `**Correction:** … **Outcome:** decomposed_then_swept`-comment op de activity-feed. De oorspronkelijke `no_action_needed`-comment + `no-action-needed`-label blijven in het op-log voor audit (kanban_ops is append-only); de correctie-comment is de canonieke waarheid voor elke toekomstige lezer die de activity-feed opent. De kaarten zelf zijn van het bord verwijderd — er bestaat geen live `kanban_cards`-rij meer om een label weg te poetsen; de correctie-comment is de enige aanvaardbare interventie.
+
+**Relatie tot de parent-park-bug.** De aanleiding voor deze uitkomst is dezelfde bug-klasse die kaart `400d6a77…` de afgelopen weken heeft proberen te dichten (auto-close walk bij kind-delete + Clear Done). Die fix sluit het *toekomstige* gat: een verse analyse met kinderen wordt netjes auto-closed zodra de kinderen Done zijn, ook als de kinderen daarna worden gesweept. §10 sluit het *achterstallige* gat: de vijf kaarten die voor die fix in `Awaiting Subtasks` zijn blijven hangen (en daarna met `no_action_needed` zijn afgesloten) krijgen alsnog een eerlijke uitkomst.

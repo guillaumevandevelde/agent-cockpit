@@ -4,24 +4,29 @@
 #
 # Sweeps kanban_cards WHERE column='Done' AND (work_type='analysis' OR
 # agent='analyst') and reports each card that doesn't carry at least one of
-# the four outcome witnesses defined by
-# docs/cockpit/analysis-outcome-contract-decision.md §5 + §9:
+# the five outcome witnesses defined by
+# docs/cockpit/analysis-outcome-contract-decision.md §5 + §9 + §10:
 #
 #   1. **Outcome:** <value> — <summary>  activity-feed comment (the gate's
 #      primary neerslag — backend/app/kanban/mcp_server.py:394-414).
-#      For `filed_standalone` the **Outcome:** comment is the only neerslag
-#      (no label is set; the §9 decision explicitly keeps label-vocabulary
-#      for outcome-taxonomy values like `not-feasible`/`no-action-needed`).
+#      For `filed_standalone` and `decomposed_then_swept` the **Outcome:**
+#      comment is the only neerslag (no label is set; the §9 / §10 decisions
+#      explicitly keep label-vocabulary for outcome-taxonomy values like
+#      `not-feasible`/`no-action-needed`).
 #   2. labels contains 'not-feasible' or 'no-action-needed'
 #   3. ≥1 child card (parent_card_id == card.id)
 #   4. card.metadata.filed_card_ids is a non-empty list resolving to real
 #      cards in the same project_key (the `filed_standalone` analogue of #3
 #      for cadence-trigger runs whose findings deliberately carry no
 #      `parent_card_id` to the trigger — recurring-cadence-proposal.md §4.3)
+#   5. ≥1 historical `create` op in kanban_ops with
+#      `payload.parent_card_id == card.id` (the `decomposed_then_swept`
+#      analogue of #3 for analyses whose children were swept from the
+#      board after they finished — kaart 85f231f0…, §10).
 #
-# A card missing all three is a "verdampte analyse" — exactly the failure mode
-# the gate was built to prevent (decision §1). This script is the vangnet
-# for the known REST-bypass gap (§5) and the historic back-catalog.
+# A card missing all five is a "verdampte analyse" — exactly the failure
+# mode the gate was built to prevent (decision §1). This script is the
+# vangnet for the known REST-bypass gap (§5) and the historic back-catalog.
 #
 # Historic vs. new split. The gate shipped on 2026-07-16 (commit b2e7333 —
 # feat(kanban): outcome gate on move_card). Cards Done before that date
@@ -62,7 +67,7 @@ DB_PATH="${KANBAN_DB:-$HOME/.claude-registry/kanban.db}"
 STRICT=0
 
 print_help() {
-  sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,46p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 for arg in "$@"; do
@@ -141,7 +146,8 @@ for c in cards:
     try:
         # `Outcome:` activity-feed comment — the gate's primary neerslag
         # (backend/app/kanban/mcp_server.py:394-414). We accept any of the
-        # four canonical values, including `filed_standalone` from §9.
+        # five canonical values, including `filed_standalone` from §9 and
+        # `decomposed_then_swept` from §10 (kaart 85f231f0…).
         has_outcome_comment = con.execute(
             """
             SELECT 1 FROM kanban_ops
@@ -152,6 +158,7 @@ for c in cards:
                  OR json_extract(payload, '$.text') LIKE '**Outcome:** not_feasible%'
                  OR json_extract(payload, '$.text') LIKE '**Outcome:** no_action_needed%'
                  OR json_extract(payload, '$.text') LIKE '**Outcome:** filed_standalone%'
+                 OR json_extract(payload, '$.text') LIKE '**Outcome:** decomposed_then_swept%'
                )
              LIMIT 1
             """,
@@ -213,6 +220,27 @@ for c in cards:
                 has_filed_standalone = False
         else:
             has_filed_standalone = False
+
+        # `decomposed_then_swept` analogue: ≥1 historical `create` op in
+        # kanban_ops referencing this card as `payload.parent_card_id`.
+        # Survives single-card delete + Clear Done (kanban_ops is
+        # append-only, §10), so this witness is the only way to detect a
+        # productive-but-now-swept analysis after the live `kanban_cards`
+        # witness (#3) has gone to zero. Mirrors service.enforce_move_gate's
+        # same query.
+        try:
+            has_historical_children = con.execute(
+                """
+                SELECT 1 FROM kanban_ops
+                 WHERE entity_type = 'card'
+                   AND op_type = 'create'
+                   AND json_extract(payload, '$.parent_card_id') = ?
+                 LIMIT 1
+                """,
+                (c["id"],),
+            ).fetchone() is not None
+        except sqlite3.Error:
+            has_historical_children = False
     except sqlite3.Error as e:
         # A schema mismatch (e.g. a fixture without kanban_ops, or a
         # migration in flight) should not silently turn into "OK" — surface
@@ -223,7 +251,8 @@ for c in cards:
     # Card is a hit only if ALL witnesses are absent — anything else
     # means the analysis did produce *some* outcome, even if partial.
     if (has_outcome_comment or has_outcome_label
-            or has_children or has_filed_standalone):
+            or has_children or has_filed_standalone
+            or has_historical_children):
         continue
 
     # Historic = card created before the threshold (default: gate commit
@@ -236,11 +265,11 @@ for c in cards:
     # title may contain tabs/newlines (rare, but possible) — flatten so the
     # bash awk below stays column-anchored.
     title = (c["title"] or "").replace("\t", " ").replace("\n", " ")
-    # Witness list order tracks the four-witness taxonomy introduced in
-    # `analysis-outcome-contract-decision.md` §9 (commit-mode split —
-    # pre-§9 cards only carry the first three; new cards may have any
+    # Witness list order tracks the five-witness taxonomy introduced in
+    # `analysis-outcome-contract-decision.md` §9 + §10 (commit-mode split —
+    # pre-§10 cards only carry the first four; new cards may have any
     # subset, with the missing-CSV reflecting only what was *absent*).
-    print(f'{c["id"]}\t{title}\t{created}\toutcome-comment,label,children,filed_standalone\t{historic}')
+    print(f'{c["id"]}\t{title}\t{created}\toutcome-comment,label,children,filed_standalone,historical_children\t{historic}')
 con.close()
 PY
 )" || PY_RC=$?
@@ -286,12 +315,17 @@ printf '%s\n' "$HIT_TSV" | awk -F'\t' '
 echo "" >&2
 echo "A Done analysis must carry at least ONE of:" >&2
 echo "  - a **Outcome:** <value> — <summary> activity-feed comment" >&2
-echo "    (any of: decomposed / not_feasible / no_action_needed / filed_standalone)" >&2
+echo "    (any of: decomposed / not_feasible / no_action_needed /" >&2
+echo "     filed_standalone / decomposed_then_swept)" >&2
 echo "  - a 'not-feasible' or 'no-action-needed' label" >&2
 echo "  - ≥1 child follow-up card (parent_card_id == card.id)" >&2
 echo "  - ≥1 id in metadata.filed_card_ids resolving to a real card" >&2
 echo "    in the same project_key (filed_standalone analogue — analysis-" >&2
 echo "    outcome-contract-decision.md §9)" >&2
+echo "  - ≥1 historical child-create op in kanban_ops with" >&2
+echo "    payload.parent_card_id == card.id (decomposed_then_swept" >&2
+echo "    analogue — analysis-outcome-contract-decision.md §10," >&2
+echo "    kaart 85f231f0…)" >&2
 echo "" >&2
 echo "See docs/cockpit/analysis-outcome-contract-decision.md §5 + §9." >&2
 

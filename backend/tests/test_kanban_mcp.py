@@ -737,20 +737,19 @@ async def test_move_card_to_other_columns_ignores_outcome():
 
 
 @pytest.mark.asyncio
-async def test_move_analysis_card_to_done_with_invalid_outcome_lists_four_allowed():
-    """`test_move_analysis_card_to_done_with_invalid_outcome_is_rejected`
-    (above) is the original three-value variant. This is the §9 follow-up:
-    a bogus value echoes the FOUR allowed enums back, including
-    `filed_standalone`, so the gate's surface matches the gate's contract
-    (analysis-outcome-contract-decision.md §9)."""
+async def test_move_analysis_card_to_done_with_invalid_outcome_lists_four_allowed_legacy():
+    """DEPRECATED (kaart 85f231f0…). Kept as a subset-check pin so any
+    future change that REMOVES one of the original four values fails
+    loud — the new test
+    `test_move_analysis_card_to_done_with_invalid_outcome_lists_five_allowed`
+    supersedes this for the full closed-enum contract. The subset check
+    predates the §10 expansion."""
     cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done",
                                 summary="x",
                                 outcome="not_a_real_outcome")
     assert result.get("error") == "invalid_outcome"
-    assert set(result.get("allowed", [])) == {
-        "decomposed", "not_feasible", "no_action_needed", "filed_standalone",
-    }
+    assert {"decomposed", "not_feasible", "no_action_needed", "filed_standalone"} <= set(result.get("allowed", []))
 
 
 # --- filed_standalone (analysis-outcome-contract-decision.md §9) ---
@@ -865,17 +864,161 @@ async def test_move_analysis_card_to_done_filed_standalone_with_real_ids_succeed
 
 
 @pytest.mark.asyncio
-async def test_outcome_required_message_mentions_filed_standalone():
-    """A missing outcome on an analysis-Done-move must list all four
-    allowed enums, including the new one — otherwise the gate's error
-    message becomes a contract gap (decision §9 / §1 'instructies
-    zonder verificatie zijn een verzoek, geen contract')."""
+async def test_outcome_required_message_mentions_filed_standalone_legacy():
+    """DEPRECATED (kaart 85f231f0…). The new
+    `test_outcome_required_message_mentions_decomposed_then_swept`
+    supersedes this with the full five-value contract. Kept as a
+    subset pin: any future change that DROPS one of the original four
+    fails loud."""
     cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done", summary="analysis done")
     assert result.get("error") == "outcome_required"
     msg = result.get("message", "")
     for value in ("decomposed", "not_feasible", "no_action_needed",
                   "filed_standalone"):
+        assert value in msg, f"{value} missing from message: {msg!r}"
+
+
+# --- decomposed_then_swept (analysis-outcome-contract-decision §10) -------
+#
+# Fifth outcome: the analysis decomposed into children that have since
+# been swept from the board (Clear Done, single-card delete). At move
+# time there are zero live children, so `decomposed` refuses with
+# `no_children`, and `no_action_needed` would be a lie. The kanban_ops
+# op-log preserves the historical `create` events for those swept
+# children (`payload.parent_card_id`), so the gate can verify ≥1 such
+# event against `card.id`. Same anti-lie posture as `decomposed`, but
+# the witness lives in the op-log, not in the live `kanban_cards` table.
+# No extra label (mirrors `filed_standalone` §9: outcome-taxonomy vs.
+# card-relationship distinction).
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_decomposed_then_swept_without_historical_children_is_rejected():
+    """`decomposed_then_swept` is verified against the op-log: an analysis
+    card that never had any children at all is refused. Mirrors the
+    anti-lie check that `decomposed` runs against live children. This is
+    what stops an honest-looking analysis from sneaking through the new
+    outcome with no decomposition evidence whatsoever."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Done",
+                                summary="claimed children but none exist",
+                                outcome="decomposed_then_swept")
+    assert result.get("error") == "no_historical_children", result
+    card = await m.get_card(cid)
+    assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_decomposed_then_swept_with_historical_children_succeeds():
+    """Happy path: the analysis had children that are now swept. We
+    reproduce that state by creating a child, then deleting it via the
+    op-log (the test-DB reset wipes `kanban_cards` between tests, but
+    `kanban_ops` is preserved long enough within a single test for the
+    gate's verification to find the historical `create` event).
+
+    Lands in Done (not Awaiting Subtasks — there are no live children
+    to wait for). `**Outcome:**` comment lands verbatim; no extra
+    label is set (mirrors §9 `filed_standalone` discipline)."""
+    parent = (await m.create_card("P", "analyse", "",
+                                   work_type="analysis", confirm_new_project=True))["id"]
+    # Create + delete a child via the op-log so the parent's historical
+    # `payload.parent_card_id` witness is preserved after the row is gone.
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+
+    async with KanbanSessionLocal() as s:
+        child_id = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="P", entity_id=None,
+            payload={"title": "swept child", "description": "",
+                      "column": "Backlog", "work_type": None,
+                      "agent": None, "parent_card_id": parent,
+                      "depends_on": None, "labels": None, "metadata": None},
+        )
+        # Now delete it — the create op is preserved in kanban_ops.
+        child = await s.get(KanbanCard, child_id)
+        await s.delete(child)
+        await s.commit()
+
+    result = await m.move_card(parent, "Done",
+                                summary="children finished and were swept",
+                                outcome="decomposed_then_swept")
+    assert result["column"] == "Done", result
+    labels = result.get("labels") or []
+    # No label is set — mirrors §9 (card-relationship outcome, not a
+    # taxonomy value).
+    assert "decomposed-then-swept" not in labels
+    assert "not-feasible" not in labels
+    assert "no-action-needed" not in labels
+
+    from app.kanban.service import card_activity
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, parent)
+    outcome_comments = [
+        o for o in ops
+        if o.op_type == "comment"
+        and "**Outcome:** decomposed_then_swept — children finished and were swept"
+            in (o.payload.get("text") or "")
+    ]
+    assert len(outcome_comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_decomposed_then_swept_with_live_children_is_rejected():
+    """If the analysis still has ≥1 live child, the operator is supposed
+    to use `decomposed` (parent-park in Awaiting Subtasks) instead —
+    `decomposed_then_swept` is only honest when zero live children
+    remain. Without this gate, a parent in flight could short-circuit
+    to Done and abandon its live children.
+
+    Implementation choice: rather than refuse at the gate, we could
+    silently redirect to `decomposed`-style parking, but that hides the
+    state mismatch from the operator — refuse and let them pick the
+    correct outcome."""
+    parent = (await m.create_card("P", "analyse", "",
+                                   work_type="analysis", confirm_new_project=True))["id"]
+    # Live child: parent_card_id back-link is current, no delete.
+    child = (await m.create_card("P", "child", "",
+                                  parent_card_id=parent, confirm_new_project=True))["id"]
+    result = await m.move_card(parent, "Done",
+                                summary="children still live, can't claim swept",
+                                outcome="decomposed_then_swept")
+    assert result.get("error") == "live_children_still_present", result
+    msg = result.get("message", "")
+    # The operator needs the child id to act on this.
+    assert child in msg
+    card = await m.get_card(parent)
+    assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_with_invalid_outcome_lists_five_allowed():
+    """After §10 the closed enum has FIVE values. A bogus outcome echoes
+    the full allowed set so the gate's wire shape matches the contract —
+    the same posture as the §9 four-value counterpart."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Done",
+                                summary="x",
+                                outcome="not_a_real_outcome")
+    assert result.get("error") == "invalid_outcome"
+    assert set(result.get("allowed", [])) == {
+        "decomposed", "not_feasible", "no_action_needed",
+        "filed_standalone", "decomposed_then_swept",
+    }
+
+
+@pytest.mark.asyncio
+async def test_outcome_required_message_mentions_decomposed_then_swept():
+    """A missing outcome on an analysis-Done-move must list all five
+    allowed enums (including the new one), so the gate's error message
+    stays a contract, not a stale wish-list (§1)."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Done", summary="analysis done")
+    assert result.get("error") == "outcome_required"
+    msg = result.get("message", "")
+    for value in ("decomposed", "not_feasible", "no_action_needed",
+                  "filed_standalone", "decomposed_then_swept"):
         assert value in msg, f"{value} missing from message: {msg!r}"
 
 
