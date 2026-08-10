@@ -7,6 +7,10 @@ description: Use when producing the recurring weekly product-owner digest from t
 
 Maak één wekelijkse pagina die de product owner in vijf minuten laat zien wat is opgeleverd, wat is besloten, wat op hen wacht en of de koers is verschoven. Het collector-JSON is de bron; jouw taak is redactie op producthoogte, geen nieuwe data-extractie.
 
+## Bron van deze run
+
+Deze skill wordt aangeroepen door de server-side trigger `id=2` in `recurring_triggers` (cron `0 8 * * 1`, timezone `Europe/Brussels`). De eerdere LLM-keten die de digest handmatig doorgaf is vervangen; deze sessie hoeft geen opvolger-kaart te filen. De volgende run wordt door dezelfde trigger aangemaakt. Een dubbele aanroep van dezelfde cron-beurt (inhaal op boot, twee APScheduler-ticks, handmatige replay) wordt hieronder in **Stap 2** expliciet afgewezen om een bestaande weekpagina niet leeg te schrijven.
+
 ## Step 1 — bepaal project en venster
 
 1. Resolve de echte project-key met `resolve_project_key`; gok hem nooit.
@@ -22,7 +26,18 @@ python3 scripts/po-digest-source.py \
 
 Controleer dat `window`, `shipped`, `decisions`, `waiting` en `course_changes` aanwezig zijn. Staat een sectie in `errors`, benoem dan de bronstoring in die sectie; presenteer een lege fallback nooit als complete werkelijkheid.
 
-## Step 2 — redigeer vier secties
+## Step 2 — botsingscontrole en schrijven
+
+Voordat je het weekbestand opent, controleer of het al bestaat en of het de huidige cron-beurt al dekt. Een bestaande weekpagina is canoniek; een dubbele run mag die niet overschrijven.
+
+1. Bepaal `target_file = docs/cockpit/po-digest/YYYY-Www.md` met `YYYY-Www` de ISO-week van `until`.
+2. Lees `docs/cockpit/po-digest/README.md` en tel het aantal keer dat `YYYY-Www` voorkomt in een indexregel; hetzelfde bestand kan niet twee keer geïndexeerd staan.
+3. Bestaat `target_file`?
+   - **Ja — lees de frontmatter.** Als de bestaande `since`/`until` dezelfde ISO-week dekken als `window.since`/`window.until` van deze run, dan is dit een dubbele aanroep van dezelfde cron-beurt (boot-inhaal, retry, handmatige replay). **Schrijf het bestand niet over.** Post een korte comment op de host-kaart (`<kaart-id>` is `metadata.source_card_id` of de trigger-context) met:
+     > `Botsing: docs/cockpit/po-digest/<YYYY-Www>.md dekt deze beurt al (since=<…>, until=<…>). Trigger id=2 heeft last_fired_at=<…>; sessie stopt zonder schrijven.`
+     Verplaats de kaart naar `Done` met dezelfde botsing als `summary` en beëindig de sessie. Wrijf de indexregel of de commit niet aan.
+   - **Ja — andere week.** Dan zit er een gat in de reeks. Noteer dat in de kaart-comment maar ga door met schrijven: deze run is een inhaal van een eerder overgeslagen week.
+   - **Nee.** Ga door met schrijven zoals hieronder beschreven.
 
 Schrijf `docs/cockpit/po-digest/YYYY-Www.md`, waarbij `YYYY-Www` de ISO-week van `until` is. Gebruik frontmatter met `since:` en `until:`; de collector gebruikt `until` als grens voor de volgende run.
 
@@ -112,6 +127,11 @@ Dupliceer niet het hele digest-blok in de summary.
 ## Quick reference
 
 ```text
-resolve project → collect JSON → redact four capped sections → write week file
-→ prepend README index → commit + push → Done-summary: four lines + canonical path
+resolve project → collect JSON → redact four capped sections
+→ write week file
+→ prepend README index
+→ commit + push
+→ Done-summary: four lines + canonical path
 ```
+
+Eerst botsingscontrole (Stap 2): als `docs/cockpit/po-digest/YYYY-Www.md` de huidige week al dekt, stop en post een korte comment; **niet overschrijven**.
