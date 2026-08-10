@@ -38,16 +38,10 @@ something weird while doing my actual work"; use `session-problem-scan` for
 ## Step 1 — get the *real* project key first
 
 **This is the step most likely to silently fail.** Kanban cards are bucketed
-by a free-form `project` string with no validation — a typo or a
-differently-derived key creates an invisible parallel board.
-This was verified the hard way while building this skill: a hand-typed
-project string (a guessed slug, a display name, even a close-but-not-exact
-copy of the remote URL) returned an empty board even though real cards
-existed — because the live key is derived from the git remote, not typed by
-hand. Resolving it for real is the only path that lands you on the board
-that everyone else is reading.
-A card filed under any other string is orphaned: invisible from the real
-board, and it makes future dedupe checks against it silently miss.
+by a free-form `project` key — a typo or guessed slug creates an invisible
+parallel board, exactly what tripped this skill's own build before a
+resolver existed. Derive the key from the git remote, don't guess — that's
+the only path that lands on the board everyone reads.
 
 Resolve it for real, don't guess. If the `cockpit-kanban` MCP server is
 available, call its `resolve_project_key` tool with this repo's working
