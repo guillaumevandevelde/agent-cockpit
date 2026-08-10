@@ -949,10 +949,38 @@ async def move_card(cid: str, payload: MoveRequest):
         # Post the side-effects the gate guaranteed would land —
         # otherwise the gate fires but the board still shows an empty
         # Done card. Same helpers the MCP move_card uses; no logic
-        # duplicated. ``payload.column`` is the *intended* column —
-        # the REST handler doesn't redirect (no parent-parking /
-        # reviewer routing), but the helper's intent-based contract
-        # keeps the call site uniform with MCP.
+        # duplicated. ``payload.column`` is the *intended* column.
+        #
+        # Deliberate REST divergence (kaart 85a06bc7…, AC #4):
+        # the REST handler does NOT mirror two MCP redirects:
+        #
+        # 1. Parent-parking — MCP redirects Done → Awaiting Subtasks for
+        #    a card that has ≥1 child (docs/cockpit/
+        #    analyse-levenscyclus-decision.md §3). REST lands the card
+        #    in Done directly. A parent-with-pending-children can
+        #    therefore show up as Done on the board via REST; the
+        #    children never auto-close it. Real gap, kept divergent
+        #    pending its own card (the UI affordance — what the user
+        #    sees when they drag a parent to Done — needs its own
+        #    design decision before the redirect lands here).
+        # 2. Reviewer-routing — MCP routes engineer→Done through a
+        #    project-level reviewer column when one exists (board-
+        #    enforced feature-compliance gate, kaart
+        #    ``docs/cockpit/reviewer-agent-decision.md``). REST lands
+        #    in Done directly. A human can therefore bypass the
+        #    reviewer by dragging to Done; an agent dispatching via
+        #    MCP cannot. Kept divergent for now because the REST path
+        #    doubles as the dispatch-fallback when the MCP handshake
+        #    is broken (kaart a962b209…): forcing the redirect on
+        #    REST would silently re-route the fallback the same way,
+        #    which the MCP path already covers.
+        #
+        # What REST DOES share with MCP (the contract that matters
+        # for board consistency): the summary/outcome gate (kaart
+        # efbb82e6…), and — added in kaart 85a06bc7… — the parent
+        # auto-close walk below. Both are non-redirect side-effects,
+        # so they apply cleanly to the REST path with no UI-redirect
+        # concern.
         await service.apply_move_summary_comment(
             s, cid, payload.column, cleaned_summary
         )
@@ -961,6 +989,20 @@ async def move_card(cid: str, payload: MoveRequest):
             await service.apply_outcome_side_effects(
                 s, card, cleaned_outcome, cleaned_summary
             )
+
+        # Auto-close walk (kaart 85a06bc7…): the REST mirror was missing
+        # the parent-chain walk the MCP path runs via
+        # ``service.try_close_ancestors``. The MCP path redirects Done to
+        # Awaiting Subtasks for cards with children (parking), so the
+        # walk only fires after a *genuine* Done. The REST handler
+        # doesn't redirect — a child dragged to Done in the UI reaches
+        # Done directly — so the walk condition is simply
+        # ``column == "Done" and card.parent_card_id``. Same helper, same
+        # parked-only invariant inside ``close_parent_if_all_children_done``,
+        # so a parent still in an agent column is left alone. Mirrors the
+        # MCP check at ``mcp_server.py:599-600``.
+        if payload.column == "Done" and card.parent_card_id:
+            await service.try_close_ancestors(s, card.parent_card_id)
 
         await s.commit()
         return await _reload(s, cid)
