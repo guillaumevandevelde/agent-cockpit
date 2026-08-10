@@ -234,6 +234,39 @@ function ResolveImpediment({
     (selectedOption !== null && hasChoiceRow) ||
     trimmedAnswer !== "";
 
+  // Kaart dec91f69…: distinguish 4xx (server detail, no retry) from 5xx or
+  // network failure (transient — offer Retry). The previous bare `catch {}`
+  // showed the same generic toast for both, so a 422 ("answer must be one of
+  // the gate's options") and a 500 (transient DB lock) read identically and
+  // the operator concluded a specific choice button was broken.
+  // `error.status` is attached by apiClient when the response is not ok; a
+  // missing status means a fetch() rejection (offline / DNS / aborted), which
+  // we treat as transient.
+  const transientFailureMsg =
+    "Transient error — your pick is preserved. Retry?";
+
+  const showSubmitError = (err: unknown, fallbackContext: string) => {
+    const status = (err as { status?: number } | null)?.status;
+    const is4xx = typeof status === "number" && status >= 400 && status < 500;
+    if (is4xx) {
+      // The error message already carries the server detail (FastAPI's
+      // `{"detail": "..."}` body is unpacked by apiErrorMessage). Surface it
+      // verbatim so the operator sees the actual reason the backend refused.
+      const detail =
+        err instanceof Error && err.message ? err.message : fallbackContext;
+      toast.error(detail);
+      return;
+    }
+    toast.error(transientFailureMsg, {
+      action: {
+        label: "Retry",
+        onClick: () => {
+          void submit();
+        },
+      },
+    });
+  };
+
   const submit = async () => {
     if (submitting) return;
     setSubmitting(true);
@@ -241,9 +274,8 @@ function ResolveImpediment({
       if (openGate && selectedOption) {
         try {
           await kanbanApi.answerGate(openGate.id, selectedOption);
-        } catch {
-          toast.error("Failed to submit gate answer");
-          setSubmitting(false);
+        } catch (err) {
+          showSubmitError(err, "Failed to submit gate answer");
           return;
         }
       }
@@ -258,8 +290,8 @@ function ResolveImpediment({
       setAnswer("");
       setSelectedOption(null);
       onResolved();
-    } catch {
-      toast.error("Failed to resolve impediment");
+    } catch (err) {
+      showSubmitError(err, "Failed to resolve impediment");
     } finally {
       setSubmitting(false);
     }
