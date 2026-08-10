@@ -411,3 +411,106 @@ async def test_close_parent_if_all_children_done_true_posts_summary_comment():
             if o.op_type == "comment" and (o.payload.get("text") or "").startswith("**Summary:**")
         ]
         assert len(summary_comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_close_parent_if_all_children_done_zero_children_closes_parent():
+    """Acceptance #2 — a parent parked in `Awaiting Subtasks` with **zero**
+    children must auto-close: there is nothing left to wait for. The previous
+    `if not children or any(...): return False` short-circuit held the parent
+    on Awaiting Subtasks forever once the last child was deleted
+    (kaart `400d6a77…`; 5 parents had been stuck in this state for up to 6
+    weeks before being manually closed). The auto-close still runs only when
+    the parent is in `Awaiting Subtasks` — agents in flight are still left
+    alone, and a not-parked parent in an analyst/engineer column is also
+    untouched.
+    """
+    async with KanbanSessionLocal() as s:
+        parent = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parked-parent", "column": "Awaiting Subtasks"})
+        # The parent has zero children — this is the regression shape.
+        await s.commit()
+
+        closed = await service.close_parent_if_all_children_done(s, parent)
+        await s.commit()
+        assert closed is True, (
+            "Parked parent with zero children must auto-close: there is no "
+            "child left to wait for."
+        )
+        assert (await service.get_card(s, parent)).column == "Done"
+
+        # A leading `**Summary:**` comment is posted so the Done-banner is
+        # not blank — same shape as the regular all-Done case.
+        ops = await service.card_activity(s, parent)
+        summary_texts = [
+            o.payload.get("text") for o in ops
+            if o.op_type == "comment"
+            and (o.payload.get("text") or "").startswith("**Summary:**")
+        ]
+        assert len(summary_texts) == 1, summary_texts
+
+
+@pytest.mark.asyncio
+async def test_close_parent_zero_children_rollup_mentions_children_removed():
+    """Acceptance #3 — the roll-up posted for a zero-children auto-close
+    must explicitly state that the children were already gone, so a reader
+    does not infer there was never any work. We assert two phrasings that
+    can co-exist: a "kinderen zijn al verwijderd" note, and an explicit
+    mention that the auto-close fired because no children were left.
+    """
+    async with KanbanSessionLocal() as s:
+        parent = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "klaar-zonder-kinderen",
+                     "column": "Awaiting Subtasks"})
+        await s.commit()
+
+        await service.close_parent_if_all_children_done(s, parent)
+        await s.commit()
+
+        ops = await service.card_activity(s, parent)
+        rollup = next(
+            (o.payload.get("text") for o in ops
+             if o.op_type == "comment"
+             and (o.payload.get("text") or "").startswith("**Summary:**")),
+            None,
+        )
+        assert rollup is not None, ops
+        body = rollup[len("**Summary:** "):]
+        # Must say children are gone (accept either Dutch wording).
+        assert any(p in body for p in (
+            "kinderen zijn al verwijderd",
+            "kinderen al van het bord",
+            "kind-kaarten waren al",
+            "kinderen waren al",
+            "geen kinderen meer",
+            "zero children",
+        )), (
+            f"Roll-up must explain children are gone; body was:\n{body}"
+        )
+        # Must still name the parent so the reader knows which card closed.
+        assert "klaar-zonder-kinderen" in body
+
+
+@pytest.mark.asyncio
+async def test_close_parent_zero_children_does_not_close_non_parked_parent():
+    """Guard rail for acceptance #2: the zero-children branch must not
+    bleed into the parked-only invariant. A non-parked parent (analyst
+    column, in flight) is still left alone even with zero children — only
+    parked parents are auto-closed, and the parked-only check is what
+    `test_close_parent_if_all_children_done_requires_parent_parked` pins
+    for the populated-children case. We re-pin it for the empty-children
+    case so a future refactor that flips the predicate does not silently
+    start auto-closing parents that are still in flight.
+    """
+    async with KanbanSessionLocal() as s:
+        parent = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "in-flight-parent", "column": "analyst"})
+        await s.commit()
+
+        closed = await service.close_parent_if_all_children_done(s, parent)
+        await s.commit()
+        assert closed is False
+        assert (await service.get_card(s, parent)).column == "analyst"

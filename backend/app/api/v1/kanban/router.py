@@ -1975,6 +1975,15 @@ async def delete_card(cid: str, force: bool = Query(False)):
 
     async with KanbanSessionLocal() as s:
         card = await service.get_card(s, cid)
+        # Capture the parent_card_id BEFORE the delete so we can re-evaluate
+        # the parent after the row is gone (kaart `400d6a77…` — see the
+        # auto-close-walk comment below). The lookup itself is informational;
+        # `orphan_children_on_delete` already clears children's parent_card_id,
+        # but the *parent of the deleted card* is a separate row and needs its
+        # own re-evaluation: if the parent was parked in `Awaiting Subtasks`
+        # and this child was its last one, the parent must auto-close, the
+        # same way `mcp_server.move_card` walks the chain on a real Done.
+        parent_of_deleted = card.parent_card_id if card is not None else None
         if card is not None:
             warning = await find_worktree_unmerged_warning(card)
             if warning is not None:
@@ -2014,6 +2023,18 @@ async def delete_card(cid: str, force: bool = Query(False)):
         await service.orphan_children_on_delete(s, cid)
         await apply_operation(s, op_type="delete", entity_type="card",
             project_key="", entity_id=cid, payload={})
+        # Auto-close the parent of the deleted card (if any) and walk up the
+        # chain — mirrors `mcp_server.move_card` for genuine Done moves. Without
+        # this, a parked parent whose last child is deleted via DELETE strands
+        # itself on `Awaiting Subtasks` forever: `close_parent_if_all_children_done`
+        # used to short-circuit on `not children` and return False. The chain
+        # walk is bounded by the parked-only invariant (the helper stops as
+        # soon as a parent in the chain is not parked or has a still-pending
+        # child), so this never auto-closes a parent that is still in flight.
+        # See kaart `400d6a77…` for the full history — five parents on the
+        # live board had been stuck this way for up to 6 weeks.
+        if parent_of_deleted:
+            await service.try_close_ancestors(s, parent_of_deleted)
         await s.commit()
 
 
@@ -2148,6 +2169,10 @@ async def clear_column(payload: ColumnClearRequest):
         cards = await service.list_cards(s, payload.project_key, column=payload.column)
         count = 0
         for card in cards:
+            # Capture the parent BEFORE the delete so we can re-evaluate it
+            # after the row is gone. Same shape as the single-card delete path
+            # — see its comment for the rationale (kaart `400d6a77…`).
+            parent_of_deleted = card.parent_card_id
             # Same dep-aware guard as the single-card delete: strip each cleared
             # card out of any non-Done dependent's depends_on (+ audit comment)
             # so "Clear Done" never orphans a satisfied dependency into a
@@ -2160,6 +2185,16 @@ async def clear_column(payload: ColumnClearRequest):
             await service.orphan_children_on_delete(s, card.id)
             await apply_operation(s, op_type="delete", entity_type="card",
                 project_key="", entity_id=card.id, payload={})
+            # Auto-close the parent of each cleared card (if any) and walk up
+            # the chain — same walk as `mcp_server.move_card` for genuine Done
+            # moves. This is the routine end-of-life path that produced the
+            # historical stuck-parents (kaart `400d6a77…`): a parked parent
+            # whose last Done child was swept into Clear Done used to strand
+            # itself on `Awaiting Subtasks` forever. The chain walk is
+            # bounded by the parked-only invariant, so it never auto-closes a
+            # parent that is still in flight.
+            if parent_of_deleted:
+                await service.try_close_ancestors(s, parent_of_deleted)
             count += 1
         await s.commit()
     return {"cleared": count}
