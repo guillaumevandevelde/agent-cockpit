@@ -18,6 +18,72 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 # CardUpdate), so a UI typo can't sneak a partial carrier in.
 _COMPATIBLE_PROVIDER = "anthropic-compatible"
 
+# Per-column Claude Code subagent/WebSearch caps (kanban card aaa81b23…).
+# Mirrors the CLAUDE_CODE_MAX_* env vars the CC CLI reads at startup
+# (https://code.claude.com/docs/en/changelog, entries 2.1.212/2.1.217):
+#   - max_spawn_depth         -> CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH  (default 3 post-2.1.217, was 1)
+#   - max_concurrent          -> CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS  (default 20)
+#   - max_subagents_per_session -> CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION (default 200)
+#   - max_web_searches_per_session -> CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION (default 200)
+# Anything else is rejected at the API boundary so a UI typo can't silently
+# spawn on the platform default and hide the misconfiguration until the
+# spawned session behaves wrong.
+_ALLOWED_SUBAGENT_CAPS_KEYS = frozenset({
+    "max_spawn_depth",
+    "max_concurrent",
+    "max_subagents_per_session",
+    "max_web_searches_per_session",
+})
+# Claude Code 2.1.217+ caps the depth env at 3; honour it so the value the
+# operator types matches the value the CLI will actually enforce.
+_MAX_SPAWN_DEPTH = 3
+# Lower bound = 1 (no subagents). 0 / negatives would be a silent no-op on
+# the CLI side and a confusing error message to debug from here.
+_MIN_SPAWN_DEPTH = 1
+
+
+def _validate_subagent_caps(value: Any, *, column: str) -> Any:
+    """Validate a ``column_overrides[col].subagent_caps`` dict.
+
+    Returns the value unchanged when valid; raises ``ValueError`` (which
+    pydantic maps to a 422 at the API boundary) on:
+      - non-dict shapes,
+      - unknown keys (the bug class the validator exists for),
+      - non-int values,
+      - ``max_spawn_depth`` outside [1, 3].
+    """
+    if value is None:
+        return value
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"column_overrides[{column!r}].subagent_caps must be an "
+            f"object; got {type(value).__name__}",
+        )
+    for key, val in value.items():
+        if key not in _ALLOWED_SUBAGENT_CAPS_KEYS:
+            allowed = sorted(_ALLOWED_SUBAGENT_CAPS_KEYS)
+            raise ValueError(
+                f"column_overrides[{column!r}].subagent_caps has unknown "
+                f"key {key!r}; allowed keys: {allowed}",
+            )
+        if isinstance(val, bool) or not isinstance(val, int):
+            raise ValueError(
+                f"column_overrides[{column!r}].subagent_caps[{key!r}] "
+                f"must be an integer; got {type(val).__name__} {val!r}",
+            )
+        if key == "max_spawn_depth" and not (_MIN_SPAWN_DEPTH <= val <= _MAX_SPAWN_DEPTH):
+            raise ValueError(
+                f"column_overrides[{column!r}].subagent_caps.max_spawn_depth "
+                f"must be between {_MIN_SPAWN_DEPTH} and {_MAX_SPAWN_DEPTH} "
+                f"(Claude Code 2.1.217+ hard cap); got {val}",
+            )
+        if val < 0:
+            raise ValueError(
+                f"column_overrides[{column!r}].subagent_caps[{key!r}] "
+                f"must be >= 0; got {val}",
+            )
+    return value
+
 
 def _validate_column_overrides_value(value: Any) -> Any:
     """Reject ``column_overrides[col]`` with ``provider=anthropic-compatible``
@@ -38,28 +104,33 @@ def _validate_column_overrides_value(value: Any) -> Any:
                 f"got {type(override).__name__}",
             )
         provider = override.get("provider")
-        if provider is None:
-            continue
-        if not isinstance(provider, str):
-            raise ValueError(
-                f"column_overrides[{column!r}].provider must be a string "
-                f"or null; got {type(provider).__name__}",
-            )
-        endpoint_name = override.get("endpoint_name")
-        if endpoint_name is not None and not isinstance(endpoint_name, str):
-            raise ValueError(
-                f"column_overrides[{column!r}].endpoint_name must be a "
-                f"string or null; got {type(endpoint_name).__name__}",
-            )
-        if provider == _COMPATIBLE_PROVIDER and not (
-            isinstance(endpoint_name, str) and endpoint_name.strip()
-        ):
-            raise ValueError(
-                f"column_overrides[{column!r}] uses provider "
-                f"anthropic-compatible; a non-empty endpoint_name is "
-                f"required. Register the endpoint via "
-                f"/api/v1/agent-bridge/platforms/endpoints first.",
-            )
+        if provider is not None:
+            if not isinstance(provider, str):
+                raise ValueError(
+                    f"column_overrides[{column!r}].provider must be a string "
+                    f"or null; got {type(provider).__name__}",
+                )
+            endpoint_name = override.get("endpoint_name")
+            if endpoint_name is not None and not isinstance(endpoint_name, str):
+                raise ValueError(
+                    f"column_overrides[{column!r}].endpoint_name must be a "
+                    f"string or null; got {type(endpoint_name).__name__}",
+                )
+            if provider == _COMPATIBLE_PROVIDER and not (
+                isinstance(endpoint_name, str) and endpoint_name.strip()
+            ):
+                raise ValueError(
+                    f"column_overrides[{column!r}] uses provider "
+                    f"anthropic-compatible; a non-empty endpoint_name is "
+                    f"required. Register the endpoint via "
+                    f"/api/v1/agent-bridge/platforms/endpoints first.",
+                )
+        # Per-column Claude Code subagent/WebSearch caps (kanban card
+        # aaa81b23…). Optional; validates the dict shape + key allow-list
+        # only when the operator opted in. See _validate_subagent_caps
+        # for the full rule set.
+        if "subagent_caps" in override:
+            _validate_subagent_caps(override["subagent_caps"], column=column)
     return value
 
 # Fixed kanban columns. Cards on a fixed column are never auto-dispatched

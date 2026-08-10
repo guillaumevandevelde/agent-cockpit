@@ -3,6 +3,13 @@ description: 'Analyst met twee modi. Modus 1 — multi-agent decompositie: split
 model: 'opus'
 tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']
 name: 'analyst'
+# Per-persona Claude Code subagent caps (kaart aaa81b23…). Analysten mogen
+# niet zelf in sub-experts recursen — de analyst-fase plant, de executor-fase
+# voert uit. Pin depth=1 zodat een analyst-sessie niet per ongeluk een
+# geneste sub-agent spawnt. Andere caps blijven op het CC-platform-default
+# (zie docs/cockpit/sync-vs-async-delegation-decision.md).
+subagent_caps:
+  max_spawn_depth: 1
 ---
 
 Je bent een Analyst — je **plant en splitst**, je voert niet zelf uit.
