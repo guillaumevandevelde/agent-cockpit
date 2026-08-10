@@ -393,6 +393,96 @@ for k in (\"shipped\",\"decisions\",\"waiting\",\"course_changes\"):
 "'
 
 # ----------------------------------------------------------------------------
+echo "Task 11: fresh-worktree — equal mtimes + README.md without frontmatter picks the latest W-week"
+# Reproduction of the W33 incident (kaart df54a63d…): a fresh git checkout
+# stamps all files with the same mtime, so mtime-based ordering falls back
+# to iterdir() order and may land on README.md (no `until:` frontmatter).
+# The collector must (a) parse the YYYY-Www token out of the filename rather
+# than rely on mtime, and (b) skip files whose frontmatter has no `until:`
+# instead of stopping at the first candidate.
+mkdir -p "$TMP/po-digest-fresh"
+PRIOR_UNTIL_W32="2026-08-08T08:05:30Z"
+PRIOR_UNTIL_W33="2026-08-10T06:00:49Z"
+cat > "$TMP/po-digest-fresh/2026-W31.md" <<EOF
+---
+until: "2026-07-31T00:00:00Z"
+---
+# W31
+EOF
+cat > "$TMP/po-digest-fresh/2026-W32.md" <<EOF
+---
+until: "${PRIOR_UNTIL_W32}"
+---
+# W32
+EOF
+cat > "$TMP/po-digest-fresh/2026-W33.md" <<EOF
+---
+until: "${PRIOR_UNTIL_W33}"
+---
+# W33
+EOF
+cat > "$TMP/po-digest-fresh/README.md" <<'EOF'
+# This is a README without `until:` frontmatter.
+EOF
+# Force identical mtime so mtime-based ordering is meaningless — exactly
+# what a fresh checkout produces.
+touch -d "2026-08-10T07:00:00Z" "$TMP/po-digest-fresh/2026-W31.md" \
+                                "$TMP/po-digest-fresh/2026-W32.md" \
+                                "$TMP/po-digest-fresh/2026-W33.md" \
+                                "$TMP/po-digest-fresh/README.md"
+# Confirm the precondition: all four files share mtime.
+SAME_MTIME=$(stat -c '%Y' "$TMP/po-digest-fresh"/*.md | sort -u | wc -l)
+check "fresh-worktree → all files share mtime" '[ "$SAME_MTIME" -eq 1 ]'
+db11="$TMP/t11.db"; seed_db "$db11"
+out=$(PO_DIGEST_DIR="$TMP/po-digest-fresh" python3 "$SUT" --kanban-db "$db11" --project-key "pk" --until "2026-08-11T00:00:00Z" 2>&1); rc=$?
+check "fresh-worktree → exit 0" '[ "$rc" -eq 0 ]'
+check "fresh-worktree → since = W33.until (NOT now-7d)" 'echo "$out" | pycheck "
+assert d[\"window\"][\"since\"].startswith(\"2026-08-10T06:00:49\"), d[\"window\"][\"since\"]
+"'
+check "fresh-worktree → since is NOT the silent now-7d fallback" 'echo "$out" | pycheck "
+import datetime
+s=datetime.datetime.fromisoformat(d[\"window\"][\"since\"].replace(\"Z\",\"+00:00\"))
+u=datetime.datetime.fromisoformat(d[\"window\"][\"until\"].replace(\"Z\",\"+00:00\"))
+delta=(u-s).total_seconds()
+assert delta < 2*86400, (delta, d[\"window\"])
+"'
+check "fresh-worktree → no silent fallback error message" 'echo "$out" | pycheck "
+assert \"window_fallback\" not in d.get(\"errors\",{}), d.get(\"errors\")
+"'
+
+# ----------------------------------------------------------------------------
+echo "Task 12: when ALL candidates lack until-frontmatter, the collector falls back to now-7d AND reports it in errors"
+mkdir -p "$TMP/po-digest-empty-fm"
+cat > "$TMP/po-digest-empty-fm/README.md" <<'EOF'
+# readme only
+EOF
+cat > "$TMP/po-digest-empty-fm/2026-W32.md" <<'EOF'
+---
+title: no until
+---
+# W32 (no until key)
+EOF
+touch -d "2026-08-10T07:00:00Z" "$TMP/po-digest-empty-fm/2026-W32.md" \
+                                "$TMP/po-digest-empty-fm/README.md"
+db12="$TMP/t12.db"; seed_db "$db12"
+# Use --until = test-time now so the now-7d fallback gives a ~7d delta.
+NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+out=$(PO_DIGEST_DIR="$TMP/po-digest-empty-fm" python3 "$SUT" --kanban-db "$db12" --project-key "pk" --until "$NOW_ISO" 2>&1); rc=$?
+check "empty-fm → exit 0" '[ "$rc" -eq 0 ]'
+check "empty-fm → since ≈ now - 7d" 'echo "$out" | pycheck "
+import datetime
+s=datetime.datetime.fromisoformat(d[\"window\"][\"since\"].replace(\"Z\",\"+00:00\"))
+u=datetime.datetime.fromisoformat(d[\"window\"][\"until\"].replace(\"Z\",\"+00:00\"))
+delta=(u-s).total_seconds()
+assert abs(delta-7*86400) < 60, (delta, d[\"window\"])
+"'
+check "empty-fm → errors.window_fallback explains why" 'echo "$out" | pycheck "
+err=d.get(\"errors\",{}).get(\"window_fallback\",\"\")
+assert err, d.get(\"errors\")
+assert \"until\" in err.lower() or \"frontmatter\" in err.lower(), err
+"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]

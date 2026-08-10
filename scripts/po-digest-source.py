@@ -95,8 +95,14 @@ REVERSAL_MARKER = "↩︎ herzien door"
 DEFAULT_KANBAN_DB = "~/.claude-registry/kanban.db"
 
 # Path the collector walks for the prior-week file when --since is omitted.
+# Path the collector walks for the prior-week file when --since is omitted.
 # Mirrors the spec §6.1 contract: doc-based, not state-based.
 DEFAULT_DIGEST_DIRNAME = "docs/cockpit/po-digest"
+
+# Week-filename token (e.g. ``2026-W33``) extracted from the path stem.
+# Mirrors the writer side: weekly digests land as ``<year>-W<ww>.md`` and
+# sort lexicographically = chronologically under ISO-8601.
+_WEEK_FILE_RE = re.compile(r"^(?P<year>\d{4})-W(?P<week>\d{2})$")
 
 # Default backend base URL. The wachtrij lives behind this — see
 # backend/app/api/v1/kanban/router.py:467 (po_wachtrij endpoint).
@@ -201,40 +207,65 @@ def _parse_frontmatter_date(text: str, key: str) -> datetime | None:
         return None
 
 
-def _resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime]:
-    """Return the (since, until) datetime pair the collector will use.
+def _resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime, dict[str, str]]:
+    """Return the (since, until, errors) the collector will use.
 
     See spec §6.1 for the rationale. Three cases for ``--since``:
 
     1. Explicit → use it as-is.
-    2. Omitted + a prior week file exists → since = that file's
-       ``until:`` frontmatter (self-correcting after a missed week).
-    3. Omitted + no prior week file → since = now − 7d.
+    2. Omitted + a prior week file with a parseable ``until:`` frontmatter
+       exists → since = that file's ``until:`` (self-correcting after a
+       missed week). Selection sorts by the ``YYYY-Www`` token in the
+       filename, NOT by mtime — a fresh git checkout stamps every file with
+       the same mtime, so mtime-based ordering degrades to iterdir()
+       order and may land on a non-week file (e.g. ``README.md``).
+    3. Omitted + no usable prior week file → since = now − 7d. The
+       fallback is reported on ``errors["window_fallback"]`` so a silent
+       double-count cannot recur (kaart df54a63d…).
 
     ``--until`` defaults to ``now`` when omitted.
     """
     now = datetime.now(UTC)
+    explicit_until = _parse_iso_datetime(args.until) if args.until else now
+    errors: dict[str, str] = {}
     if args.since:
-        return _parse_iso_datetime(args.since), _parse_iso_datetime(args.until)
+        return _parse_iso_datetime(args.since), explicit_until, errors
     repo_root = _resolve_repo_root(args.repo_root)
     digest_dir = _resolve_digest_dir(repo_root)
     if digest_dir.is_dir():
-        # Pick the newest file's mtime — week files are added incrementally,
-        # so two weeks in the same dir don't trample each other.
-        files = sorted(
-            (p for p in digest_dir.iterdir() if p.is_file() and p.suffix == ".md"),
-            key=lambda p: p.stat().st_mtime,
-        )
-        if files:
-            newest = files[-1]
+        # Sort by the YYYY-Www token in the filename — lexicographic on a
+        # fixed-width ISO week key equals chronological. mtime is
+        # meaningless in a fresh checkout (every file gets the same stamp),
+        # and an unrelated file like README.md can land in iterdir() order
+        # before the real week files.
+        files = [
+            p for p in digest_dir.iterdir()
+            if p.is_file() and p.suffix == ".md"
+        ]
+        files.sort(key=lambda p: (
+            # Non-week files sort last so they are tried only after every
+            # parseable week file has been skipped over.
+            _WEEK_FILE_RE.match(p.stem) is None,
+            p.stem,
+        ), reverse=True)
+        for candidate in files:
             try:
-                text = newest.read_text(encoding="utf-8")
+                text = candidate.read_text(encoding="utf-8")
             except OSError:
-                text = ""
+                continue
             until = _parse_frontmatter_date(text, "until")
             if until is not None:
-                return until, _parse_iso_datetime(args.until) if args.until else now
-    return now - timedelta(days=7), _parse_iso_datetime(args.until) if args.until else now
+                return until, explicit_until, errors
+            # File is a week-named candidate without a usable until → keep
+            # looking. README.md / out-of-band notes never had one.
+        # Walked the whole digest dir without finding a usable until.
+        if files:
+            errors["window_fallback"] = (
+                "no prior week file in "
+                f"{digest_dir} has a parseable `until:` frontmatter; "
+                "falling back to now − 7d"
+            )
+    return now - timedelta(days=7), explicit_until, errors
 
 
 # ---------------------------------------------------------------------------
@@ -557,7 +588,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
-    since, until = _resolve_window(args)
+    since, until, window_errors = _resolve_window(args)
+    errors: dict[str, str] = dict(window_errors)
     out: dict = {
         WINDOW_KEY: {"since": since.isoformat(), "until": until.isoformat()},
         SHIPPED_KEY: [],
@@ -565,8 +597,6 @@ def main(argv: list[str] | None = None) -> int:
         WAITING_KEY: [],
         COURSE_CHANGES_KEY: [],
     }
-
-    errors: dict[str, str] = {}
 
     # --- shipped + course_changes (kanban DB) --------------------------------
     db_path = _resolve_db_path(args.kanban_db)
