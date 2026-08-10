@@ -81,10 +81,19 @@ jobs:
         run: bash scripts/check-superpowers-promotions.sh
         continue-on-error: true
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-      # Six statische check-scripts advisory gewired (kanban card d92f6f5f…).
-      # Vorm spiegelt check-superpowers-promotions.sh hierboven: draaien vanuit
-      # repo-root, advisory (`continue-on-error: true`), en dezelfde `if:`-vorm
-      # zodat één run alle falende gates toont.
+      # Seven statische check-scripts wired (kanban card d92f6f5f… +
+      # a712f5c6…). De zes `*-advisory`-blokken hieronder draaien vanuit
+      # repo-root met `continue-on-error: true` zodat één run alle
+      # falende gates toont (zelfde `if:`-vorm als
+      # check-superpowers-promotions.sh hierboven). De PreToolUse-bg-
+      # agent-test stap wijkt af: blocking (`continue-on-error`
+      # weggelaten) en met `--strict`, op bevel van kanban-kaart
+      # `a712f5c6…` — eerste blokkerende static-check, de doc-tekst in
+      # `docs/cockpit/00-orientation.md` en `CLAUDE.md` belooft al
+      # "faalt CI" en deze stap maakt die claim waar.
+      - name: PreToolUse background-agent test (blocking)
+        run: bash scripts/check-pretooluse-bg-agent-test.sh --strict
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
       - name: Worktree admin files tracked (advisory)
         run: bash scripts/check-worktree-admin-files.sh
         continue-on-error: true
