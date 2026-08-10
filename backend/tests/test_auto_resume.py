@@ -249,6 +249,97 @@ class TestEnabledState:
         assert svc.is_enabled("/project-b") is False
 
 
+class TestDefaultResumeMessage:
+    """The default nudge text is short ("OK") on purpose — a long imperative
+    like "Continue where you left off." looks like a workprompt to Claude and
+    burns input-tokens on a routine auto-resume. Operators that want a longer
+    message (e.g. to give the session context) override per-cwd via
+    ``set_message``. Pinning the default length here guards against a future
+    refactor widening the constant back to an imperative sentence."""
+
+    def test_default_is_short(self):
+        from app.services.scheduling.auto_resume import DEFAULT_RESUME_MESSAGE
+
+        # 1-3 words, per card 9c7ef6b1… acceptance criteria.
+        assert len(DEFAULT_RESUME_MESSAGE.split()) <= 3
+        assert len(DEFAULT_RESUME_MESSAGE) < 30
+
+
+class TestResumeMessageOverride:
+    """Per-cwd override on the auto-resume message — the canonical way for
+    an operator to give the resumed session context (or to switch to their
+    own short acknowledgement). Analog of ``set_enabled`` / ``is_enabled``."""
+
+    def test_get_message_returns_default_when_unset(self):
+        svc = AutoResumeService()
+        from app.services.scheduling.auto_resume import DEFAULT_RESUME_MESSAGE
+        assert svc.get_message("/some/path") == DEFAULT_RESUME_MESSAGE
+
+    def test_set_message_roundtrip(self):
+        svc = AutoResumeService()
+        svc.set_message("/project", "Resume on prior task")
+        assert svc.get_message("/project") == "Resume on prior task"
+
+    def test_per_cwd_isolation(self):
+        svc = AutoResumeService()
+        svc.set_message("/project-a", "Custom A")
+        assert svc.get_message("/project-a") == "Custom A"
+        assert svc.get_message("/project-b") == svc.get_message("/project-b")
+        # project-b keeps the default (not project-a's value).
+        from app.services.scheduling.auto_resume import DEFAULT_RESUME_MESSAGE
+        assert svc.get_message("/project-b") == DEFAULT_RESUME_MESSAGE
+
+
+class TestScheduleResumeMessagePropagation:
+    """``schedule_resume`` resolves the message in this order:
+
+    1. explicit ``message`` argument (call-site override),
+    2. per-cwd override via ``get_message(cwd)``,
+    3. ``DEFAULT_RESUME_MESSAGE``.
+
+    The explicit-override path stays so a caller like the session-hooks
+    router can hand-craft a one-off nudge (kanban card 9c7ef6b1…
+    acceptance criteria). The per-cwd path is the new way operators pick
+    a project-specific default without forking the call site."""
+
+    def _capture_scheduled_args(self, svc, **kwargs):
+        mock_sched = MagicMock()
+        with patch(
+            "app.services.scheduling.scheduler.scheduler_service", mock_sched
+        ):
+            svc.schedule_resume(
+                cwd=kwargs.pop("cwd", "/project"),
+                reset_time=kwargs.pop(
+                    "reset_time",
+                    datetime.now(ZoneInfo("UTC")) + timedelta(hours=1),
+                ),
+                tz_name=kwargs.pop("tz_name", "UTC"),
+                **kwargs,
+            )
+            # args=[cwd, message, session_id, project_folder]
+            return mock_sched._sched.add_job.call_args.kwargs["args"]
+
+    def test_explicit_message_overrides_per_cwd_setting(self):
+        svc = AutoResumeService()
+        svc.set_message("/project", "Per-cwd default")
+        args = self._capture_scheduled_args(
+            svc, cwd="/project", message="explicit override"
+        )
+        assert args[1] == "explicit override"
+
+    def test_no_message_picks_up_per_cwd_setting(self):
+        svc = AutoResumeService()
+        svc.set_message("/project", "Per-cwd default")
+        args = self._capture_scheduled_args(svc, cwd="/project")
+        assert args[1] == "Per-cwd default"
+
+    def test_no_message_no_override_picks_default(self):
+        svc = AutoResumeService()
+        from app.services.scheduling.auto_resume import DEFAULT_RESUME_MESSAGE
+        args = self._capture_scheduled_args(svc, cwd="/project")
+        assert args[1] == DEFAULT_RESUME_MESSAGE
+
+
 class TestScheduleResume:
     def test_schedule_creates_job(self):
         svc = AutoResumeService()

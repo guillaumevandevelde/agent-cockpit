@@ -6084,7 +6084,6 @@ async def handle_rate_limit_signal(
         record_handled_signal,
     )
     from app.services.scheduling.auto_resume import (
-        DEFAULT_RESUME_MESSAGE,
         FALLBACK_PAUSE_HOURS,
         auto_resume_service,
     )
@@ -6237,7 +6236,7 @@ async def handle_rate_limit_signal(
             moved = await _do_move_to_resume(cwd, pause_until)
         else:
             scheduled = await try_pane_resume(
-                cwd, pause_until, DEFAULT_RESUME_MESSAGE,
+                cwd, pause_until, auto_resume_service.get_message(cwd),
                 attempts=next_attempts,
             )
             if scheduled:
@@ -6252,7 +6251,7 @@ async def handle_rate_limit_signal(
         moved = False
     else:
         scheduled = await try_pane_resume(
-            cwd, pause_until, DEFAULT_RESUME_MESSAGE, attempts=1,
+            cwd, pause_until, auto_resume_service.get_message(cwd), attempts=1,
         )
         if scheduled:
             moved = False
