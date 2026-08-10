@@ -163,6 +163,18 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql(
             "ALTER TABLE kanban_cards ADD COLUMN dispatch_session_id VARCHAR(64)"
         )
+    # Spawn-window bookmark (kanban card "Onderbroken spawn lekt zijn
+    # tmux-sessie"): written before ``spawn_session`` runs, cleared after.
+    # Nullable so legacy rows round-trip unchanged. Added alongside
+    # ``dispatch_session_id`` because they share the same dispatch-telemetry
+    # read path; a partial state where ``dispatch_session_id`` exists without
+    # ``pending_spawn_session`` would let the boot scan miss orphans on rows
+    # that already migrated half-way (idempotent guard: each column is
+    # checked independently).
+    if "pending_spawn_session" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN pending_spawn_session VARCHAR(64)"
+        )
     if "dispatch_project_folder" not in cols:
         await conn.exec_driver_sql(
             "ALTER TABLE kanban_cards ADD COLUMN dispatch_project_folder VARCHAR(512)"

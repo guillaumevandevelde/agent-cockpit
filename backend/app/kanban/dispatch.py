@@ -6593,6 +6593,23 @@ async def _run_card(
         entity_id=card.id, payload={"column": target_agent},
     )
 
+    # Spawn-window bookmark (kanban card "Onderbroken spawn lekt zijn
+    # tmux-sessie"): the dispatcher writes the just-minted name into
+    # ``pending_spawn_session`` BEFORE ``tmux new-session`` runs, so the next
+    # boot can identify and kill tmux sessions that survive a crash in the
+    # narrow window between spawn and the post-spawn bookkeeping commit.
+    # The field is cleared on the success path below, and
+    # ``session_recovery.reap_pending_spawn_orphans`` reconciles any leftovers
+    # at startup. Sets up the durability contract below: ``commit()`` runs
+    # unconditionally before spawn (was previously gated on
+    # ``is_fresh_worktree`` for the SQLite write-lock reason explained in
+    # that branch), so the bookmark + claim + move are all on disk before
+    # any tmux side effect.
+    await apply_operation(
+        session, op_type="update", entity_type="card", project_key=project_key,
+        entity_id=card.id, payload={"pending_spawn_session": name},
+    )
+
     # Load persona for the target agent. Analyst phase uses a dedicated
     # helper that falls back to the hardcoded ANALYST_PROMPT when no
     # `analyst.md` exists in the project — otherwise the analyst session
@@ -6782,6 +6799,14 @@ async def _run_card(
         # Claim + move are durable before spawn, and the existing exception
         # path applies and commits compensating release/move operations.
         await session.commit()
+    else:
+        # Resume / headless / sandcastle paths also need claim + move +
+        # ``pending_spawn_session`` on disk BEFORE ``tmux new-session`` runs:
+        # otherwise a crash in the ~37s spawn window leaves a live tmux
+        # session with no DB row that recognises it (kaart "Onderbroken spawn
+        # lekt zijn tmux-sessie"). Commit is unconditional rather than gated
+        # on transport type so the bookmark is consistent across paths.
+        await session.commit()
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
                                  cli_id=cli_id, provider=provider, model=effective_model,
@@ -6808,6 +6833,14 @@ async def _run_card(
         # looping forever: move to source_column, immediately re-picked up next
         # tick, same exception again.
         await _clear_stale_resume_fields(session, card=card, project_key=project_key)
+        # Spawn-window bookmark: a synchronous spawn failure left no tmux
+        # session behind, so clearing the field is the right state. The
+        # boot-time sweep would otherwise treat this as an orphan and try
+        # to kill a session that never existed.
+        await apply_operation(
+            session, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"pending_spawn_session": None},
+        )
         failures = await _bump_dispatch_failures(session, card=card, project_key=project_key)
         if failures >= MAX_DISPATCH_FAILURES:
             # Thread `str(exc)` into the impediment comment so the operator
@@ -6826,6 +6859,20 @@ async def _run_card(
             )
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
         raise CardSpawnFailed(str(exc)) from exc
+
+    # Spawn succeeded: clear the bookmark so the boot sweep does not treat
+    # this row as a stale pending-spawn. Telemetry / activity comments are
+    # intentionally NOT inside the same try-block — a half-failed spawn
+    # would log a phantom activation otherwise — and this clear is similarly
+    # separated so the only path that touches it is the success path. A
+    # SIGKILL between this apply_operation and the caller's commit leaves a
+    # row with the bookmark still set and a live claim: the boot sweep
+    # classifies that as ``matched_cleared`` (no kill) and the next dispatch
+    # tick proceeds normally.
+    await apply_operation(
+        session, op_type="update", entity_type="card", project_key=project_key,
+        entity_id=card.id, payload={"pending_spawn_session": None},
+    )
 
     logger.info("dispatched card %s (%s) -> session %s (transport: %s, provider: %s)",
                 card.id, source_column, name,
