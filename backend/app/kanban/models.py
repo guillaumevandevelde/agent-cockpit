@@ -103,6 +103,13 @@ class KanbanCard(KanbanBase):
     # DateTime — see the class docstring's PATCHable-timestamp rule.
     dispatch_started_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
     dispatch_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Name the dispatcher minted for the in-flight spawn, written BEFORE
+    # ``spawn_session`` runs and cleared on the success path. Survives a crash
+    # anywhere in the spawn window so the next boot's ``reap_pending_spawn_orphans``
+    # sweep can identify tmux sessions that would otherwise be orphaned (no DB
+    # row references them). See kanban card "Onderbroken spawn lekt zijn
+    # tmux-sessie -- de naam bestaat pas ná de spawn".
+    pending_spawn_session: Mapped[str | None] = mapped_column(String(64), nullable=True)
     dispatch_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
     dispatch_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Provider (vendor subscription) the dispatcher resolved for the last spawn.

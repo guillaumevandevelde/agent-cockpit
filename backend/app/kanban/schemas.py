@@ -287,6 +287,11 @@ class CardResponse(BaseModel):
     # column — datetime objects don't round-trip).
     dispatch_started_at: str | None = None
     dispatch_session_id: str | None = None
+    # Spawn-window bookmark (kanban card "Onderbroken spawn lekt zijn
+    # tmux-sessie"). Null while no spawn is in flight; cleared on the
+    # success path. Exposed so the board / debug tools can see if a card
+    # is mid-spawn.
+    pending_spawn_session: str | None = None
     dispatch_project_folder: str | None = None
     dispatch_model: str | None = None
     dispatch_provider: str | None = None
@@ -402,6 +407,8 @@ class CardUpdate(BaseModel):
     # so the schema matches the underlying row shape.
     dispatch_started_at: str | None = None
     dispatch_session_id: str | None = None
+    # Spawn-window bookmark — see CardResponse for the rationale.
+    pending_spawn_session: str | None = None
     dispatch_project_folder: str | None = None
     dispatch_model: str | None = None
     dispatch_provider: str | None = None
@@ -979,6 +986,7 @@ class BoardExportCard(BaseModel):
     scheduled_at: str | None = None
     dispatch_started_at: str | None = None
     dispatch_session_id: str | None = None
+    pending_spawn_session: str | None = None
     dispatch_project_folder: str | None = None
     dispatch_model: str | None = None
     dispatch_provider: str | None = None

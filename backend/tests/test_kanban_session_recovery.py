@@ -580,3 +580,128 @@ async def test_recover_project_retains_claim_for_live_session_despite_mcp_discon
     assert called == [], "recovery must not redispatch a session that is live in tmux"
     assert card.claimed_by == "agent:k-product-analy-312c", "the live claim must be retained"
     assert card.resume_session_id is None
+
+
+# ---- reap_pending_spawn_orphans (interrupt-window session leak) -----------
+
+@pytest.mark.asyncio
+async def test_reap_pending_spawn_orphans_kills_tmux_without_matching_claim(monkeypatch):
+    """An interrupted spawn leaves a tmux session alive with no DB-side claim.
+
+    Before this fix, a crash anywhere between ``tmux new-session`` and the
+    post-spawn commit left the tmux session running with nobody able to
+    identify or kill it. The new field ``pending_spawn_session`` is written
+    BEFORE the spawn, so the boot scan can detect this exact state and kill
+    the orphan.
+    """
+    killed = []
+
+    def fake_kill_session(session_name):
+        killed.append(session_name)
+
+    monkeypatch.setattr(recovery, "_kill_tmux_session", fake_kill_session)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="interrupted", column="engineer")
+        # No claim -- the spawn was interrupted before the claim op committed,
+        # but tmux already created the session.
+        card = await get_card(s, cid)
+        card.pending_spawn_session = "k-orphan-aaaa"
+        await s.commit()
+
+        stats = await recovery.reap_pending_spawn_orphans(
+            s, live_sessions={"k-orphan-aaaa"},
+        )
+        await s.commit()
+
+        fresh = await get_card(s, cid)
+
+    assert killed == ["k-orphan-aaaa"]
+    assert stats == {"killed": 1, "stale_cleared": 0, "matched_cleared": 0}
+    assert fresh.pending_spawn_session is None
+
+
+@pytest.mark.asyncio
+async def test_reap_pending_spawn_orphans_clears_stale_when_session_dead(monkeypatch):
+    """The spawn never reached tmux (or died before this boot). Clear the
+    leftover field but don't try to kill anything."""
+    killed = []
+
+    def fake_kill_session(session_name):
+        killed.append(session_name)
+
+    monkeypatch.setattr(recovery, "_kill_tmux_session", fake_kill_session)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="dead", column="engineer")
+        card = await get_card(s, cid)
+        card.pending_spawn_session = "k-dead-bbbb"
+        await s.commit()
+
+        stats = await recovery.reap_pending_spawn_orphans(
+            s, live_sessions=set(),
+        )
+        await s.commit()
+
+        fresh = await get_card(s, cid)
+
+    assert killed == []
+    assert stats == {"killed": 0, "stale_cleared": 1, "matched_cleared": 0}
+    assert fresh.pending_spawn_session is None
+
+
+@pytest.mark.asyncio
+async def test_reap_pending_spawn_orphans_clears_matched_claim_bookkeeping(monkeypatch):
+    """Normal late-finish bookkeeping: the spawn succeeded and the claim was
+    set, but the post-spawn cleanup step that clears ``pending_spawn_session``
+    never ran (process was SIGKILLed). Field must be cleared; tmux stays."""
+    killed = []
+
+    def fake_kill_session(session_name):
+        killed.append(session_name)
+
+    monkeypatch.setattr(recovery, "_kill_tmux_session", fake_kill_session)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="matched", column="engineer")
+        await _claim(s, cid, "agent:k-live-cccc")
+        card = await get_card(s, cid)
+        card.pending_spawn_session = "k-live-cccc"
+        await s.commit()
+
+        stats = await recovery.reap_pending_spawn_orphans(
+            s, live_sessions={"k-live-cccc"},
+        )
+        await s.commit()
+
+        fresh = await get_card(s, cid)
+
+    assert killed == [], "live session with a matching claim is not an orphan"
+    assert stats == {"killed": 0, "stale_cleared": 0, "matched_cleared": 1}
+    assert fresh.pending_spawn_session is None
+    assert fresh.claimed_by == "agent:k-live-cccc"
+
+
+@pytest.mark.asyncio
+async def test_reap_pending_spawn_orphans_ignores_cards_without_pending_field(monkeypatch):
+    """Cards that never went through the new pre-spawn path (legacy, or
+    a normal successful spawn that already cleared the field) are not
+    touched by this sweep."""
+    killed = []
+
+    def fake_kill_session(session_name):
+        killed.append(session_name)
+
+    monkeypatch.setattr(recovery, "_kill_tmux_session", fake_kill_session)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="legacy", column="engineer")
+        await _claim(s, cid, "agent:k-legacy-dddd")
+        await s.commit()
+
+        stats = await recovery.reap_pending_spawn_orphans(
+            s, live_sessions={"k-legacy-dddd"},
+        )
+
+    assert killed == []
+    assert stats == {"killed": 0, "stale_cleared": 0, "matched_cleared": 0}

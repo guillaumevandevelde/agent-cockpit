@@ -10,10 +10,18 @@ Instead, at startup (before the dispatch scheduler runs, so the reaper never get
 to release the claim first) we detect cards whose agent session is gone but whose
 worktree still has a vendor-owned resumable session record, tag them with that
 session id, and re-dispatch them in *resume* mode through the original CLI adapter.
+
+The ``reap_pending_spawn_orphans`` helper closes the narrower interrupt-window
+leak: when the backend dies in the ~37s between ``tmux new-session`` and the
+post-spawn commit, the tmux session is alive but nothing in the DB points at it
+(the claim either never committed or the post-spawn bookkeeping never ran). The
+``pending_spawn_session`` field, written BEFORE the spawn, is the durable
+bookmark this sweep reads.
 """
 from __future__ import annotations
 
 import logging
+import subprocess
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -95,6 +103,89 @@ def _resolve_resume_target(
         logger.info("resume detection unsupported for cli=%s", cli_id)
         return None
     return cli.resolve_resume_target(worktree, data_dir=projects_dir)
+
+
+def _kill_tmux_session(session_name: str) -> None:
+    """Best-effort ``tmux kill-session`` for the orphan-kill sweep.
+
+    Kept distinct from ``dispatch._kill_agent_session`` because the orphan-kill
+    sweep is a startup housekeeping pass that must NOT touch the session
+    registry or session_signals — those in-memory maps belong to the running
+    backend and are empty at boot time anyway. A subprocess call is enough:
+    the sweeper just needs the tmux session gone, with the durably-recorded
+    ``pending_spawn_session`` cleared immediately after so a second boot doesn't
+    re-classify the same dead session as a fresh orphan.
+    """
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
+async def reap_pending_spawn_orphans(
+    session, *, live_sessions: set[str],
+) -> dict[str, int]:
+    """Sweep ``pending_spawn_session`` bookmarks left behind by interrupted spawns.
+
+    Three terminal states per card:
+
+    - **orphan (tmux alive, no matching claim):** the spawn succeeded but the
+      claim op was rolled back, OR the spawn raced a crash between
+      ``tmux new-session`` and the claim commit. Either way the tmux session
+      has no DB row pointing at it — kill it.
+    - **stale (tmux dead):** the spawn never reached tmux, or the tmux session
+      died after this card wrote the bookmark. Nothing to kill; just clear
+      the field so the next sweep skips it.
+    - **matched (tmux alive, claim matches):** the spawn succeeded and the
+      claim was written, but the post-spawn cleanup that clears
+      ``pending_spawn_session`` never ran (process SIGKILLed). Leave the
+      session alive; clear the field.
+
+    Returns ``{"killed": n, "stale_cleared": n, "matched_cleared": n}`` so
+    the caller can log a one-line summary and tests can assert the breakdown
+    without re-deriving it.
+    """
+    from sqlalchemy import select
+
+    from app.kanban.models import KanbanCard
+
+    rows = (
+        await session.execute(
+            select(KanbanCard).where(KanbanCard.pending_spawn_session.is_not(None))
+        )
+    ).scalars().all()
+
+    stats = {"killed": 0, "stale_cleared": 0, "matched_cleared": 0}
+    for card in rows:
+        name = card.pending_spawn_session
+        if not name:
+            continue
+        if name in live_sessions:
+            # Session still alive. Either the claim matches (matched) or it
+            # doesn't (orphan). CLAIMANT_PREFIX == "agent:" — see dispatch.py.
+            claimant_name = (
+                card.claimed_by[len(CLAIMANT_PREFIX):]
+                if (card.claimed_by or "").startswith(CLAIMANT_PREFIX)
+                else None
+            )
+            if claimant_name == name:
+                stats["matched_cleared"] += 1
+            else:
+                _kill_tmux_session(name)
+                stats["killed"] += 1
+                logger.warning(
+                    "reaped pending-spawn orphan %s for card %s (no matching claim)",
+                    name, card.id,
+                )
+        else:
+            stats["stale_cleared"] += 1
+        card.pending_spawn_session = None
+    if any(stats.values()):
+        await session.flush()
+    return stats
 
 
 async def recover_project(
@@ -225,6 +316,28 @@ async def recover_interrupted_sessions() -> int:
         # session is dead, or we'd resume live work into a duplicate session.
         logger.warning("session recovery skipped: tmux liveness unavailable")
         return 0
+
+    # Close the spawn-window leak first. recover_project relies on
+    # ``claimed_by`` for liveness matching, but an interrupted spawn has no
+    # committed claim to match — only the durable ``pending_spawn_session``
+    # bookmark. Sweep these before the per-project recovery so an orphan
+    # tmux session in project A doesn't keep running while project A's
+    # recovery is in flight. Per-project scope is not needed here: the field
+    # is a global signal of "this card was mid-spawn when the backend died".
+    async with KanbanSessionLocal() as ks:
+        try:
+            stats = await reap_pending_spawn_orphans(ks, live_sessions=live)
+            await ks.commit()
+        except Exception:
+            logger.exception("pending-spawn orphan sweep failed; continuing")
+            stats = {}
+        if stats:
+            logger.info(
+                "pending-spawn orphan sweep: killed=%d stale_cleared=%d matched_cleared=%d",
+                stats.get("killed", 0),
+                stats.get("stale_cleared", 0),
+                stats.get("matched_cleared", 0),
+            )
 
     async with KanbanSessionLocal() as ks:
         enabled = set(await list_autodispatch_projects(ks))
