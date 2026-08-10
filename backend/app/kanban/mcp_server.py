@@ -440,19 +440,24 @@ async def move_card(card_id: str, column: str,
     ``decomposed`` (verified against ≥1 child card with
     `parent_card_id == card.id`), ``not_feasible`` (canonical label
     `not-feasible` is appended), ``no_action_needed`` (canonical label
-    `no-action-needed` is appended), or ``filed_standalone`` (a cadence
+    `no-action-needed` is appended), ``filed_standalone`` (a cadence
     trigger that filed Backlog cards WITHOUT parentage — verified against
-    `card.metadata.filed_card_ids`; see §9 of the decision doc below).
+    `card.metadata.filed_card_ids`; see §9 of the decision doc below), or
+    ``decomposed_then_swept`` (the analysis had children that have since
+    been swept from the board — verified against the historical `create`
+    ops in `kanban_ops` with `payload.parent_card_id == card.id`; see §10).
     A `**Outcome:** <value> — <summary>` comment is posted in every case;
     `not_feasible` and `no_action_needed` additionally append a canonical
     label. Failure modes are refused without moving the card and return
     one of `{"error": "outcome_required"}`,
     `{"error": "invalid_outcome", "allowed": [...]}`,
-    `{"error": "no_children"}` or `{"error": "no_filed_cards"}`.
-    Backwards-compatible for non-analysis cards — `outcome` is ignored
-    unless both the column is `Done` and `service.is_analyst_leaf_spike(card)`
-    is true. See `docs/cockpit/analysis-outcome-contract-decision.md` for
-    the rationale.
+    `{"error": "no_children"}`, `{"error": "no_filed_cards"}`,
+    `{"error": "live_children_still_present"}`, or
+    `{"error": "no_historical_children"}`. Backwards-compatible for
+    non-analysis cards — `outcome` is ignored unless both the column is
+    `Done` and `service.is_analyst_leaf_spike(card)` is true. See
+    `docs/cockpit/analysis-outcome-contract-decision.md` for the
+    rationale.
 
     Parent-parking: any card (not just analysis cards) moving to `Done`
     while it has ≥1 child card (`parent_card_id == card.id`) lands in

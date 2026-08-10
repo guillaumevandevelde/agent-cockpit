@@ -1583,22 +1583,34 @@ SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary"}
 # the highest-discipline consumer of the Done state. A summary alone is the
 # wrong witness surface for that — three rounds of prompt-level instructions
 # were ignored because no machine path verified them. This gate closes that
-# gap. The closed enum maps the four legitimate exits:
+# gap. The closed enum maps the five legitimate exits:
 #
-#   decomposed      — child cards were created; verified against the DB
-#                     (≥1 row with parent_card_id == card.id).
-#   not_feasible    — "we should not build this"; sets label ``not-feasible``.
-#   no_action_needed — "decision/steering artefact only, no subtasks"; sets
-#                     label ``no-action-needed``.
-#   filed_standalone — cadence-trigger filed ≥1 standalone Backlog cards
-#                     (no parent_card_id by design); verified against
-#                     ``metadata.filed_card_ids``. See
-#                     ``analysis-outcome-contract-decision.md`` §9.
+#   decomposed          — child cards were created; verified against the DB
+#                         (≥1 row with parent_card_id == card.id).
+#   not_feasible        — "we should not build this"; sets label
+#                         ``not-feasible``.
+#   no_action_needed    — "decision/steering artefact only, no subtasks"; sets
+#                         label ``no-action-needed``.
+#   filed_standalone    — cadence-trigger filed ≥1 standalone Backlog cards
+#                         (no parent_card_id by design); verified against
+#                         ``metadata.filed_card_ids``. See
+#                         ``analysis-outcome-contract-decision.md`` §9.
+#   decomposed_then_swept — the analysis decomposed into children that have
+#                         since been swept (Clear Done or single-card
+#                         delete); at move time there are 0 live children,
+#                         but ≥1 historical `create` op exists in
+#                         ``kanban_ops`` with
+#                         ``payload.parent_card_id == card.id``. Verified
+#                         against the op-log so the card's history — even
+#                         after the children are gone — still counts as
+#                         proof. See
+#                         ``analysis-outcome-contract-decision.md`` §10.
 OUTCOMES = frozenset({
     "decomposed",
     "not_feasible",
     "no_action_needed",
     "filed_standalone",
+    "decomposed_then_swept",
 })
 
 # Label keys for the path-labelling outcomes. Lowercase kebab, matching the
@@ -1650,6 +1662,13 @@ async def enforce_move_gate(
     - ``no_children`` — ``outcome='decomposed'`` without ≥1 child card.
     - ``no_filed_cards`` — ``outcome='filed_standalone'`` without a valid
       ``metadata.filed_card_ids`` entry.
+    - ``live_children_still_present`` — ``outcome='decomposed_then_swept'``
+      while ≥1 child card still exists (the operator should pick
+      ``decomposed`` and let the parent park in Awaiting Subtasks).
+    - ``no_historical_children`` — ``outcome='decomposed_then_swept'``
+      without ≥1 historical ``create`` op in ``kanban_ops`` referencing
+      this card as ``payload.parent_card_id`` (i.e. the analysis never
+      decomposed at all — the anti-lie check).
 
     On success, returns ``(cleaned_summary, cleaned_outcome)``. ``summary``
     is stripped (so ``"  hello  "`` counts as ``"hello"``); ``outcome`` is
@@ -1705,16 +1724,19 @@ async def enforce_move_gate(
                 (
                     "An analysis card (work_type='analysis' or "
                     "agent='analyst') moving to Done must declare an explicit "
-                    "outcome. Pick one of the four values from the closed "
+                    "outcome. Pick one of the five values from the closed "
                     "enum: `decomposed` (the analysis produced ≥1 child "
                     "follow-up cards with `parent_card_id` set), "
                     "`not_feasible` (the analysis concludes: do not build "
                     "this), `no_action_needed` (decision/steering artefact "
-                    "only, no subtasks), or `filed_standalone` (a "
+                    "only, no subtasks), `filed_standalone` (a "
                     "recurring-cadence trigger that filed ≥1 Backlog cards "
                     "without parentage — verified against "
-                    "`metadata.filed_card_ids`). The chosen value lands as "
-                    "a `**Outcome:** …` comment in the activity feed; "
+                    "`metadata.filed_card_ids`), or `decomposed_then_swept` "
+                    "(the analysis had children that have since been swept "
+                    "from the board; verified against the historical "
+                    "`create` ops in `kanban_ops`). The chosen value lands "
+                    "as a `**Outcome:** …` comment in the activity feed; "
                     "`not_feasible` and `no_action_needed` also append a "
                     "canonical label. For an unresolved product fork "
                     "instead, use `report_impediment`."
@@ -1866,6 +1888,72 @@ async def enforce_move_gate(
                         f"{missing[:5]}{'…' if len(missing) > 5 else ''}. "
                         f"Either correct `metadata.filed_card_ids` or pick "
                         f"`no_action_needed` instead."
+                    ),
+                )
+        elif cleaned_outcome == "decomposed_then_swept":
+            # §10 (analysis-outcome-contract-decision): the analysis had
+            # children that have since been swept (Clear Done or single-card
+            # delete). Two checks, both required:
+            #
+            #   1. **No live children** — if there are still child cards on
+            #      the board, the operator should be using ``decomposed``
+            #      (which parks the parent in Awaiting Subtasks), not
+            #      claiming the children are swept. Refuse and name the
+            #      live child so the operator can decide.
+            #   2. **At least one historical create event** in
+            #      ``kanban_ops`` with ``payload.parent_card_id == card.id``
+            #      — the anti-lie check. Without it, an analysis that
+            #      never decomposed could pass itself off as "swept".
+            #      The op-log is append-only and survives card deletes,
+            #      so this witness survives even when every child row is
+            #      gone (the very situation this outcome exists to handle).
+            from app.kanban.models import KanbanOp
+            live_child_ids = (await session.execute(
+                select(KanbanCard.id)
+                .where(KanbanCard.parent_card_id == card.id)
+                .limit(1)
+            )).scalars().all()
+            if live_child_ids:
+                raise MoveGateRejected(
+                    "live_children_still_present",
+                    (
+                        "`outcome='decomposed_then_swept'` requires the "
+                        "analysis card to have zero live children, but "
+                        f"found at least one: `{live_child_ids[0]}`. "
+                        "If the children are still in flight, pick "
+                        "`decomposed` instead (the parent will park in "
+                        "`Awaiting Subtasks` until every child reaches "
+                        "Done). `decomposed_then_swept` is only honest "
+                        "when every historical child has been cleared "
+                        "from the board."
+                    ),
+                )
+            historical = (await session.execute(
+                select(KanbanOp.op_id)
+                .where(KanbanOp.entity_type == "card")
+                .where(KanbanOp.op_type == "create")
+                .where(
+                    func.json_extract(KanbanOp.payload, "$.parent_card_id")
+                    == card.id
+                )
+                .limit(1)
+            )).scalar_one_or_none()
+            if historical is None:
+                raise MoveGateRejected(
+                    "no_historical_children",
+                    (
+                        "`outcome='decomposed_then_swept'` requires the "
+                        "analysis card to have ≥1 historical child-create "
+                        "op in `kanban_ops` with "
+                        "`payload.parent_card_id == card.id`. The op-log "
+                        "is append-only, so a child that was created and "
+                        "later swept (Clear Done, single-card delete) "
+                        "still leaves its `create` op behind. Found 0 "
+                        "such events — either this analysis never "
+                        "decomposed, or all evidence has been pruned. "
+                        "Pick `no_action_needed` if no follow-up work "
+                        "was produced, or `decomposed` if children are "
+                        "still live."
                     ),
                 )
 
