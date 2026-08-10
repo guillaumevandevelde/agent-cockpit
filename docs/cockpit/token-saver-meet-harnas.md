@@ -73,10 +73,30 @@ dus de agent werkt **tegen** een gefaalde test-suite.
   niet pre+post als één concat — anders kan "untouched" ook scoren).
 
 **Twee trials, counterbalanced**: trial 1 = `baseline → with-saver`,
-trial 2 = `with-saver → baseline`. Beide trials draaien in **vers
-aangemaakte scratch worktrees** met de golden-task revert onafhankelijk
-opnieuw toegepast; **geen gedeelde worktree**, dus de eerste run van een
-trial ziet nooit de tweede run.
+trial 2 = `with-saver → baseline`. Beide trials draaien in **verse
+sandbox-bomen** (`make_prompt_sandbox`, een `git archive`-export zonder
+`.git` onder `$MEASURE_SANDBOX_ROOT`) met de golden-task revert
+onafhankelijk opnieuw toegepast; **geen gedeelde boom**, dus de eerste
+run van een trial ziet nooit de tweede run.
+
+### Containment — twee beveiligingen die hier niet werken en één die wel
+
+- **Een omgevingsvariabele is geen slot.** `GIT_SSH_COMMAND=/bin/false` op
+  de claude-aanroep overleefde de shell-grens niet waarin de agent zelf
+  `git` draait — een gemeten agent pushte zijn golden-task edit naar
+  `origin/master` (kaart 5934b954…, revert `2e0eb256`). Bewaren als
+  belt-and-suspenders kost niets; erop vertrouwen breekt.
+- **Een scratch git worktree is geen sandbox.** Een linked worktree
+  deelt per constructie de `.git/config` (en daarmee de remotes én de
+  credentials) van de parent-repo, en staat bovendien binnen de repo.
+  Dat is exact de topologie die `make_prompt_sandbox`'s docstring afwijst.
+- **Een `git archive`-export is de structurele beveiliging die we hier
+  gebruiken.** Geen `.git`, geen remote, geen credentials, en de export
+  ligt buiten `$REPO_ROOT` zodat een `cd ..` nooit de echte repo opent.
+  Sinds kaart `ee905064…` (commit volgt) draait élke variant — niet
+  alleen de card-vormige — door deze sandbox; zie
+  [`harnas-spawn-inventaris.md`](./harnas-spawn-inventaris.md) §1 voor
+  de volledige tabel en §2 voor de rationale.
 
 **Conclusies die je per run mag trekken**: 2 bits kwaliteit + 4
 tokens-velden = **6 getallen per variant + een delta-rij**. Conclusies die

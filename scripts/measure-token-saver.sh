@@ -60,29 +60,36 @@ Subcommands:
                 build_card_prompt injector kwargs. Fails closed (non-zero)
                 when the production import cannot resolve.
   real-saver    runs one isolated variant with the actual RTK hook installed
-                into the scratch worktree's .claude/settings.json. Fails closed
+                into the sandbox's .claude/settings.json. Fails closed
                 if no RTK binary resolves (COCKPIT_RTK_BIN, cache, or PATH).
 
 Output: a Markdown table with one row per trial/variant and separate input,
 cache_creation, cache_read, output, pass_tests, and pass_diff columns.
 
 The harness reapplies the backend/app/kanban/dispatch.py golden-task revert
-for every variant. The proxy/RTK variants run in a fresh detached scratch
-worktree; the card-shaped variants run in a git-less \`git archive\` export
-under \$MEASURE_SANDBOX_ROOT (default \$HOME/.cache/cockpit-measure-sandbox),
-because they carry the real ship recipe and an agent measured with it once
-pushed its golden-task edit to origin/master. In compare mode each trial runs
-baseline / with-saver / real-saver (in that order on trial 1, reverse on
-trial 2) so neither tree state nor variant order is a confounder. In
-injector-compare trial 1 runs card-baseline → card-injector and trial 2 the
-reverse, so each arm gets one cold-cache and one warm-cache position.
+for every variant. Every variant runs in the same structural sandbox — a
+\`git archive\` export with no .git, no remote, and no credentials, written
+under \$MEASURE_SANDBOX_ROOT (default \$HOME/.cache/cockpit-measure-sandbox).
+One uniform invariant across all five variants: an agent that mutates the
+sandbox has nothing to push to and cannot walk up into the real repo. See
+docs/cockpit/harnas-spawn-inventaris.md for the rationale and kaart
+ee905064…/5934b954… (revert 2e0eb256) for the originating incident. In
+compare mode each trial runs baseline / with-saver / real-saver (in that
+order on trial 1, reverse on trial 2) so neither tree state nor variant
+order is a confounder. In injector-compare trial 1 runs card-baseline →
+card-injector and trial 2 the reverse, so each arm gets one cold-cache and
+one warm-cache position.
 
 Requires: claude CLI on PATH, git, pytest (via venv or system). Each variant
-runs in its own detached scratch worktree created from the resolved baseline
-ref (origin/master → master → HEAD) of \$REPO_ROOT, so no network is required;
-the only filesystem footprint between invocations is the result directory
-printed at the end of the run. The \`real-saver\` variant additionally requires
-the RTK binary on PATH (or via COCKPIT_RTK_BIN).
+runs in its own structural sandbox (a `git archive` export with no .git,
+no remote, and no credentials, written under \$MEASURE_SANDBOX_ROOT
+(default \$HOME/.cache/cockpit-measure-sandbox) — see
+docs/cockpit/harnas-spawn-inventaris.md §1) created from the resolved
+baseline ref (origin/master → master → HEAD) of \$REPO_ROOT, so no
+network is required; the only filesystem footprint between invocations
+is the result directory printed at the end of the run. The \`real-saver\`
+variant additionally requires the RTK binary on PATH (or via
+COCKPIT_RTK_BIN).
 
 Results land in \$MEASURE_RESULT_DIR (defaults to
 \$REPO_ROOT/.tmp-measure-token-saver/<timestamp>/). Pass an explicit
@@ -151,15 +158,13 @@ mkdir -p "$RESULT_DIR"
 SANDBOX_ROOT="${MEASURE_SANDBOX_ROOT:-$HOME/.cache/cockpit-measure-sandbox}"
 mkdir -p "$SANDBOX_ROOT"
 
-# One releaser for both tree kinds, so every exit path in run_one cleans up
-# whatever it actually created.
+# One releaser: every variant now runs in a structural sandbox, so the
+# worktree branch is gone. The hook is kept for the API surface (`run_one`
+# still calls `release_run_tree` with two args), but the boolean is no
+# longer used to choose a path.
 release_run_tree() {
-    local sandboxed="$1" tree="$2"
-    if [ "$sandboxed" = "1" ]; then
-        cleanup_prompt_sandbox "$tree" || true
-    else
-        cleanup_scratch_worktree "$REPO_ROOT" "$tree"
-    fi
+    local _sandboxed_unused="$1" tree="$2"
+    cleanup_prompt_sandbox "$tree" || true
 }
 
 # Each call owns one fresh worktree. The result files are copied out before
@@ -170,26 +175,21 @@ run_one() {
     local result_prefix="$RESULT_DIR/trial-${trial}-${variant}"
     local sandboxed=0
 
-    # Card-shaped variants get a git-less sandbox, not a scratch worktree.
-    # They carry the real ship recipe, and an agent measured with it followed
-    # that recipe all the way to `git push origin HEAD:master` on the shared
-    # repo (kaart 5934b954…, reverted in 2e0eb256). A `git archive` export has
-    # no .git, no remote and no credentials, and lives outside $REPO_ROOT, so
-    # the ship step has nothing to act on. See make_prompt_sandbox.
-    if [ "$variant" = "card-baseline" ] || [ "$variant" = "card-injector" ]; then
-        sandboxed=1
-        wt="$SANDBOX_ROOT/trial-${trial}-${variant}"
-        cleanup_prompt_sandbox "$wt" 2>/dev/null || true
-        if ! make_prompt_sandbox "$REPO_ROOT" "$BASE_REF" "$wt" 2> "${result_prefix}.sandbox.err"; then
-            printf 'sandbox export failed: %s\n' \
-                "$(tr '\n' ' ' < "${result_prefix}.sandbox.err")" > "${result_prefix}.missing"
-            return 0
-        fi
-    else
-        wt_path_file="$(mktemp)"
-        with_scratch_worktree "$REPO_ROOT" WT "$BASE_REF" > "$wt_path_file"
-        wt="$(cat "$wt_path_file")"
-        rm -f "$wt_path_file"
+    # Every variant now runs in the structural sandbox — the same
+    # `git archive` export that the card-shaped variants used from the start
+    # (kaart 5934b954…, incident 2026-08-10, revert 2e0eb256). The
+    # baseline/with-saver/real-saver arms did not carry the ship recipe
+    # today, but their prompt is one edit away from that shape, and a
+    # `GIT_SSH_COMMAND=/bin/false` guard or a linked worktree inside
+    # $REPO_ROOT was the guard `make_prompt_sandbox`'s docstring calls
+    # out as bewezen ontoereikend. One uniform invariant for every arm.
+    sandboxed=1
+    wt="$SANDBOX_ROOT/trial-${trial}-${variant}"
+    cleanup_prompt_sandbox "$wt" 2>/dev/null || true
+    if ! make_prompt_sandbox "$REPO_ROOT" "$BASE_REF" "$wt" 2> "${result_prefix}.sandbox.err"; then
+        printf 'sandbox export failed: %s\n' \
+            "$(tr '\n' ' ' < "${result_prefix}.sandbox.err")" > "${result_prefix}.missing"
+        return 0
     fi
 
     # Reapply the golden-task revert independently in every scratch tree.
@@ -240,7 +240,7 @@ run_one() {
         fi
         raw_prompt="$rendered"
     elif [ "$variant" = "real-saver" ]; then
-        # Install the RTK hook into the scratch worktree's .claude/settings.json
+        # Install the RTK hook into the sandbox's .claude/settings.json
         # via the dispatch helper itself. Failure here is "no silent fallback":
         # write a missing-reason marker into the result row, skip the claude
         # invocation, and let emit_table show the row as ?/?/—/?/? — the
@@ -256,15 +256,13 @@ run_one() {
 
     (
         cd "$wt"
-        # Network kill for git. The card-shaped variants carry the REAL ship
-        # instructions ("merge your branch into master and push"), and the
-        # scratch worktree belongs to the real repo — an agent that reaches
-        # the ship step would push a measurement artefact to origin/master.
-        # `origin` is an ssh remote, so /bin/false as the ssh transport makes
-        # every fetch/push fail immediately and locally. Applied to every
-        # variant: none of them legitimately needs the network (the golden
-        # task is local), it changes no prompt bytes, and keeping the two
-        # arms in an identical environment is the point of the comparison.
+        # Network kill for git — the legacy `GIT_SSH_COMMAND=/bin/false`
+        # belt is kept as a redundant guard. The structural containment is
+        # the `make_prompt_sandbox` export: no `.git`, no remote, no
+        # credentials, outside $REPO_ROOT. The env-var did not hold when
+        # tested against a real prompt mutation (kaart 5934b954…), but
+        # keeping it costs nothing and removes a class of regression if a
+        # future operator wires a credential into the sandbox.
         GIT_SSH_COMMAND=/bin/false GIT_TERMINAL_PROMPT=0 \
         timeout "$RUN_TIMEOUT_S" claude -p \
             --dangerously-skip-permissions \
