@@ -7,7 +7,7 @@
 #
 # Helpers:
 #   apply_saver <in> <out>          — byte-stable prompt mutation (RTK + Caveman + Ponytail)
-#   apply_injector <in> <out>       — verbatim Caveman + Ponytail slice from production constants
+#   render_card_prompt <in> <out> <0|1> — production build_card_prompt, injectors off/on
 #   parse_usage <json>              — emits input / cache_creation / cache_read / output on 4 lines
 #   score_golden <worktree>         — emits "pass_tests=<0|1>\npass_diff=<0|1>" on 2 lines
 #   build_prompt <worktree>         — emits the deterministic golden-task prompt on stdout
@@ -15,6 +15,15 @@
 #   prepare_golden_revert <worktree> — creates the broken fixture or fails closed
 #   make_worktree <repo> <path>     — echo the new worktree path on stdout
 #   cleanup_worktree <repo> <path>  — git worktree remove --force + prune
+
+# The one global this file defines on import: the absolute directory of the
+# lib itself, captured at source time. `${BASH_SOURCE[0]}` is only reliable at
+# file scope (inside a function it is empty under a non-bash caller), and
+# `render_card_prompt`/`apply_real_saver` need the repo root to import the
+# production backend. Deliberately NOT `$SCRIPT_DIR` — that global belongs to
+# the caller and points at `scripts/`, one level up, which is why the earlier
+# `$SCRIPT_DIR/../..` in this file resolved one directory above the repo root.
+MEASURE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # --- apply_saver ---------------------------------------------------------
 # Pure, deterministic, byte-stable. Two runs on identical input → identical
@@ -179,65 +188,80 @@ prepare_golden_revert() {
     sed -i "s/$fixed/$broken/" "$dispatch_py"
 }
 
-# --- apply_injector ------------------------------------------------------
-# Apply the verbatim upstream Caveman + Ponytail prompt slices to a prompt
-# file, mirroring the production preamble assembly in
-# ``backend/app/kanban/dispatch.py::build_card_prompt``. The slices come
-# straight from ``backend/app/kanban/prompt_injectors.py`` (the same
-# constants the resolver passes to the dispatch kwargs) so this is a true
-# verbatim measurement — NOT the ~110-byte stub of ``apply_saver``.
+# --- render_card_prompt --------------------------------------------------
+# Render a task body into a full dispatch prompt by calling the PRODUCTION
+# assembler, ``backend/app/kanban/dispatch.py::build_card_prompt`` — the same
+# function ``_run_card`` calls on every real spawn. The third argument decides
+# whether the two injector kwargs carry the verbatim Caveman + Ponytail slices
+# (``1``) or the empty strings a lane with both flags off produces (``0``).
 #
-# Layout produced (separators match the production code's
-# ``preamble + "\n\n---\n\n" + ... + "\n\n"`` pattern):
+#     render_card_prompt <task-body-file> <out-file> <0|1>
 #
-#     <CAVEMAN_PROMPT.rstrip()>
-#     <blank>
-#     ---
-#     <blank>
-#     <original prompt body>
-#     <blank>
-#     ---
-#     <blank>
-#     <PONYTAIL_PROMPT.rstrip()>
+# Why this replaced the earlier hand-assembled ``apply_injector`` (kaart
+# 5934b954…, impediment ronde 2): that helper re-implemented the preamble by
+# hand and got the order wrong — it put Ponytail *after* the task body, while
+# production puts BOTH slices in the preamble, ahead of the card text
+# (dispatch.py: ``preamble + "\n\n---\n\n" + "\n\n---\n\n".join(blocks) + "\n\n"``,
+# then the card body, then the ship instructions). ``cache_read`` is a prefix
+# property, so a wrong prefix measures the wrong thing. Calling the real
+# function removes the whole class of drift: there is no second copy of the
+# assembly order to keep in sync.
 #
-# Mirrors what an injected dispatch sees when both column flags are on
-# (the acceptatiecriterium the kaart noemde: "kwargs op build_card_prompt
-# met en zonder injectie"). The harness can't reach ``build_card_prompt``
-# directly because the path goes through ``_run_card`` and a real
-# kanban-DB; this helper stands in for that path with the same bytes.
+# Calling ``build_card_prompt`` directly is safe from a plain script — it
+# reads only ``id``/``title``/``description`` off the card object and touches
+# no DB (the same reason ``backend/tests/test_prompt_injectors.py`` drives it
+# with a ``SimpleNamespace``). The persona comes from the production reader
+# (``_read_persona``) so the measured prefix is the real engineer-lane prefix,
+# not a stand-in.
 #
-# Fails closed (non-zero) when the import cannot resolve the production
-# module — a silent fallback would emit a measurement that isn't the
-# verbatim slice and is exactly the bug this helper exists to fix.
-apply_injector() {
-    local in="$1" out="$2"
-    # Resolve the repo root from BASH_SOURCE so the inline Python can import
-    # backend.app.kanban.prompt_injectors. SCRIPT_DIR (defined at the top
-    # of this file as the directory of measure_token_saver_lib.sh) points at
-    # scripts/lib/; its grandparent is the repo root. We pass that on
-    # PYTHONPATH and additionally insert ./backend on sys.path inside the
-    # Python heredoc, so the import resolves no matter where the caller
-    # invoked from (the production run from the harness has cwd=repo root;
-    # tests may run from a synthetic tmp dir as long as that dir also has
-    # a backend/ tree — see test_measure_token_saver.sh).
+# Both arms of the measurement go through this one function, so the ONLY
+# byte-level difference between them is the injector slices themselves.
+#
+# Fails closed (non-zero) when the production import cannot resolve — a
+# silent fallback would emit numbers that don't describe the dispatch shape,
+# which is exactly the bug this helper exists to fix.
+render_card_prompt() {
+    local in="$1" out="$2" inject="${3:-0}"
+    # Resolve the repo root from this file's own path — not from a
+    # caller-defined $SCRIPT_DIR. scripts/lib/ → ../.. is the repo root.
     local repo_root
-    repo_root="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)"
-    if [ -z "$repo_root" ]; then
-        echo "error: cannot resolve repo root from $SCRIPT_DIR" >&2
+    repo_root="$(cd "$MEASURE_LIB_DIR/../.." 2>/dev/null && pwd)"
+    if [ -z "$repo_root" ] || [ ! -d "$repo_root/backend/app/kanban" ]; then
+        echo "error: cannot resolve repo root with backend/app/kanban from $MEASURE_LIB_DIR" >&2
         return 13
     fi
-    PYTHONPATH="${PYTHONPATH:-}:$repo_root" \
-    python3 - "$in" "$out" <<'PY'
-import sys
-sys.path.insert(0, "backend")
+    PYTHONPATH="${PYTHONPATH:-}:$repo_root/backend" \
+    REPO_ROOT_FOR_PERSONA="$repo_root" \
+    python3 - "$in" "$out" "$inject" <<'PY'
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["REPO_ROOT_FOR_PERSONA"], "backend"))
 try:
+    from app.kanban.dispatch import build_card_prompt, _read_persona
     from app.kanban.prompt_injectors import CAVEMAN_PROMPT, PONYTAIL_PROMPT
 except Exception as exc:
-    print(f"error: cannot import verbatim slice from app.kanban.prompt_injectors: {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(
+        "error: cannot import production prompt assembler from app.kanban.dispatch: "
+        f"{type(exc).__name__}: {exc}",
+        file=sys.stderr,
+    )
     sys.exit(14)
-src = open(sys.argv[1]).read()
-out = CAVEMAN_PROMPT.rstrip() + "\n\n---\n\n" + src + "\n\n---\n\n" + PONYTAIL_PROMPT.rstrip() + "\n"
-open(sys.argv[2], "w").write(out)
+from types import SimpleNamespace
+
+inject = sys.argv[3] == "1"
+body = open(sys.argv[1]).read()
+card = SimpleNamespace(
+    id="measure-golden-task",
+    title="Golden task: re-apply the zero-column-cap dispatch fix",
+    description=body,
+)
+prompt = build_card_prompt(
+    card,
+    persona=_read_persona(os.environ["REPO_ROOT_FOR_PERSONA"], "engineer"),
+    ship_mode="direct",
+    prompt_injector_caveman=CAVEMAN_PROMPT if inject else "",
+    prompt_injector_ponytail=PONYTAIL_PROMPT if inject else "",
+)
+open(sys.argv[2], "w").write(prompt)
 PY
 }
 
@@ -299,6 +323,53 @@ print(sys.argv[2])
 PY
 }
 
+
+# --- make_prompt_sandbox -------------------------------------------------
+# Materialise <ref>'s tree into <dest> as PLAIN FILES — no .git, no remotes,
+# no credentials, and outside every git working tree.
+#
+#     make_prompt_sandbox <repo> <ref> <dest>
+#
+# Why this exists (kaart 5934b954…, incident 2026-08-10). The card-shaped
+# variants feed the agent the real dispatch prompt, ship recipe included. An
+# agent measured that way follows it: one run reached the ship step, merged
+# its golden-task edit and pushed it to origin/master — unreviewed production
+# dispatch code authored by a measurement fixture (reverted in 2e0eb256).
+#
+# Two guards were tried and are NOT sufficient on their own:
+#   * `GIT_SSH_COMMAND=/bin/false` on the claude invocation — the variable did
+#     not survive into the shell the agent actually runs git from, and the
+#     push went through anyway. Do not rely on env-level transport blocking.
+#   * A scratch git worktree — `with_scratch_worktree` puts the checkout
+#     INSIDE the repo and a linked worktree shares the parent's config, so it
+#     shares the parent's remotes and credentials by construction.
+#
+# A `git archive` export has neither. The agent can still `git init` locally;
+# it has nothing to push to. Keep the destination outside $REPO_ROOT so a
+# stray `git` call cannot walk up into the real repository either.
+make_prompt_sandbox() {
+    local repo="$1" ref="$2" dest="$3"
+    mkdir -p "$dest" || return 1
+    command git -C "$repo" archive --format=tar "$ref" 2>/dev/null | tar -x -C "$dest" || return 1
+    [ -f "$dest/backend/app/kanban/dispatch.py" ] || {
+        echo "error: sandbox export from $ref is missing backend/app/kanban/dispatch.py" >&2
+        return 1
+    }
+    [ ! -e "$dest/.git" ] || {
+        echo "error: sandbox at $dest unexpectedly contains a .git entry" >&2
+        return 1
+    }
+    return 0
+}
+
+# --- cleanup_prompt_sandbox ----------------------------------------------
+cleanup_prompt_sandbox() {
+    local dest="$1"
+    case "$dest" in
+        "$HOME"/.cache/*) rm -rf "$dest" ;;
+        *) echo "refusing to remove sandbox outside \$HOME/.cache: $dest" >&2; return 1 ;;
+    esac
+}
 
 # --- make_worktree -------------------------------------------------------
 # Create a detached scratch worktree. Tries origin/master first, then
