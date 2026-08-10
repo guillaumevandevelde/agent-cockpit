@@ -63,12 +63,22 @@ class _EventOrderingTransport:
     session currently holding a SQLite transaction". Returning ``False`` at
     call-time is the load-bearing invariant; returning ``True`` is the
     regression that the kanban card documents.
+
+    ``commit_counter`` is an optional dict like ``{"n": 0}`` whose ``"n"`` key
+    is incremented by the test's patched ``AsyncSession.commit``. The spy
+    snapshots the count at the moment ``card_transport`` is invoked, so a
+    test can assert ``commit_call_count_at_call >= 1`` to prove at least one
+    commit landed before the sync spawn — the second invariant the card
+    pins (the in-transaction check alone wouldn't catch a deferred commit,
+    because the post-spawn bookkeeping closes the transaction before the
+    test inspects it).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, commit_counter: dict | None = None) -> None:
         self.in_transaction_at_call: bool | None = None
         self.called_at: float | None = None
         self.commit_call_count_at_call: int | None = None
+        self.commit_counter = commit_counter
         self.call_count = 0
 
     def __call__(self, *, directory, prompt, session_name, cli_id="claude-code",
@@ -84,36 +94,16 @@ class _EventOrderingTransport:
             # the transaction, otherwise SQLite's write lock is still held
             # for the duration of this (sync) call.
             self.in_transaction_at_call = sess.in_transaction()
+            # Snapshot the commit counter so a regression that defers the
+            # commit to post-spawn bookkeeping surfaces as
+            # ``commit_call_count_at_call == 0`` here.
+            if self.commit_counter is not None:
+                self.commit_call_count_at_call = self.commit_counter["n"]
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
     # Bound by the test before invoking _run_card so the spy can inspect
     # the session that's running the dispatch.
     _session_ref: list = [None]
-
-
-def _wrap_commit_to_count(sess) -> int:
-    """Wrap ``AsyncSession.commit`` on a session instance to count calls.
-
-    Returns the original commit. Caller is expected to ``await`` the wrapped
-    form. We monkeypatch at the *class* level only for the lifetime of the
-    test (the autouse fixture rebuilds the engine, which discards the
-    patched class) — keeps the patch surface narrow so unrelated tests stay
-    deterministic.
-    """
-    counter = {"n": 0}
-
-    from sqlalchemy.ext.asyncio import AsyncSession
-
-    original_commit = AsyncSession.commit
-
-    async def counting_commit(self, *args, **kwargs):
-        counter["n"] += 1
-        return await original_commit(self, *args, **kwargs)
-
-    AsyncSession.commit = counting_commit
-    # Track the count from inside the transport.
-    sess._commit_counter = counter  # type: ignore[attr-defined]
-    return counter
 
 
 @pytest.mark.asyncio
@@ -190,7 +180,12 @@ async def test_commit_runs_before_sync_spawn_call():
     # cross-test leakage.
     AsyncSession.commit = counting_commit
     try:
-        transport = _EventOrderingTransport()
+        # Hand the counter dict to the spy so ``__call__`` can snapshot
+        # the commit count at the moment ``card_transport`` runs. Without
+        # this wire, the spy never reads the counter and the assertion
+        # below is tautological (passes whether or not a commit ran
+        # before spawn) — the very pattern the card rejects.
+        transport = _EventOrderingTransport(commit_counter=counter)
 
         async with KanbanSessionLocal() as s:
             transport._session_ref[0] = s
@@ -213,8 +208,17 @@ async def test_commit_runs_before_sync_spawn_call():
         AsyncSession.commit = original_commit
 
     assert transport.call_count == 1, "spy transport was not invoked"
-    assert transport.commit_call_count_at_call is None or \
-        transport.commit_call_count_at_call >= 1, (
+    # The spawn-time invariant: at least one commit ran before the
+    # synchronous spawn call. ``commit_call_count_at_call`` is the snapshot
+    # the spy took inside ``__call__``; ``is None`` means the test forgot
+    # to wire the counter, which is a different failure mode than "no
+    # commit ran" and surfaces as a missing-fixture bug.
+    assert transport.commit_call_count_at_call is not None, (
+        "spy transport was not wired to the commit counter — the test "
+        "fixture is incomplete, not a regression of the spawn-time "
+        "commit invariant"
+    )
+    assert transport.commit_call_count_at_call >= 1, (
         f"no commit ran before the sync spawn call "
         f"(observed={transport.commit_call_count_at_call}); "
         f"the SQLite write lock would have been held for the full spawn "
@@ -274,4 +278,84 @@ async def test_run_card_for_resume_transport_also_commits_before_spawn():
     assert transport.in_transaction_at_call is False, (
         "resume branch held an open transaction at spawn time — "
         "lock-release invariant regressed on the resume path"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fresh_worktree_branch_also_commits_before_spawn():
+    """The fresh-worktree branch (``if is_fresh_worktree:`` in ``_run_card``)
+    must also release the SQLite write lock BEFORE the synchronous spawn
+    call. This is the production hot path — the normal dispatch route
+    resolves its transport through ``get_transport_for_project`` →
+    ``make_worktree_transport(skip_permissions=skip)`` and lands here.
+
+    Earlier tests in this module pinned the resume / sandcastle / headless
+    branches but never this one: the bare ``_EventOrderingTransport``
+    carries no ``transport_kind`` label, so ``_transport_is_worktree``
+    returns ``False`` and the dispatch falls through to the ``else:`` arm.
+    A regression that removes the pre-spawn commit from the
+    ``if is_fresh_worktree:`` block would still pass every test in this
+    file — exactly the gap kanban card ``a2d15978d897436ca992e22f9ba23ba6``
+    flagged in its IMPEDIMENT follow-up. This test closes it.
+
+    Detection method: tag the spy with ``transport_kind = "worktree"``
+    (the same label ``make_worktree_transport`` stamps on its closures)
+    so ``_transport_is_worktree`` returns ``True`` and the dispatch
+    enters the production branch. Then assert the same
+    ``in_transaction() is False`` + ``commit_call_count_at_call >= 1``
+    invariants the other tests pin on the ``else:`` branch.
+    """
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        card = await get_card(s, cid)
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+    counter = {"n": 0}
+    original_commit = AsyncSession.commit
+
+    async def counting_commit(self, *args, **kwargs):
+        counter["n"] += 1
+        return await original_commit(self, *args, **kwargs)
+
+    AsyncSession.commit = counting_commit
+    try:
+        transport = _EventOrderingTransport(commit_counter=counter)
+        # The label that flips ``_transport_is_worktree`` to True. Every
+        # worktree-transport factory in dispatch.py stamps the same label
+        # on its closures (see ``make_worktree_transport``'s tag-comment
+        # and kaart a962b209…). Setting it on the spy routes the dispatch
+        # through the production ``if is_fresh_worktree:`` branch.
+        transport.transport_kind = "worktree"
+
+        async with KanbanSessionLocal() as s:
+            transport._session_ref[0] = s
+            s.__class__.commit = counting_commit
+
+            await dispatch._run_card(
+                s, card=card, project_key=PK, project_path="/p",
+                transport=transport, live_sessions=set(),
+            )
+    finally:
+        AsyncSession.commit = original_commit
+
+    assert transport.call_count == 1, "spy transport was not invoked"
+    # Same invariants as the resume-branch test, applied to the branch
+    # the production dispatch actually takes.
+    assert transport.in_transaction_at_call is False, (
+        "fresh-worktree branch held an open transaction at spawn time — "
+        "the production dispatch path regressed on the lock-release "
+        "invariant (card a2d15978d897436ca992e22f9ba23ba6)"
+    )
+    assert transport.commit_call_count_at_call is not None, (
+        "spy transport was not wired to the commit counter — the test "
+        "fixture is incomplete, not a regression of the spawn-time "
+        "commit invariant"
+    )
+    assert transport.commit_call_count_at_call >= 1, (
+        f"no commit ran before the sync spawn call on the fresh-worktree "
+        f"branch (observed={transport.commit_call_count_at_call}); "
+        f"SQLite write lock held for the full ~30-40s spawn window — "
+        f"concurrent UI/MCP writes would 500 with 'database is locked'. "
+        f"Regression of card a2d15978d897436ca992e22f9ba23ba6."
     )
