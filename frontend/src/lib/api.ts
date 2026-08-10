@@ -76,6 +76,15 @@ function apiErrorMessage(error: ApiError, fallback = 'An error occurred'): strin
   return fallback
 }
 
+// Attach the HTTP status to the thrown Error so consumers can distinguish a
+// 4xx (their input is the problem — surface the server detail) from a 5xx
+// (transient backend state — offer Retry). Kaart dec91f69…
+function apiErrorWithStatus(message: string, status: number): Error {
+  const err = new Error(message) as Error & { status?: number }
+  err.status = status
+  return err
+}
+
 export class ApiClient {
   private async request<T>(
     endpoint: string,
@@ -90,7 +99,7 @@ export class ApiClient {
         const error: ApiError = await response.json().catch(() => ({
           message: `HTTP ${response.status}: ${response.statusText}`,
         }))
-        throw new Error(apiErrorMessage(error))
+        throw apiErrorWithStatus(apiErrorMessage(error), response.status)
       }
 
       return response.json()
@@ -143,7 +152,7 @@ export async function apiUpload<T>(endpoint: string, formData: FormData): Promis
     const error: ApiError = await response.json().catch(() => ({
       message: `HTTP ${response.status}: ${response.statusText}`,
     }))
-    throw new Error(apiErrorMessage(error))
+    throw apiErrorWithStatus(apiErrorMessage(error), response.status)
   }
   return response.json()
 }
@@ -171,7 +180,7 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
       const error: ApiError = await response.json().catch(() => ({
         message: `HTTP ${response.status}: ${response.statusText}`,
       }))
-      throw new Error(apiErrorMessage(error))
+      throw apiErrorWithStatus(apiErrorMessage(error), response.status)
     }
 
     return response.json()

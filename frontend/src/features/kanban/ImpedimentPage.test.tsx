@@ -21,6 +21,8 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+const { toast } = await import("sonner");
+
 vi.mock("@/contexts/ProjectContext", () => ({
   useProjectContext: () => ({
     activeProject: {
@@ -608,5 +610,185 @@ describe("ImpedimentPage Resolve button — empty submit guard (kaart 504b4e8a�
 
     const submit = (await screen.findByTestId("resolve-impediment-submit")) as HTMLButtonElement;
     expect(submit.disabled).toBe(false);
+  });
+});
+
+// 4xx vs 5xx distinguishing for the resolve submit flow (kaart dec91f69…).
+// The previous bare `catch {}` swallowed the HTTP status, so a 422
+// ("answer must be one of the gate's options") and a 500 (transient DB
+// lock) both rendered the same generic toast. The operator concluded a
+// specific choice button was broken and reported it as a bug.
+// The fix: ImpedimentPage now reads `error.status` (attached by apiClient
+// when the response is not ok) and branches — 4xx surfaces the server's
+// detail text (from the 422 body), 5xx fires a generic "transient, retry"
+// toast with a Retry action that re-runs the submit flow.
+describe("ImpedimentPage submit error handling — 4xx vs 5xx (kaart dec91f69…)", () => {
+  function apiError(message: string, status: number): Error {
+    const err = new Error(message) as Error & { status?: number };
+    err.status = status;
+    return err;
+  }
+
+  it("surfaces the server detail when answerGate returns 422", async () => {
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+    (kanbanApi.answerGate as ReturnType<typeof vi.fn>).mockRejectedValue(
+      apiError("answer must be one of the gate's options", 422),
+    );
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    fireEvent.click(screen.getByRole("button", { name: /sneller live/i }));
+    fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("answer must be one of the gate's options"),
+      );
+    });
+    // No retry action on 4xx — the operator's input is the problem, not
+    // a transient backend state.
+    const lastCall = (toast.error as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(lastCall?.[1]?.action).toBeUndefined();
+  });
+
+  it("shows a generic transient message with a Retry action when answerGate returns 5xx", async () => {
+    // First attempt: 500 (e.g. transient DB lock). Retry attempt: succeeds.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+    (kanbanApi.answerGate as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(apiError("Internal Server Error", 500))
+      .mockResolvedValueOnce(openGate);
+    (kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...cardInImpediment,
+      column: "Backlog",
+    });
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    fireEvent.click(screen.getByRole("button", { name: /sneller live/i }));
+    fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
+    });
+
+    const lastCall = (toast.error as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const [message, options] = lastCall as [string, { action?: { label: string; onClick: () => void } }];
+    expect(message).toMatch(/transient|retry|try again/i);
+    // The action must be present and offer a Retry button.
+    expect(options.action).toBeDefined();
+    expect(options.action?.label.toLowerCase()).toContain("retry");
+
+    // Clicking the Retry action re-issues the failed call.
+    const callsBefore = (kanbanApi.answerGate as ReturnType<typeof vi.fn>).mock.calls.length;
+    options.action?.onClick();
+    await waitFor(() => {
+      expect((kanbanApi.answerGate as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+    // On success the resolve Impediment + navigation also fire.
+    await waitFor(() => {
+      expect(kanbanApi.resolveImpediment).toHaveBeenCalledWith(
+        "card-imp-1",
+        "/tmp/test-project",
+        undefined,
+      );
+    });
+  });
+
+  it("surfaces the server detail when resolveImpediment returns 422", async () => {
+    // Mirrors the answerGate 422 case but for the second call. The card
+    // mentions resolveImpediment at line 235 having the same bare-catch
+    // problem.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+    (kanbanApi.answerGate as ReturnType<typeof vi.fn>).mockResolvedValue(openGate);
+    (kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>).mockRejectedValue(
+      apiError("card is not in Impediment column", 422),
+    );
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    fireEvent.click(screen.getByRole("button", { name: /sneller live/i }));
+    fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("card is not in Impediment column"),
+      );
+    });
+    const lastCall = (toast.error as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(lastCall?.[1]?.action).toBeUndefined();
+  });
+
+  it("shows a generic transient message with Retry when resolveImpediment returns 5xx", async () => {
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+    (kanbanApi.answerGate as ReturnType<typeof vi.fn>).mockResolvedValue(openGate);
+    (kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(apiError("Internal Server Error", 500))
+      .mockResolvedValueOnce({
+        ...cardInImpediment,
+        column: "Backlog",
+      });
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    fireEvent.click(screen.getByRole("button", { name: /sneller live/i }));
+    fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
+    });
+
+    const lastCall = (toast.error as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const [message, options] = lastCall as [string, { action?: { label: string; onClick: () => void } }];
+    expect(message).toMatch(/transient|retry|try again/i);
+    expect(options.action).toBeDefined();
+
+    const callsBefore = (kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>).mock.calls.length;
+    options.action?.onClick();
+    await waitFor(() => {
+      expect((kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+    await waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith("/kanban");
+    });
+  });
+
+  it("treats a network failure (no status) as transient and offers Retry", async () => {
+    // No status property — represents a fetch() rejection with TypeError
+    // (offline, DNS failure, etc.). The retry affordance should still fire.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+    (kanbanApi.answerGate as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockResolvedValueOnce(openGate);
+    (kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...cardInImpediment,
+      column: "Backlog",
+    });
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    fireEvent.click(screen.getByRole("button", { name: /sneller live/i }));
+    fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
+    });
+
+    const lastCall = (toast.error as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const [, options] = lastCall as [string, { action?: { label: string; onClick: () => void } }];
+    expect(options.action).toBeDefined();
   });
 });
