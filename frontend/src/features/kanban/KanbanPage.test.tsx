@@ -440,6 +440,76 @@ describe("KanbanPage ready-state precedence", () => {
     expect(badge?.getAttribute("title") ?? "").not.toContain("No open dependencies");
   });
 
+  // Restgat van kaart 8b54be53…: dezelfde tegenstrijdigheid herhaalt zich in
+  // de lokale fallback-ladder wanneer `held_reason` leeg is — typisch als
+  // auto-dispatch uit of gepauzeerd staat, of in het venster tussen aanmaken
+  // en de eerstvolgende tick. Zonder `held_reason` moet de fallback zelf op
+  // `scheduled_at` letten, anders valt de kaart door naar `ready` met groene
+  // "No open dependencies"-badge naast de ⌛-chip.
+  it("flags a future-scheduled Backlog card as 'scheduled' even when the dispatcher has not yet ticked (held_reason === null)", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({
+          id: "card-scheduled-unticked",
+          column: "Backlog",
+          scheduled_at: future,
+          // held_reason is null — the dispatcher hasn't classified this
+          // card yet, so the local fallback is what the operator sees.
+          held_reason: null,
+        }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]");
+
+    const badge = await waitFor(() => stateOf("card-scheduled-unticked"));
+    expect(badge?.getAttribute("data-ready-state")).toBe("scheduled");
+    expect(badge?.textContent).toBe("Scheduled");
+    // Same tooltip-guard as the held_reason-bearing sibling: the `ready`
+    // tooltip must not surface here.
+    expect(badge?.getAttribute("title") ?? "").not.toContain("No open dependencies");
+  });
+
+  // Negative case: a past `scheduled_at` is meaningless — the wait already
+  // cleared, so the card is dispatchable and must read as `ready`.
+  it("does NOT flag a card with a past scheduled_at as 'scheduled'", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({
+          id: "card-scheduled-past",
+          column: "Backlog",
+          scheduled_at: past,
+          held_reason: null,
+        }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() => expect(stateOf("card-scheduled-past")).toBe("ready"));
+  });
+
   // kanban-pro-analyse.md §4.1: the dispatcher holds two additional filters
   // the UI didn't mirror — child cards awaiting the analyst's plan_ref
   // delivery, and operator-set `metadata.gated_on` business gates. Both used

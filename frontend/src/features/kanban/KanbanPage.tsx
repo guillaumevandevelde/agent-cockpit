@@ -10,6 +10,7 @@ import type { CardMeta } from "./components/Column";
 import { CardDrawer } from "./components/CardDrawer";
 import { CardEditDialog } from "./components/CardEditDialog";
 import { ColumnSettingsDialog } from "./components/ColumnSettingsDialog";
+import { isFutureSchedule } from "./components/CardItem";
 import { EnableKanbanToggle } from "./components/EnableKanbanToggle";
 import { McpHealthBadge } from "./components/McpHealthBadge";
 import { ShipModeToggle } from "./components/ShipModeToggle";
@@ -382,6 +383,20 @@ export default function KanbanPage() {
         meta.set(card.id, {
           readyState: "dependent",
           blockerTitles,
+        });
+        continue;
+      }
+      // Future `scheduled_at` mirrors the dispatcher's `dep_resolver.is_due`
+      // check. The backend-`held_reason` branch already routes this to
+      // `scheduled`; we only run when `held_reason` is null (dispatcher
+      // paused, or window between create and first tick) — without this
+      // guard a scheduled card falls through to `ready` and the badge
+      // contradicts the ⌛-chip on the same card (kanban card ac46160d…).
+      if (isFutureSchedule(card.scheduled_at ?? null)) {
+        meta.set(card.id, {
+          readyState: "scheduled",
+          blockerTitles: [],
+          scheduledAt: card.scheduled_at ?? undefined,
         });
         continue;
       }

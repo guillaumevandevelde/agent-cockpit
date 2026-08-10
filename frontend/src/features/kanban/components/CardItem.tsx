@@ -49,7 +49,12 @@ const DONE_SUMMARY_MAX = 80;
 // lines, so a card spent more vertical space on labels than on its own title.
 const LABELS_SHOWN_MAX = 2;
 
-function isFutureSchedule(scheduledAt: string | null): boolean {
+// True iff `schedAt` parses to a wall-clock instant strictly in the future.
+// Exported so KanbanPage can mirror the dispatcher's `dep_resolver.is_due`
+// check in its local fallback ladder (kanban card ac46160d… — without it a
+// future-scheduled card falls through to `ready` whenever the dispatcher
+// hasn't ticked yet).
+export function isFutureSchedule(scheduledAt: string | null): boolean {
   return !!scheduledAt && new Date(scheduledAt).getTime() > Date.now();
 }
 
