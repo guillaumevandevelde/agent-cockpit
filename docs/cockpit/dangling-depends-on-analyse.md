@@ -113,10 +113,10 @@ is bovendien hetzelfde woord dat elders (Impediment) "een mens moet ingrijpen" b
 | `725fbdd3` | B↔C-correlatie /plans/overview | `c0cccd74` | levende Backlog-zuster (ready) | 🟢 gezond |
 | `528c5ca2` | `kanban_plans` uitfaseren | `9e33a359` | in `engineer`-kolom, actief geclaimd (in progress) | 🟢 gezond |
 
-**Meetcommando** (peildatum 2026-07-17; kanban-DB in `~/.claude-registry/kanban.db`,
-`project_key` uit git-remote — vul hieronder de sleutel van jouw repo in,
-op deze box `git:github.com/guillaumevandevelde/agent-cockpit` → 12 rijen
-terug op 2026-08-10):
+**Meetcommando** — reproduceert de inventaris hierboven. De kanban-DB staat in
+`~/.claude-registry/kanban.db`. De `project_key` verschilt per repo; vul die van
+jouw repo in (op deze box `git:github.com/guillaumevandevelde/agent-cockpit`).
+De tabel heeft peildatum 2026-07-17; op 2026-08-10 gaf dit 0 rijen.
 
 ```bash
 # per Backlog-kaart met depends_on: toont elke dep-id + of die nog bestaat en z'n kolom
@@ -128,7 +128,7 @@ python3 -c '
 import sqlite3, os
 db = os.path.expanduser("~/.claude-registry/kanban.db")
 con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-for row in con.execute("SELECT c.id, c.title, c.depends_on FROM kanban_cards c WHERE c.project_key=\"git:github.com/guillaumevandevelde/agent-cockpit\" AND c.column=\"Backlog\" AND c.depends_on IS NOT NULL AND c.depends_on != \"[]\""):
+for row in con.execute("SELECT c.id, c.title, c.depends_on FROM kanban_cards c WHERE c.project_key=\"git:github.com/guillaumevandevelde/agent-cockpit\" AND c.column=\"Backlog\" AND c.depends_on IS NOT NULL AND c.depends_on NOT IN (\"[]\", \"null\")"):
     print(row)
 '
 # een dep-id is 'dangling' als deze query 0 rijen geeft:
