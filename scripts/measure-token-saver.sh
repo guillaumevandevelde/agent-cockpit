@@ -64,7 +64,7 @@ Subcommands:
                 if no RTK binary resolves (COCKPIT_RTK_BIN, cache, or PATH).
 
 Output: a Markdown table with one row per trial/variant and separate input,
-cache_creation, cache_read, output, pass_tests, and pass_diff columns.
+cache_creation, cache_read, output, and pass_tests columns.
 
 The harness reapplies the backend/app/kanban/dispatch.py golden-task revert
 for every variant. Every variant runs in the same structural sandbox — a
@@ -303,7 +303,7 @@ emit_row() {
     local label="$1"
     local usage_file="$RESULT_DIR/${label}.usage"
     local score_file="$RESULT_DIR/${label}.score"
-    local input cc cr out pt pd
+    local input cc cr out pt
     if [ -s "$usage_file" ]; then
         input=$(sed -n 1p "$usage_file")
         cc=$(sed -n 2p "$usage_file")
@@ -314,12 +314,11 @@ emit_row() {
     fi
     if [ -s "$score_file" ]; then
         pt=$(grep '^pass_tests=' "$score_file" | cut -d= -f2)
-        pd=$(grep '^pass_diff=' "$score_file" | cut -d= -f2)
     else
-        pt="?"; pd="?"
+        pt="?"
     fi
-    printf '| %-18s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
-        "$label" "$input" "$cc" "$cr" "$out" "$pt" "$pd"
+    printf '| %-18s | %12s | %16s | %12s | %8s | %11s |\n' \
+        "$label" "$input" "$cc" "$cr" "$out" "$pt"
 }
 
 emit_delta() {
@@ -327,20 +326,20 @@ emit_delta() {
     local left="$RESULT_DIR/trial-${trial}-${a}.usage"
     local right="$RESULT_DIR/trial-${trial}-${b}.usage"
     if [ -s "$left" ] && [ -s "$right" ]; then
-        printf '| %-18s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
+        printf '| %-18s | %12s | %16s | %12s | %8s | %11s |\n' \
             "trial-${trial}-delta" \
             "$(( $(sed -n 1p "$right") - $(sed -n 1p "$left") ))" \
             "$(( $(sed -n 2p "$right") - $(sed -n 2p "$left") ))" \
             "$(( $(sed -n 3p "$right") - $(sed -n 3p "$left") ))" \
             "$(( $(sed -n 4p "$right") - $(sed -n 4p "$left") ))" \
-            "—" "—"
+            "—"
     fi
 }
 
 emit_table() {
-    printf '| %-18s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
-        label input cache_creation cache_read output pass_tests pass_diff
-    printf '|--------------------|--------------|------------------|--------------|----------|-------------|------------|\n'
+    printf '| %-18s | %12s | %16s | %12s | %8s | %11s |\n' \
+        label input cache_creation cache_read output pass_tests
+    printf '|--------------------|--------------|------------------|--------------|----------|-------------|\n'
     local trial variant
     for trial in "$@"; do
         for variant in baseline with-saver card-baseline card-injector real-saver; do

@@ -11,11 +11,13 @@
 #      (input / cache_creation_input / cache_read_input / output) and emits
 #      them in that order on stdout; handles missing fields as 0; errors on
 #      unparseable JSON.
-#   3. score_golden: returns `pass_tests=<0|1>` + `pass_diff=<0|1>` for a
-#      worktree that contains (a) the dispatch.py revert, (b) the failing
-#      tests pre-installed, and (c) the pytest invocation that exercises
-#      them. The fixture builds a temporary pytest-stub returning a
-#      deterministic exit code so we don't need a real pytest run.
+#   3. score_golden: returns `pass_tests=<0|1>` for a worktree that contains
+#      (a) the dispatch.py revert, (b) the failing tests pre-installed, and
+#      (c) the pytest invocation that exercises them. The fixture builds a
+#      temporary pytest-stub returning a deterministic exit code so we don't
+#      need a real pytest run. No pass_diff column — see kaart 0a3ee4c9…
+#      and docs/cockpit/prompt-injectors-decision.md §"Over pass_diff" for
+#      why the text-form check was removed in favour of pass_tests alone.
 #   4. resolve_measurement_base_ref + prepare_golden_revert: baseline ref
 #      resolves to origin/master when present, falls back to master, then to
 #      HEAD; prepare_golden_revert fails closed on a worktree whose
@@ -167,7 +169,7 @@ check "unparseable JSON exits non-zero" '[ "$rc" -ne 0 ]'
 check "unparseable JSON prints PARSE_ERROR" 'echo "$out" | grep -qE "PARSE_ERROR"'
 
 # ----------------------------------------------------------------------------
-echo "Task 3: score_golden returns pass_tests + pass_diff for a fixture"
+echo "Task 3: score_golden returns pass_tests (and only pass_tests) for a fixture"
 
 # Build a worktree fixture with the dispatch.py revert + a fake pytest that
 # exits 0 (simulating "tests pass").
@@ -205,7 +207,16 @@ chmod +x "$TMP/fake_pytest.sh"
   score_golden "$TMP/wt" > "$TMP/score.out" )
 check "score_golden exit 0" '[ -f "$TMP/score.out" ]'
 check "score_golden line 1 = pass_tests=1" 'grep -q "^pass_tests=1" "$TMP/score.out"'
-check "score_golden line 2 = pass_diff=1" 'grep -q "^pass_diff=1" "$TMP/score.out"'
+# Regression guard (kaart 0a3ee4c9…): the old pass_diff column scored 0 in
+# every run because the text-form check couldn't follow equivalent
+# rewrites. A future regression that re-adds it as a side effect would
+# also need to ship a behavioural fix to make it useful; this assertion
+# fails in the old form (which emitted `pass_diff=1`) and pins the
+# single-column contract.
+check "score_golden emits no pass_diff line (regression guard for kaart 0a3ee4c9…)" \
+    '! grep -q "^pass_diff=" "$TMP/score.out"'
+check "score_golden output is exactly one line (pass_tests only)" \
+    '[ "$(wc -l < "$TMP/score.out")" -eq 1 ]'
 
 # Now run with a failing fake pytest → pass_tests should flip to 0.
 cat > "$TMP/fake_pytest_fail.sh" <<'EOF'
@@ -219,7 +230,8 @@ chmod +x "$TMP/fake_pytest_fail.sh"
   BACKEND_DIR="$TMP/wt/backend" \
   score_golden "$TMP/wt" > "$TMP/score_fail.out" )
 check "failing pytest → pass_tests=0" 'grep -q "^pass_tests=0" "$TMP/score_fail.out"'
-check "pass_diff stays 1 (diff is still right)" 'grep -q "^pass_diff=1" "$TMP/score_fail.out"'
+check "failing pytest still emits no pass_diff line (regression guard)" \
+    '! grep -q "^pass_diff=" "$TMP/score_fail.out"'
 
 # Verify the pytest invocation is scoped to the canonical test file so the
 # collection errors from unrelated modules (e.g. test_response_model_validation,
