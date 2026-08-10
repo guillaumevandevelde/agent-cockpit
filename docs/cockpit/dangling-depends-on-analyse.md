@@ -120,9 +120,14 @@ terug op 2026-08-10):
 
 ```bash
 # per Backlog-kaart met depends_on: toont elke dep-id + of die nog bestaat en z'n kolom
+# project_key verschilt per repo (afgeleid van `git remote get-url origin`); op deze
+# box 'git:github.com/guillaumevandevelde/agent-cockpit'. Vind die van jou met
+# `curl -s "http://localhost:8000/api/v1/kanban/project-key?project_path=$(git rev-parse --show-toplevel)"`
+# of de MCP-tool resolve_project_key.
 python3 -c '
-import sqlite3
-con = sqlite3.connect("file:~/.claude-registry/kanban.db?mode=ro", uri=True)
+import sqlite3, os
+db = os.path.expanduser("~/.claude-registry/kanban.db")
+con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
 for row in con.execute("SELECT c.id, c.title, c.depends_on FROM kanban_cards c WHERE c.project_key=\"git:github.com/guillaumevandevelde/agent-cockpit\" AND c.column=\"Backlog\" AND c.depends_on IS NOT NULL AND c.depends_on != \"[]\""):
     print(row)
 '
