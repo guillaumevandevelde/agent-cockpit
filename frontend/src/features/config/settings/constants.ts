@@ -1,5 +1,6 @@
 export const MODEL_OPTIONS = [
   { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+  { value: 'claude-opus-5', label: 'Claude Opus 5 (1M context)' },
   { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
   { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
   { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
