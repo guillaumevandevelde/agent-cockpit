@@ -7,6 +7,7 @@
 #
 # Helpers:
 #   apply_saver <in> <out>          — byte-stable prompt mutation (RTK + Caveman + Ponytail)
+#   apply_injector <in> <out>       — verbatim Caveman + Ponytail slice from production constants
 #   parse_usage <json>              — emits input / cache_creation / cache_read / output on 4 lines
 #   score_golden <worktree>         — emits "pass_tests=<0|1>\npass_diff=<0|1>" on 2 lines
 #   build_prompt <worktree>         — emits the deterministic golden-task prompt on stdout
@@ -177,6 +178,69 @@ prepare_golden_revert() {
 
     sed -i "s/$fixed/$broken/" "$dispatch_py"
 }
+
+# --- apply_injector ------------------------------------------------------
+# Apply the verbatim upstream Caveman + Ponytail prompt slices to a prompt
+# file, mirroring the production preamble assembly in
+# ``backend/app/kanban/dispatch.py::build_card_prompt``. The slices come
+# straight from ``backend/app/kanban/prompt_injectors.py`` (the same
+# constants the resolver passes to the dispatch kwargs) so this is a true
+# verbatim measurement — NOT the ~110-byte stub of ``apply_saver``.
+#
+# Layout produced (separators match the production code's
+# ``preamble + "\n\n---\n\n" + ... + "\n\n"`` pattern):
+#
+#     <CAVEMAN_PROMPT.rstrip()>
+#     <blank>
+#     ---
+#     <blank>
+#     <original prompt body>
+#     <blank>
+#     ---
+#     <blank>
+#     <PONYTAIL_PROMPT.rstrip()>
+#
+# Mirrors what an injected dispatch sees when both column flags are on
+# (the acceptatiecriterium the kaart noemde: "kwargs op build_card_prompt
+# met en zonder injectie"). The harness can't reach ``build_card_prompt``
+# directly because the path goes through ``_run_card`` and a real
+# kanban-DB; this helper stands in for that path with the same bytes.
+#
+# Fails closed (non-zero) when the import cannot resolve the production
+# module — a silent fallback would emit a measurement that isn't the
+# verbatim slice and is exactly the bug this helper exists to fix.
+apply_injector() {
+    local in="$1" out="$2"
+    # Resolve the repo root from BASH_SOURCE so the inline Python can import
+    # backend.app.kanban.prompt_injectors. SCRIPT_DIR (defined at the top
+    # of this file as the directory of measure_token_saver_lib.sh) points at
+    # scripts/lib/; its grandparent is the repo root. We pass that on
+    # PYTHONPATH and additionally insert ./backend on sys.path inside the
+    # Python heredoc, so the import resolves no matter where the caller
+    # invoked from (the production run from the harness has cwd=repo root;
+    # tests may run from a synthetic tmp dir as long as that dir also has
+    # a backend/ tree — see test_measure_token_saver.sh).
+    local repo_root
+    repo_root="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)"
+    if [ -z "$repo_root" ]; then
+        echo "error: cannot resolve repo root from $SCRIPT_DIR" >&2
+        return 13
+    fi
+    PYTHONPATH="${PYTHONPATH:-}:$repo_root" \
+    python3 - "$in" "$out" <<'PY'
+import sys
+sys.path.insert(0, "backend")
+try:
+    from app.kanban.prompt_injectors import CAVEMAN_PROMPT, PONYTAIL_PROMPT
+except Exception as exc:
+    print(f"error: cannot import verbatim slice from app.kanban.prompt_injectors: {type(exc).__name__}: {exc}", file=sys.stderr)
+    sys.exit(14)
+src = open(sys.argv[1]).read()
+out = CAVEMAN_PROMPT.rstrip() + "\n\n---\n\n" + src + "\n\n---\n\n" + PONYTAIL_PROMPT.rstrip() + "\n"
+open(sys.argv[2], "w").write(out)
+PY
+}
+
 
 # --- apply_real_saver ----------------------------------------------------
 # Install the RTK token-saver hook into a scratch worktree. Reuses the

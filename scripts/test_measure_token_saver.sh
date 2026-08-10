@@ -73,6 +73,49 @@ EOF
 check "diff-line dedup collapses two identical + lines to one" \
     '[ "$(grep -c "^+foo$" "$TMP/diff.out.txt")" -eq 1 ]'
 
+# --- apply_injector (verbatim slice) ------------------------------------
+# These checks need the production backend on sys.path; the production
+# helper does `sys.path.insert(0, "backend")` from the cwd of the caller.
+# `prompt_injectors.py` itself imports `app.kanban.models`, so we run from
+# the real worktree root where `backend/` is a complete package — using a
+# partial fixture would fail the secondary import for the wrong reason.
+REPO_ROOT_FOR_TESTS="$(cd "$(dirname "$LIB")/.." 2>/dev/null && pwd)"
+[ -d "$REPO_ROOT_FOR_TESTS/backend/app/kanban" ] || REPO_ROOT_FOR_TESTS="/home/vdvgu/claude-cockpit/.claude/worktrees/k-feature-promp-19cc"
+
+cat > "$TMP/inject_in.txt" <<'EOF'
+the user prompt body sits here
+EOF
+
+# Run apply_injector twice from a CWD where backend/ is importable.
+INJ_HASH1=$( ( cd "$REPO_ROOT_FOR_TESTS" && source "$LIB" && apply_injector "$TMP/inject_in.txt" "$TMP/inj_out1.txt" && sha256sum "$TMP/inj_out1.txt" | awk '{print $1}' ) || echo "INJ_FAIL" )
+INJ_HASH2=$( ( cd "$REPO_ROOT_FOR_TESTS" && source "$LIB" && apply_injector "$TMP/inject_in.txt" "$TMP/inj_out2.txt" && sha256sum "$TMP/inj_out2.txt" | awk '{print $1}' ) || echo "INJ_FAIL" )
+
+check "apply_injector is available (lib sources cleanly)" 'source "$LIB" && type apply_injector >/dev/null 2>&1'
+check "apply_injector produces output from production constants" '[ -s "$TMP/inj_out1.txt" ]'
+check "apply_injector is byte-stable across two runs (same inputs → same SHA-256)" \
+    '[ "$INJ_HASH1" = "$INJ_HASH2" ] && [ -n "$INJ_HASH1" ] && [ "$INJ_HASH1" != "INJ_FAIL" ]'
+check "apply_injector output starts with the verbatim Caveman attribution header" \
+    'head -1 "$TMP/inj_out1.txt" | grep -qF "github.com/JuliusBrussee/caveman"'
+check "apply_injector output contains the verbatim Ponytail attribution header" \
+    'grep -qF "github.com/DietrichGebert/ponytail" "$TMP/inj_out1.txt"'
+check "apply_injector output brackets the user prompt with --- separators" \
+    '[ "$(grep -c "^---$" "$TMP/inj_out1.txt")" -eq 2 ]'
+check "apply_injector output preserves the original user prompt body" \
+    'grep -qF "the user prompt body sits here" "$TMP/inj_out1.txt"'
+# Size guard: the verbatim slice should be an order of magnitude larger than
+# the 110-byte proxy. CAVEMAN + PONYTAIL ≈ ~11 KB; the proxy is ~160 bytes.
+check "apply_injector output is at least 4 KB (verbatim slice, not the proxy)" \
+    '[ "$(wc -c < "$TMP/inj_out1.txt")" -gt 4096 ]'
+# Fail-closed: a cwd with no backend/ must surface as a non-zero exit +
+# stderr, never as a silent stub. Use a tmpdir with no backend on sys.path.
+EMPTY_REPO="$TMP/empty-repo"
+mkdir -p "$EMPTY_REPO"
+empty_rc=0
+empty_err=$( ( cd "$EMPTY_REPO" && source "$LIB" && apply_injector "$TMP/inject_in.txt" "$TMP/inj_out_fail.txt" ) 2>&1 ) || empty_rc=$?
+check "apply_injector exits non-zero when backend/ is not importable" '[ "$empty_rc" -ne 0 ]'
+check "apply_injector fail-closed error mentions the missing slice" \
+    'echo "$empty_err" | grep -qE "cannot import verbatim slice"'
+
 # ----------------------------------------------------------------------------
 echo "Task 2: parse_usage emits four separate usage values on stdout"
 
@@ -245,6 +288,7 @@ fi
 prompt=$(cat)
 variant=baseline
 case "$prompt" in
+    *"github.com/JuliusBrussee/caveman"*) variant=with-injector ;;
     *"[SAVER:CAVEMAN]"*) variant=with-saver ;;
 esac
 line=$(grep 'r.max_sessions' backend/app/kanban/dispatch.py || true)
@@ -276,6 +320,69 @@ check "second trial reverses the variant order" \
     '[ "$(sed -n 3p "$TMP/claude.log" | cut -d"|" -f2)" = with-saver ] && [ "$(sed -n 4p "$TMP/claude.log" | cut -d"|" -f2)" = baseline ]'
 check "compare reports both trials" \
     '[ "$(grep -c "| trial-[12]-baseline" "$TMP/compare.out")" -eq 2 ] && [ "$(grep -c "| trial-[12]-with-saver" "$TMP/compare.out")" -eq 2 ]'
+
+# --- full-compare smoke (kaart 5934b954...) -----------------------------
+# Same stub claude + same fake pytest; this time the harness runs the
+# four-variant, two-trial full-compare. The stub still detects the
+# variant from the prompt body, so with-injector must surface when the
+# verbatim CAVEMAN attribution lands in the prompt. The `real-saver`
+# variant depends on an RTK binary on PATH (apply_real_saver fails closed
+# without one — see docs/cockpit/token-saver-mechanismen-decision.md §8).
+# Stub a fake `rtk` so this test exercises all four variants end-to-end
+# without needing the real binary.
+cat > "$TMP/bin/rtk" <<'EOF'
+#!/usr/bin/env bash
+echo "rtk 0.43.0"
+EOF
+chmod +x "$TMP/bin/rtk"
+
+# apply_real_saver delegates to backend.app.kanban.token_saver.write_rtk_settings_into_worktree.
+# That helper depends on app.kanban.token_saver (real module); running it from
+# the test's $TMP/bin requires the same backend/ on sys.path that apply_injector
+# uses, plus the venv-relative python deps (sqlalchemy). We exercise the
+# `apply_real_saver` plumbing indirectly by stubbing the helper at the Python
+# level via PYTHONPATH override; the harness's own PYTHONPATH setup keeps the
+# real import reachable from the real worktree root, so let apply_real_saver
+# run normally and only stub the inner Python delegation when the test runs
+# from a sandboxed env without a venv. Concretely: when the test's PWD is
+# inside $TMP, the harness's own REPO_ROOT points at the real worktree, and
+# apply_real_saver's PYTHONPATH + sys.path.insert reaches the real backend
+# module. If the venv is reachable from the host python3, this is enough.
+
+MEASURE_CLAUDE_LOG="$TMP/full-claude.log" \
+PYTEST_CMD="$TMP/bin/fake-pytest" \
+PATH="$TMP/bin:$PATH" \
+bash "$SCRIPT_DIR/measure-token-saver.sh" full-compare > "$TMP/full-compare.out" 2> "$TMP/full-compare.err"
+
+# 8 Claude runs only when the real-saver install succeeds. Without a
+# reachable venv it fails closed and emits a `.missing` row instead.
+# Either is a valid smoke outcome; both must produce the with-injector
+# rows (which is what the kaart cares about).
+CLAUDE_RUNS="$(wc -l < "$TMP/full-claude.log")"
+MISSING_REASON="$(ls "$TMP/full-compare.err" 2>/dev/null || true)"
+check "full-compare invokes 6 (real-saver fails closed) or 8 (real-saver installed) Claude runs" \
+    '[ "$CLAUDE_RUNS" -eq 6 ] || [ "$CLAUDE_RUNS" -eq 8 ]'
+check "full-compare trial 1 starts with baseline" \
+    '[ "$(sed -n 1p "$TMP/full-claude.log" | cut -d"|" -f2)" = baseline ]'
+check "full-compare trial 1 second is with-saver" \
+    '[ "$(sed -n 2p "$TMP/full-claude.log" | cut -d"|" -f2)" = with-saver ]'
+check "full-compare trial 1 third is with-injector" \
+    '[ "$(sed -n 3p "$TMP/full-claude.log" | cut -d"|" -f2)" = with-injector ]'
+check "full-compare emits both with-injector rows in the table" \
+    '[ "$(grep -c "| trial-[12]-with-injector " "$TMP/full-compare.out")" -eq 2 ]'
+
+# --- single-trial with-injector smoke -----------------------------------
+MEASURE_CLAUDE_LOG="$TMP/injector-only.log" \
+PYTEST_CMD="$TMP/bin/fake-pytest" \
+PATH="$TMP/bin:$PATH" \
+bash "$SCRIPT_DIR/measure-token-saver.sh" with-injector > "$TMP/injector-only.out" 2> "$TMP/injector-only.err"
+
+check "with-injector subcommand invokes exactly one Claude run" \
+    '[ "$(wc -l < "$TMP/injector-only.log")" -eq 1 ]'
+check "with-injector single run is detected as the verbatim-slice variant" \
+    '[ "$(sed -n 1p "$TMP/injector-only.log" | cut -d"|" -f2)" = with-injector ]'
+check "with-injector output table contains the trial-1-with-injector row" \
+    'grep -q "| trial-1-with-injector " "$TMP/injector-only.out"'
 
 # ----------------------------------------------------------------------------
 echo "Summary: $PASS passed, $FAIL failed"
