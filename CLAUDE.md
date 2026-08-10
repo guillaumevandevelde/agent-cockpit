@@ -122,6 +122,7 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 ./scripts/check-ci-health.sh                   # CI-doesn't-run / consecutive-red Acts-detector (zie kaart 4cae38ff…); advisory + --strict; fixtures via CI_HEALTH_FIXTURES_DIR=<dir>
 ./scripts/check-doc-readability.py            # Meet de leesbaarheidsnorm uit docs/cockpit/taalgebruik-conventies.md: zinnen >40 woorden, alinea's >150 woorden, hybride werkwoorden (advisory; --strict = exit 1)
 ./scripts/check-doc-readability.py --file <pad>    # Eén bestand, met file:line per hit — draai dit vóór je een *.md-wijziging shipt
+./scripts/check-pretooluse-bg-agent-test.sh      # CI-gate dat faalt zodra `.claude/settings.json` een niet-lege `hooks.PreToolUse` heeft zonder bijbehorende achtergrond-agent-test (marker of testbestand); no-op zolang de hook-lijst leeg is (kaart a712f5c6…, CC 2.1.222)
 ./scripts/generate-doc-index.py               # Regenereer de README-index (100% dekking, gegroepeerd op type + status-badges) + docs/cockpit/llms.txt uit de frontmatter
 ./scripts/generate-doc-index.py --check --strict  # Faal als de gegenereerde index/llms.txt out-of-sync is met de frontmatter (advisory zonder --strict)
 

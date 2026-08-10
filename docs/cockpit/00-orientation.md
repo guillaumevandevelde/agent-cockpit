@@ -102,6 +102,20 @@ docker compose up -d        # UI op http://localhost:8000
 ./scripts/dev.sh            # backend :8000 + frontend :5173
 ```
 
+## Hook contracts — testen op de achtergrond-route
+
+Een `PreToolUse`-hook in `.claude/settings.json` MOET getest zijn op een
+achtergrond-agent-aanroep (subagent, samenvatting, compaction, rename), niet alleen
+op een foreground-call. Claude Code ≤ 2.1.221 liet een auto-allow `PreToolUse`-hook
+in achtergrond-agents stilzwijgend de restricties omzeilen die in foreground-aanroepen
+wel golden (upstream fix in 2.1.222, changelog 2026-08-04; deze box draait 2.1.226).
+Hiermee lekt dezelfde klasse fouten als kaart `513e37a1a86e41db8b6af8423292f6b6`
+documenteert: een hook die "fine" lijkt in een foreground-test laat op de
+achtergrond-route een write zonder foutmelding op de verkeerde checkout landen.
+CI-gate: `scripts/check-pretooluse-bg-agent-test.sh` faalt zodra
+`hooks.PreToolUse` niet leeg is en er geen bijbehorende achtergrond-agent-test
+aanwezig is (no-op zolang er geen hook staat).
+
 ## Kernbeslissingen (scheduled-messages)
 
 | Onderwerp | Keuze |
