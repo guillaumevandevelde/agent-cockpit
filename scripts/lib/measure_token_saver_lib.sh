@@ -9,7 +9,7 @@
 #   apply_saver <in> <out>          — byte-stable prompt mutation (RTK + Caveman + Ponytail)
 #   render_card_prompt <in> <out> <0|1> — production build_card_prompt, injectors off/on
 #   parse_usage <json>              — emits input / cache_creation / cache_read / output on 4 lines
-#   score_golden <worktree>         — emits "pass_tests=<0|1>\npass_diff=<0|1>" on 2 lines
+#   score_golden <worktree>         — emits "pass_tests=<0|1>" on 1 line
 #   build_prompt <worktree>         — emits the deterministic golden-task prompt on stdout
 #   resolve_measurement_base_ref    — origin/master → master → HEAD
 #   prepare_golden_revert <worktree> — creates the broken fixture or fails closed
@@ -109,7 +109,7 @@ EOF
 
 # --- score_golden --------------------------------------------------------
 # Score a worktree against the golden-task acceptance criteria. Emits
-# "pass_tests=<0|1>\npass_diff=<0|1>" on stdout.
+# "pass_tests=<0|1>" on stdout.
 #
 # Honors PYTEST_CMD (from resolve-pytest-cmd.sh or override) and BACKEND_DIR.
 # pass_tests: PYTEST_CMD exit code 0 on the zero_column_cap selector.
@@ -119,8 +119,15 @@ EOF
 #             a bare -k zero_column_cap across the whole suite exits
 #             non-zero on those import errors even when the targeted two
 #             tests pass.
-# pass_diff:  git diff -- backend/app/kanban/dispatch.py matches the canonical
-#             single-line `>` → `>=` revert (line-level substring check).
+#
+# Earlier revisions also emitted a `pass_diff` column that grep-checked
+# for the canonical `r.max_sessions >= 0` substring, but that scored 0
+# in every run: agents rewrite the line to a functionally-equivalent form
+# (e.g. `if r.max_sessions is not None`) that doesn't carry the
+# canonical token. `pass_tests` is the meaningful quality signal here —
+# it runs the two failing tests directly, so any rewrite that satisfies
+# them passes. Removed in kaart 0a3ee4c9…; see also
+# docs/cockpit/prompt-injectors-decision.md for the measurement context.
 score_golden() {
     local wt="$1"
     local backend_dir="${BACKEND_DIR:-$wt/backend}"
@@ -132,7 +139,7 @@ score_golden() {
         pytest_cmd="$(command -v pytest)"
     fi
 
-    local pass_tests=0 pass_diff=0
+    local pass_tests=0
 
     if [ -n "$pytest_cmd" ]; then
         if ( cd "$backend_dir" && "$pytest_cmd" tests/test_kanban_dispatch.py -k zero_column_cap -q >/dev/null 2>&1 ); then
@@ -140,19 +147,7 @@ score_golden() {
         fi
     fi
 
-    # pass_diff: in the working tree's *committed* (HEAD) state, the broken
-    # line must be absent and the fixed line must be present. We score the
-    # working tree (not the diff) so "added fix AND removed broken" and
-    # "untouched file" don't both score 1.
-    local dispatch_py="$wt/backend/app/kanban/dispatch.py"
-    if [ -f "$dispatch_py" ] \
-       && ! grep -q 'r.max_sessions > 0' "$dispatch_py" \
-       && grep -q 'r.max_sessions >= 0' "$dispatch_py"; then
-        pass_diff=1
-    fi
-
     echo "pass_tests=$pass_tests"
-    echo "pass_diff=$pass_diff"
 }
 
 # --- resolve_measurement_base_ref -----------------------------------------
