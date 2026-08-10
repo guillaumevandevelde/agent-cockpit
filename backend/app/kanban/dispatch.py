@@ -4715,7 +4715,7 @@ async def _column_max_sessions(session, project_key: str) -> dict[str, int]:
         .where(KanbanColumn.project_key == project_key)
         .where(KanbanColumn.max_sessions.isnot(None))
     )).scalars().all()
-    return {r.name: r.max_sessions for r in rows if r.max_sessions is not None and r.max_sessions >= 0}
+    return {r.name: r.max_sessions for r in rows if r.max_sessions is not None}
 
 
 def _claimant_session(card: KanbanCard) -> str | None:
