@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 123 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 124 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -152,7 +152,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (43)
+### Decision (44)
 
 | Document | Status |
 |---|---|
@@ -164,11 +164,12 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Beslissing — Leaf-spike maakt zijn eigen vervolgkaarten aan (autonomie i.p.v. review-round-trip)](./autonomous-leaf-spike-followup.md) | 🔵 decided |
 | [Beslissing — Bordkaart-layout: titel leest volledig, metadata scant op één regel, lege lanes worden rails](./board-card-layout-decision.md) | 🔵 decided |
 | [Telt cache_read mee in het Claude-abonnementsquotum? — gecontroleerde meting](./cache-read-quota-decision.md) | 🔵 decided |
-| [CC 2.1.224 native cross-session SendMessage + ListAgents — adopt, integrate, or position against Agent Mail?](./cc-native-cross-session-decision.md) | besloten |
+| [CC 2.1.224 native cross-session SendMessage + ListAgents — adopt, integrate, or position against Agent Mail?](./cc-native-cross-session-decision.md) | 🔵 decided |
 | [Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie](./code-knowledge-graph-navigation-decision.md) | 🔵 decided |
 | [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md) | 🔵 decided |
 | [Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies](./headless-session-retro-decision.md) | 🔵 decided |
 | [Beslissing: human-takeover-UX voor headless sessies](./human-takeover-headless-decision.md) | 🔵 decided |
+| [Anthropic Inference hooks (Aug 5, 2026, Enterprise beta) vs. Cockpit's permission_prompt — composability, overlap, and what we do](./inference-hooks-vs-permission-prompt.md) | 🔵 decided |
 | [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md) | ⚪ superseded |
 | [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md) | ⚪ superseded |
 | [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md) | 🔵 decided |
