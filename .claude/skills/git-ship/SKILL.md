@@ -153,7 +153,7 @@ diff — ook wanneer geen andere sessie de poorten vasthoudt. Drie
 identieke meetwaardes vóór en ná je fix zijn het typerende
 symptoom. Gebruik vanuit een worktree **altijd** een eigen Vite op
 een vrije poort vanuit je worktree (zie
-[`isolated-component-preview.md`](../cockpit/isolated-component-preview.md)),
+[`isolated-component-preview.md`](../../../docs/cockpit/isolated-component-preview.md)),
 ook wanneer `cockpit.sh start` wel wil starten.
 
 **Wanneer dit geldt.** De kaart voegt een **nieuwe zichtbare
@@ -185,7 +185,7 @@ Drie regels Playwright tegen de al-draaiende dev-stack zijn genoeg —
 `frontend/package.json` → `@playwright/test`). Weigert
 `./scripts/cockpit.sh start` omdat een andere sessie de poorten
 8000/5173 vasthoudt, volg dan
-[`docs/cockpit/isolated-component-preview.md`](../cockpit/isolated-component-preview.md)
+[`docs/cockpit/isolated-component-preview.md`](../../../docs/cockpit/isolated-component-preview.md)
 om de component in een scratch Vite op een vrije poort te mounten en
 dáár de telling te doen — geen wachttijd, geen gedeelde data.
 `<jouw-affordance-selector>` is een concrete `getByRole` / `getByLabel`
