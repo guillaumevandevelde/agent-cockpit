@@ -7119,16 +7119,28 @@ async def _run_card(
         # on transport type so the bookmark is consistent across paths.
         await session.commit()
     try:
-        spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
-                                 cli_id=cli_id, provider=provider, model=effective_model,
-                                 # Token-saver (RTK) per-lane opt-in seam (kaart
-                                 # c31333bf…). The worktree transport installs
-                                 # the hook when the column flag is on and
-                                 # the board kill-switch is enabled. Passing
-                                 # these is a no-op for transports that don't
-                                 # use them (resume, sandcastle, headless).
-                                 card_id=card.id, column_name=target_agent,
-                                 **endpoint_kwargs)
+        # Run the synchronous transport on a thread-pool worker so the
+        # subprocess fan-out (git fetch + git worktree add + tmux
+        # new-session) does NOT block the asyncio event loop for the
+        # full ~30-40s spawn window. ``asyncio.to_thread`` re-raises
+        # worker exceptions inside this coroutine, so the existing
+        # compensation path below (release claim, clear
+        # pending_spawn_session, bump dispatch failures) keeps firing
+        # unchanged. Kanban card ``12227dcab0db46e588755f6e12b2853a``.
+        import asyncio
+        spawned = await asyncio.to_thread(
+            card_transport,
+            directory=project_path, prompt=prompt, session_name=name,
+            cli_id=cli_id, provider=provider, model=effective_model,
+            # Token-saver (RTK) per-lane opt-in seam (kaart
+            # c31333bf…). The worktree transport installs
+            # the hook when the column flag is on and
+            # the board kill-switch is enabled. Passing
+            # these is a no-op for transports that don't
+            # use them (resume, sandcastle, headless).
+            card_id=card.id, column_name=target_agent,
+            **endpoint_kwargs,
+        )
         if inspect.isawaitable(spawned):
             spawned = await spawned
     except Exception as exc:
