@@ -161,11 +161,23 @@ mkdir -p "$SANDBOX_ROOT"
 # One releaser: every variant now runs in a structural sandbox, so the
 # worktree branch is gone. The hook is kept for the API surface (`run_one`
 # still calls `release_run_tree` with two args), but the boolean is no
-# longer used to choose a path.
+# longer used to choose a path. Also tears down the kanban-isolation rule
+# installed before the claude call — `release_kanban_isolation` is
+# idempotent (no-op when no rule is installed), so this is safe to call
+# on every cleanup path.
 release_run_tree() {
     local _sandboxed_unused="$1" tree="$2"
+    release_kanban_isolation
     cleanup_prompt_sandbox "$tree" || true
 }
+
+# Process-wide safety net: if the harness exits between `isolate_kanban_writes`
+# and `release_kanban_isolation` (signal, crash, manual Ctrl+C), the nft
+# rule must not survive — leaving it would silently break the kanban
+# server for every other process on the box. The EXIT trap fires on any
+# exit path; the helper is idempotent and self-checks the table before
+# deleting.
+trap 'release_kanban_isolation' EXIT INT TERM
 
 # Each call owns one fresh worktree. The result files are copied out before
 # cleanup, because the worktree is deliberately not shared by later variants.
@@ -212,6 +224,22 @@ run_one() {
 
     empty_mcp="$wt/.mcp-empty.json"
     printf '{"mcpServers":{}}' > "$empty_mcp"
+
+    # Board-side containment (kaart ee905064… impediment, follow-up on
+    # commit 4af88105). The dispatch prompt tells the agent to fall back
+    # to REST at http://localhost:8000/api/v1/kanban when MCP fails —
+    # which the harness guarantees by pinning MCP to empty. The git
+    # sandbox (`make_prompt_sandbox`) cannot close that REST path
+    # (no .git ≠ no loopback reachability), so we drop traffic to
+    # 127.0.0.1:8000 from this process tree before the claude call.
+    # Fail closed: a missing rule means the agent has a write path to
+    # the live board, so we record a .missing marker and skip the run.
+    if ! isolate_kanban_writes 2> "${result_prefix}.isolation.err"; then
+        printf 'kanban isolation failed: %s\n' \
+            "$(tr '\n' ' ' < "${result_prefix}.isolation.err")" > "${result_prefix}.missing"
+        release_run_tree "$sandboxed" "$wt"
+        return 0
+    fi
 
     local raw_prompt="$prompt_file"
     if [ "$variant" = "with-saver" ]; then
