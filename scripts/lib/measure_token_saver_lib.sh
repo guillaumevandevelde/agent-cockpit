@@ -319,6 +319,118 @@ PY
 }
 
 
+# --- isolate_kanban_writes -----------------------------------------------
+# Reject outbound traffic to 127.0.0.1:8000 and [::1]:8000 from this host
+# so a measured agent that follows the dispatch prompt's REST fallback
+# cannot reach the live kanban board.
+#
+# Why this is its own primitive (kaart ee905064… board-side, follow-up on
+# commit 4af88105). The git sandbox (`make_prompt_sandbox`) closes the
+# ship-recipe path; the dispatch prompt at backend/app/kanban/dispatch.py
+# line 2513 also instructs the agent to "go straight to REST for every
+# subsequent board update" against `http://localhost:8000/api/v1/kanban`
+# when MCP is pinned empty — which the harness does on purpose. The board
+# is therefore a second mutation surface that the git sandbox does not
+# touch. The human-decided answer (kaart ee905064… impediment, 2026-08-10)
+# was to close this write path structurally rather than rely on prompt
+# wording.
+#
+# Why nftables and not an env var (kaart 5934b954…, lesson carried into
+# §3.4 of harnas-spawn-inventaris.md). `GIT_SSH_COMMAND=/bin/false` did
+# not survive into the shell the agent ran git from; an `HTTP_PROXY=`
+# pointing at a sink has the same problem, since both are read by the
+# child process spawned by claude's tool framework. nftables operates at
+# the kernel level — the OUTPUT hook fires on every packet from every
+# socket in this process tree, regardless of which subshell or library
+# the agent used to open it (curl, urllib, raw socket). Priority -150
+# keeps our chain ahead of WSL2's `WSLOUTPUT` (priority filter = 0), so
+# the rejection happens before WSL's mark-and-masquerade runs.
+#
+# sudo is pre-authorized in this environment (Cockpit dev box, see
+# `docs/cockpit/isolated-component-preview.md`); sudo -n refuses fast
+# when no cached credentials exist. The helper fails closed (non-zero)
+# when it cannot install the rule — the harness turns that into a
+# `.missing` row instead of running the agent without containment.
+#
+# The table name defaults to a unique-per-source value (`_ISOLATION_TABLE`
+# below), so two harness instances running concurrently each install under
+# their own slot and never clobber each other. `release_kanban_isolation`
+# only deletes the slot it knows about — operators can `sudo nft delete
+# table inet measure_kanban_isolation_<slot>` to clean up crashed
+# predecessors manually. The optional first argument lets tests pin a
+# specific table name (otherwise `(cmd) &` subshells all see `$$` as the
+# same parent PID).
+#
+# Known limitations, documented in §2.6:
+#   1. The rule is host-wide (within the operator's UID). Cockpit UI and
+#      other agents by the same user temporarily lose :8000 reachability
+#      during a run. Per-process-tree scoping requires a network namespace
+#      with veth-paar + NAT (CAP_SYS_ADMIN), which this environment
+#      cannot provide; the alternative is a separate user+net namespace
+#      via `unshare -Urn` (filed as open point in §7).
+#   2. An adversarial agent can `sudo nft delete table inet ...` because
+#      the operator's sudoers covers it. The rule closes the *accidental*
+#      write path (a measured agent that follows the prompt without
+#      thinking), not the adversarial one.
+#   3. The signal trap releases the rule on EXIT/INT/TERM but does not
+#      kill the `claude` child — if the harness is killed mid-run and
+#      the child continues, it regains :8000 reachability for whatever
+#      lifetime it has left. Tracking the child PID across a subshell
+#      with `timeout` requires restructuring `run_one`; not in scope here.
+isolate_kanban_writes() {
+    local table="${1:-$_ISOLATION_TABLE}"
+
+    # Clear any stale table from a previous (possibly crashed) run with
+    # this slot. nft `delete table` returns non-zero when the table is
+    # absent; ignore.
+    sudo -n nft delete table "inet $table" >/dev/null 2>&1 || true
+
+    # Install the rules. Four nft calls: table, chain, IPv4 rule, IPv6
+    # rule. The IPv6 rule closes the bypass where `localhost` resolves to
+    # `[::1]` (modern glibc prefers IPv6 when both are reachable). Each
+    # call can fail independently on permission or syntax errors. Treat
+    # any failure as fatal — partial state is worse than no state (the
+    # agent might think the rule is active when the OUTPUT chain is empty).
+    if sudo -n nft add table "inet $table" 2>"${ISOLATION_ERR:-/dev/null}" \
+        && sudo -n nft "add chain inet $table output { type filter hook output priority -150 ; policy accept ; }" 2>>"${ISOLATION_ERR:-/dev/null}" \
+        && sudo -n nft add rule "inet $table" output ip daddr 127.0.0.1 tcp dport 8000 reject 2>>"${ISOLATION_ERR:-/dev/null}" \
+        && sudo -n nft add rule "inet $table" output ip6 daddr ::1 tcp dport 8000 reject 2>>"${ISOLATION_ERR:-/dev/null}"; then
+        _ISOLATION_INSTALLED=1
+        return 0
+    fi
+    _ISOLATION_INSTALLED=0
+    return 1
+}
+
+# --- release_kanban_isolation -------------------------------------------
+# Idempotent: deletes the per-slot table whether this process installed
+# it or a stale predecessor did. Accepts an optional table-name override
+# (mirrors `isolate_kanban_writes`).
+release_kanban_isolation() {
+    local table="${1:-$_ISOLATION_TABLE}"
+    sudo -n nft delete table "inet $table" >/dev/null 2>&1 || true
+    _ISOLATION_INSTALLED=0
+}
+
+# --- probe_kanban_isolated ----------------------------------------------
+# Return 0 when 127.0.0.1:8000 is currently unreachable from this process,
+# 1 when a connection succeeds. Used by tests and by the harness's
+# fail-closed sanity check (kaart ee905064… §2.6). /dev/tcp is a bash
+# built-in that opens a TCP connection or fails fast — no nc / curl needed.
+probe_kanban_isolated() {
+    timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000' >/dev/null 2>&1
+}
+
+# Per-source state for isolate_kanban_writes / release_kanban_isolation.
+# Set on import; reset by the helpers themselves. The default table name
+# is sourced once at import time. Distinct bash processes get distinct
+# `$$` values, so two harnesses on the same box do not clobber each
+# other; a single bash process that spawns multiple subshells sees the
+# same `$$` in all of them (a known bash limitation) — such callers
+# must pass an explicit table-name argument to the helpers.
+_ISOLATION_INSTALLED=0
+_ISOLATION_TABLE="measure_kanban_isolation_$$"
+
 # --- make_prompt_sandbox -------------------------------------------------
 # Materialise <ref>'s tree into <dest> as PLAIN FILES — no .git, no remotes,
 # no credentials, and outside every git working tree.

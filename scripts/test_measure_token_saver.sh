@@ -572,5 +572,148 @@ check "cleanup_prompt_sandbox refuses a path outside \$HOME/.cache" \
 check "cleanup_prompt_sandbox removes its own sandbox" \
     '( source "$LIB" && cleanup_prompt_sandbox "$SANDBOX_TEST" ) && [ ! -d "$SANDBOX_TEST" ]'
 
+# ----------------------------------------------------------------------------
+echo "Task 6: kanban isolation rejects 127.0.0.1:8000 from the measured agent"
+
+# Board-side containment (kaart ee905064… impediment, follow-up on
+# commit 4af88105). The git sandbox closes the ship-recipe path; the
+# dispatch prompt at dispatch.py:2513 also tells the agent to fall back
+# to REST at http://localhost:8000/api/v1/kanban when MCP is pinned
+# empty — which the harness guarantees. Closing that REST write path
+# requires a kernel-level block (env vars don't survive the agent's
+# subprocess shell, see harnas-spawn-inventaris.md §2.6). This task
+# asserts `isolate_kanban_writes` installs an nft rule that rejects
+# 127.0.0.1:8000, and that `release_kanban_isolation` removes it.
+
+# Make sure no stale table survives from a prior crashed run before
+# the install path runs. The helper itself clears stale state, so this
+# is defensive only.
+# Resolve the per-PID table name the same way the lib does, so we
+# clean our own slot — leaving the helper's table for the test cycle.
+TEST_PID_TABLE="measure_kanban_isolation_$$"
+sudo -n nft delete table "inet $TEST_PID_TABLE" >/dev/null 2>&1 || true
+
+install_rc=0
+( source "$LIB" 2>/dev/null && isolate_kanban_writes ) || install_rc=$?
+check "isolate_kanban_writes returns 0 on success" '[ "$install_rc" -eq 0 ]'
+check "isolate_kanban_writes installed the per-PID nft table" \
+    "sudo -n nft list table inet $TEST_PID_TABLE >/dev/null 2>&1"
+check "installed rule targets IPv4 127.0.0.1:8000 (no broader loopback block)" \
+    "sudo -n nft list chain inet $TEST_PID_TABLE output | grep -qE \"daddr 127\\.0\\.0\\.1.*dport 8000\""
+check "installed rule targets IPv6 [::1]:8000 (closes localhost IPv6 bypass)" \
+    "sudo -n nft list chain inet $TEST_PID_TABLE output | grep -qE \"daddr ::1.*dport 8000\""
+check "installed rules are reject (drops rather than accepts the packet)" \
+    "sudo -n nft list chain inet $TEST_PID_TABLE output | grep -qE \"reject\""
+
+# Release before the listener-based assertions so we have a clean
+# "no rule" baseline to compare against. The release itself is already
+# covered by the idempotency check below.
+( source "$LIB" 2>/dev/null && release_kanban_isolation ) || true
+
+# Live-listener probe (kaart ee905064… reviewer-gate, FCR round 2). The
+# earlier probe-only assertion could pass on a closed port: no listener
+# and a working nft rule both produce the same nonzero exit. To prove
+# the rule actually blocks, we use the live Cockpit backend (uvicorn on
+# :8000) as the listener — it's reliably up in this dev environment,
+# and it's the actual service the isolation rule is designed to cut off.
+# Skipped on environments where :8000 is not listening (the harness
+# itself can run without uvicorn; the test just can't prove the rule
+# without a peer to probe).
+LISTENER_OK=0
+if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000' >/dev/null 2>&1; then
+    LISTENER_OK=1
+fi
+
+if [ "$LISTENER_OK" -eq 1 ]; then
+    # Step 1 — clean baseline: probe must succeed (no rule active).
+    if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000' >/dev/null 2>&1; then
+        PRE_ISO_PROBE_RC=0
+    else
+        PRE_ISO_PROBE_RC=1
+    fi
+    check "baseline (no rule): probe to live :8000 listener succeeds" '[ "$PRE_ISO_PROBE_RC" -eq 0 ]'
+
+    # Step 2 — install isolation; the same probe must now FAIL.
+    ( source "$LIB" 2>/dev/null && isolate_kanban_writes ) || true
+    if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000' >/dev/null 2>&1; then
+        POST_ISO_PROBE_RC=0
+    else
+        POST_ISO_PROBE_RC=1
+    fi
+    check "isolation actively rejects the live :8000 listener" '[ "$POST_ISO_PROBE_RC" -ne 0 ]'
+
+    # Step 3 — release the rule; probe must succeed again. This is the
+    # discriminating assertion: if the rule never installed, step 2
+    # would also have failed (no listener = closed port), so step 3
+    # wouldn't recover. The successful round-trip pre → during →
+    # post-isolation proves the rule, not the network state, was the
+    # blocker.
+    ( source "$LIB" 2>/dev/null && release_kanban_isolation ) || true
+    if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000' >/dev/null 2>&1; then
+        POST_REL_PROBE_RC=0
+    else
+        POST_REL_PROBE_RC=1
+    fi
+    check "after release, the live :8000 listener accepts again (rule was the blocker)" '[ "$POST_REL_PROBE_RC" -eq 0 ]'
+else
+    echo "  SKIP: live :8000 listener not reachable; listener-based isolation probes skipped"
+fi
+
+# Idempotency: calling release_kanban_isolation a second time must
+# not error. This catches a future refactor that hard-fails on the
+# "table does not exist" path.
+release_rc2=0
+( source "$LIB" 2>/dev/null && release_kanban_isolation ) || release_rc2=$?
+check "release_kanban_isolation is idempotent on a missing table" '[ "$release_rc2" -eq 0 ]'
+
+# Concurrent-run safety (kaart ee905064… reviewer-gate FCR round 2):
+# the per-PID table name lets two harness instances coexist without
+# clobbering each other's rules. Within a single bash process, `$$`
+# doesn't change in `(...)` subshells, so we exercise the concurrent
+# case via two real child bashes with explicit distinct table names —
+# that's the path two separate `measure-token-saver.sh` invocations
+# would actually take on the same box.
+CHILD_TABLE="measure_kanban_isolation_child_$$"
+( source "$LIB" 2>/dev/null && isolate_kanban_writes "$TEST_PID_TABLE" ) || true
+# Fire a child that installs under a different table name, holds the
+# rule, and releases.
+bash -c "
+    set -u
+    source '$LIB'
+    isolate_kanban_writes '$CHILD_TABLE' || exit 1
+    sleep 0.5
+    release_kanban_isolation '$CHILD_TABLE'
+" >/dev/null 2>&1 &
+CHILD_BG=$!
+# Give the child time to install.
+sleep 0.2
+# While the child holds its rule, both tables must coexist.
+check "concurrent child rule coexists with this process's rule" \
+    "sudo -n nft list table inet $TEST_PID_TABLE >/dev/null 2>&1 && \
+     sudo -n nft list table inet $CHILD_TABLE >/dev/null 2>&1"
+wait "$CHILD_BG" 2>/dev/null || true
+check "concurrent child rule is gone after the child released" \
+    "! sudo -n nft list table inet $CHILD_TABLE >/dev/null 2>&1"
+check "this process's rule still alive after the child's lifecycle" \
+    "sudo -n nft list table inet $TEST_PID_TABLE >/dev/null 2>&1"
+( source "$LIB" 2>/dev/null && release_kanban_isolation "$TEST_PID_TABLE" ) || true
+
+# Integration: a card-baseline run that goes through the harness's
+# install/release path must not leave any rule behind (the harness is
+# its own subshell, with its own PID-derived table name).
+MEASURE_RESULT_DIR="$TMP/iso-run" \
+MEASURE_CLAUDE_LOG="$TMP/iso-claude.log" \
+PYTEST_CMD="$TMP/bin/fake-pytest" \
+PATH="$TMP/bin:$PATH" \
+bash "$SCRIPT_DIR/measure-token-saver.sh" card-baseline > "$TMP/iso.out" 2> "$TMP/iso.err"
+check "harness teardown leaves no kanban-isolation rule behind (card-baseline)" \
+    "! sudo -n nft list tables | grep -q 'measure_kanban_isolation'"
+# The card-baseline row should NOT be a missing row — the integration
+# run actually ran (isolation installed, claude stub fired, rule
+# removed). A `.missing` here would mean either the install path
+# itself failed or something else aborted before claude ran.
+check "card-baseline integration run produced a real measurement row (not .missing)" \
+    '[ -s "$TMP/iso-run/trial-1-card-baseline.json" ] || [ -s "$TMP/iso-run/trial-1-card-baseline.score" ]'
+
 echo "Summary: $PASS passed, $FAIL failed (of which $EXPECTED_BAD_AT_END is the negative-control bad() row that proves the regression guard; the exit gate subtracts it via $((FAIL - EXPECTED_BAD_AT_END)) so a working negative-control does not falsely fail the suite)"
 [ "$((FAIL - EXPECTED_BAD_AT_END))" -eq 0 ]

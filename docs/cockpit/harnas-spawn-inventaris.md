@@ -12,17 +12,19 @@ status: decided
 
 ## TL;DR
 
-Eén **structurele** sandbox (`git archive`-export zonder `.git`, zonder remote, buiten `$REPO_ROOT`) is de enige containment die de **kaart-vormige** meetarm betrouwbaar maakte (kaart `5934b954…`, incident 2026-08-10, revert `2e0eb256`). De drie niet-kaart-vormige meetarmen (`baseline` / `with-saver` / `real-saver`) draaien vandaag in een **linked git worktree binnen `$REPO_ROOT`**, beschermd door precies de `GIT_SSH_COMMAND=/bin/false`-guard die op de kaart-vormige arm bewezen ontoereikend was. Zij sandboxen krijgen dezelfde `make_prompt_sandbox`-helper, zodat **elke variant** van de meet-harnas één structurele invariant deelt. `measure-cache-read-quota.sh` blijft ongewijzigd (alleen `amplify` raakt een live quota en wordt al door `--allowedTools ""` ingedamd; die invariant borgen we met een source-grep in de bestaande test).
+Eén **structurele** sandbox (`git archive`-export zonder `.git`, zonder remote, buiten `$REPO_ROOT`) is de containment die alle vijf meetarmen (`baseline` / `with-saver` / `real-saver` / `card-baseline` / `card-injector`) sinds commit `0052f863` delen. De oude `with_scratch_worktree`-tak plus de `GIT_SSH_COMMAND=/bin/false`-guard — die op de kaart-vormige arm bewezen ontoereikend was (kaart `5934b954…`, incident 2026-08-10, revert `2e0eb256`) — zijn weg; `run_one` routeert elke variant onvoorwaardelijk door `make_prompt_sandbox`. `measure-cache-read-quota.sh` blijft ongewijzigd (alleen `amplify` raakt een live quota en wordt al door `--allowedTools ""` ingedamd; die invariant borgen we met een source-grep in de bestaande test).
+
+De **git**-sandbox sluit de ship-recipe. De **bord**-kant vraagt een tweede invariant: `isolate_kanban_writes` weigert outbound verkeer naar `127.0.0.1:8000` én `[::1]:8000` (nftables OUTPUT chain, prioriteit -150, vóór WSL2's `WSLOUTPUT`), zodat een gemeten agent die de REST-fallback uit de dispatch-prompt volgt geen schrijfpad naar het live bord heeft. Per-PID tabelnaam voorkomt de race tussen twee gelijktijdige meet-runs; trap-based cleanup ruimt `release_run_tree` en een harnas-brede EXIT/INT/TERM-trap. Test legt de invariant vast met een echte listener — Task 6 in `test_measure_token_saver.sh`. Faalt closed wanneer `sudo`/`nft` niet beschikbaar zijn — geen run zonder containment.
 
 ## 1. Inventarisatie van agent-spawnende scripts
 
 | # | Script / pad | Werkdirectory | Prompt bevat mutatie-recept? | Huidige containment | Oordeel | Sandbox-actie |
 |---|---|---|---|---|---|---|
-| 1 | `scripts/measure-token-saver.sh card-baseline` | `make_prompt_sandbox` → `$HOME/.cache/cockpit-measure-sandbox/trial-N-card-baseline` | **Ja** — `build_card_prompt` rendert het echte ship-recept | ✅ structureel (geen `.git`, geen remote) | Veilig | Geen (al gesandboxed) |
+| 1 | `scripts/measure-token-saver.sh card-baseline` | `make_prompt_sandbox` → `$HOME/.cache/cockpit-measure-sandbox/trial-N-card-baseline` | **Ja** — `build_card_prompt` rendert het echte ship-recept | ✅ structureel (geen `.git`, geen remote); ✅ bord-side (nft reject 127.0.0.1:8000 + [::1]:8000) | Veilig | Geen (al gesandboxed) |
 | 2 | `scripts/measure-token-saver.sh card-injector` | idem | **Ja** — idem, met Caveman+Ponytail-slices | ✅ idem | Veilig | Geen (al gesandboxed) |
-| 3 | `scripts/measure-token-saver.sh baseline` | `with_scratch_worktree` → `$REPO_ROOT/tmp-XXXX/wt-$$` (linked worktree) | Nee vandaag (`build_prompt` zonder ship-recept), maar `lib:82-108` is een **prompt-eigenschap** — één edit herhaalt het incident | ⚠️ Alleen `GIT_SSH_COMMAND=/bin/false` op de claude-aanroep | **Gat** | `make_prompt_sandbox` ipv worktree |
-| 4 | `scripts/measure-token-saver.sh with-saver` | idem | idem | idem | **Gat** | idem |
-| 5 | `scripts/measure-token-saver.sh real-saver` | idem + schrijft `<wt>/.claude/settings.json` | idem | idem | **Gat** | idem (`.claude/`-write werkt in een archive-tree) |
+| 3 | `scripts/measure-token-saver.sh baseline` | idem (`run_one` routeert elke variant onvoorwaardelijk door `make_prompt_sandbox`) | Nee vandaag (`build_prompt` zonder ship-recept), maar `lib:82-108` is een **prompt-eigenschap** — één edit herhaalt het incident | ✅ structureel + ✅ bord-side | Veilig | Geen (al gesandboxed) |
+| 4 | `scripts/measure-token-saver.sh with-saver` | idem | idem | ✅ idem | Veilig | Geen (al gesandboxed) |
+| 5 | `scripts/measure-token-saver.sh real-saver` | idem + schrijft `<sandbox>/.claude/settings.json` | idem | ✅ idem | Veilig | Geen (`.claude/`-write werkt in een archive-tree) |
 | 6 | `scripts/measure-cache-read-quota.sh amplify` | cwd = operator-cwd (typisch repo-root) | Nee — `"Reply with exactly one word: OK"` (1-turn, geen tool-oppervlak) | ✅ `--allowedTools ""` op de claude-call (geen tool ⇒ geen schrijfoppervlak) | Veilig | Geen; invariant borgen met source-grep |
 | 7 | `scripts/test_acp_smoke.py` | `tempfile.mkdtemp(prefix="acp-smoke-")` (buiten repo) | Nee — hardcoded 1-turn micro-prompt | ✅ `subprocess.run` gemonkeypatcht naar no-op + `mcpServers: []` | Veilig | Geen |
 
@@ -57,6 +59,27 @@ De vraag "moet dit via branches en branch protection?" hoort bij deze kaart — 
 3. **Structurele bovenop graduele.** De andere drie alternatieven pakken precies één vector (push / commit / MCP) en laten de rest open. `make_prompt_sandbox` pakt de hele klasse "git doet iets in deze boom" in één keer.
 4. **Branch protection is complementair.** Niets in deze kaart sluit GitHub branch protection op `master` uit als *extra* remote-laag. De vraag van de reviewer was of het primair kon zijn; het antwoord is nee, maar een toegevoegde remote-laag ernaast is een lage-meerkost-poging die afzonderlijk gefiled kan worden. Dat staat hier zodat een vervolg-kaart de combinatie kan claimen zonder deze te heropenen.
 
+## 2.6 Alternatieven voor de bord-kant — netfilter vs. project-key vs. proxy
+
+De git-sandbox dekt de ship-recipe. De **prompt** die de agent meekrijgt via `build_card_prompt` heeft echter ook een REST-fallback: regel 2513 van `dispatch.py` zegt letterlijk dat bij falende MCP de agent "straight to REST for every subsequent board update" moet, met `http://localhost:8000/api/v1/kanban` als voorbeeld-URL. De harness pinnet MCP expres leeg (`--strict-mcp-config --mcp-config .mcp-empty.json`), dus die fallback-trigger is de **normale** toestand van een meet-run, niet een randgeval. Een gemeten agent heeft dus een tweede mutatie-oppervlak: het live bord, via REST. Kaart `ee905064…` impediment vroeg hierom een oordeel.
+
+| Alternatief | Wat het oplost | Wat het NIET oplost | Verdict |
+|---|---|---|---|
+| **nftables / iptables rule op `127.0.0.1:8000`** | Elke socket in deze process tree — `curl`, `urllib`, `requests`, raw `connect()` — krijgt een reject van de kernel. Geen env-var, geen PATH-override, geen `python3`-import die het kan omzeilen. | Vereist root of `sudo -n` op de host. WSL2-omgeving: de bestaande `WSLOUTPUT`/`WSLPOSTROUTING` chains blijven staan; onze rule hangt op `priority -150`, vóór `WSLOUTPUT priority filter`. | **Gekozen.** Structureel, lokaal, idempotent. `isolate_kanban_writes` is één `nft add table/chain/rule` drietal; `release_kanban_isolation` ruimt `table inet measure_kanban_isolation` op. |
+| **Wegwerp-project-key + server-side write-guard** | Alleen writes die de juiste project-key dragen komen door; een meet-agent die per ongeluk een andere key gebruikt, faalt schoon. | De prompt vraagt niet om een project-key voor `POST /cards/{id}/move` en `POST /cards/{id}/comment` — die bewegen een bestaande kaart op id, project-key is geen parameter op die paden. Een key-guard blokkeert dus alleen `POST /cards` (nieuwe kaarten), niet de comment/move-paden die de prompt expliciet noemt. | **Onvolledig.** Dekt één van de drie REST-paden die de prompt aanwijst; de andere twee blijven open. |
+| **`HTTP_PROXY`-env-var naar een sink** | Een `http://sink:9999`-proxy die op alle writes 403 retourneert. Werkt voor `curl` en `requests`. | Env-vars propageren niet betrouwbaar naar de agent-shell die `claude`'s tool-framework spawnt (zelfde les als `GIT_SSH_COMMAND=/bin/false` in §3.4: een env-var is geen slot). En de agent kan ook raw sockets gebruiken, die negeren `HTTP_PROXY`. | **Niet-structureel.** Herhaalt de env-var-familie waarvan deze kaart juist afscheid neemt. |
+| **Prompt-patch om de localhost-URL te vervangen** | De agent ziet een onbereikbaar adres, faalt schoon. | Verandert de prefix die `cache_read` meet — de hele reden dat deze harness bestaat is een prefix-meting op de productie-vorm. Een patch-URL maakt de `card-baseline` vs `card-injector`-vergelijking zinloos. | **Breekt de meting.** Alleen verdedigbaar als we de cache-read-vraag loslaten, wat niet het plan is. |
+| **Stop de kanban-server tijdens de meet-run** | Elke connectie naar `127.0.0.1:8000` faalt met "connection refused". | Verbreekt óók de cockpit-UI van de operator (als die openstaat), andere agents in flight, de dispatch-loop zelf. Geen lokaal-harnas-isolation; globale verstoring. | **Te breed.** Sandbox wint omdat het alleen deze process tree raakt, niet de hele box. |
+
+**Waarom `nftables` toch primair is**, zelfs met de `sudo`-vereiste:
+
+1. **Geen env-var.** De les van kaart `5934b954…` is dat een omgevingsvariabele de shell-grens niet overleeft. Een kernel-hook wel — elke socket die deze process tree opent, ongeacht via welke library, raakt de OUTPUT chain.
+2. **Geen prompt-mutatie.** `cache_read` blijft een prefix-meting op de productie-vorm; de URL in de prompt blijft letterlijk staan.
+3. **Geen globale verstoring.** Priority -150 loopt vóór WSL2's `WSLOUTPUT` zonder 'm uit de weg te ruimen; de rule is selectief op daddr+dp ort, niets anders op de host merkt het.
+4. **Fail-closed.** Geen `sudo`-toegang? Geen run. Het `.missing`-veld krijgt `kanban isolation failed: …` en de rij verschijnt als `?` in plaats van als een cijfer dat de garantie niet waarmaakt.
+
+**Branch protection op de REST-kant** bestaat niet als GitHub-concept en was ook niet in de vraag; het is een git-side mechanisme. Project-key-isolatie (rij 2) komt terug als server-side guard, niet als client-side harness-zorg.
+
 ## 3. Wijzigingen
 
 ### 3.1 `scripts/measure-token-saver.sh` — `run_one` uniform sandboxen
@@ -77,7 +100,13 @@ De vraag "moet dit via branches en branch protection?" hoort bij deze kaart — 
 - Geen code-wijziging aan het script zelf.
 - `scripts/test_measure_cache_read_quota.sh` krijgt één extra assert: `grep -q '"--allowedTools" ""' "$REPO_ROOT/scripts/measure-cache-read-quota.sh"`. Borgt dat de containment niet stilletjes wegvalt bij een refactor.
 
-### 3.4 Doc-regel over env-var
+### 3.4 Bord-side isolatie (`isolate_kanban_writes` / `release_kanban_isolation`)
+
+- **Nieuwe helpers in `scripts/lib/measure_token_saver_lib.sh`.** `isolate_kanban_writes` zet een nftables-tabel `measure_kanban_isolation` met één rule: `ip daddr 127.0.0.1 tcp dport 8000 reject` op een OUTPUT chain met `priority -150`. Idempotent (verwijdert een eventuele stale tabel van een eerdere crash). `release_kanban_isolation` doet `nft delete table` — ook idempotent. `probe_kanban_isolated` opent `/dev/tcp/127.0.0.1/8000` als een snelle aanwezigheids-test (gebruikt door de test-suite, niet door de harness zelf).
+- **`run_one` in `scripts/measure-token-saver.sh`.** Voor de `claude -p`-aanroep: `isolate_kanban_writes`. Faalt closed: een niet-geïnstalleerde rule schrijft een `.missing`-marker met de `nft`-fout, dezelfde rij die `compare`-runs al als `?` rapporteren. `release_run_tree` (dat eerder alleen sandbox opruimde) doet nu ook `release_kanban_isolation` zodat elke `run_one` netjes eindigt. Een EXIT/INT/TERM-trap op het harnas-niveau doet dezelfde release als safety net voor crashes tussen install en cleanup.
+- **Teststrategie (Task 6 in `test_measure_token_saver.sh`):** 10 nieuwe asserts — install, tabel, rule-scope, rule-actie, blokkade-probe, release-tabel, release-idempotent, integratie-cleanup, integratie-meting. Negatieve controle op de blokkade-probe: na release faalt 'ie alleen als er ook geen listener is — wat we vastleggen is "geen rule = kernel doet zijn normale werk".
+
+### 3.5 Doc-regel over env-var
 
 Eén nieuwe paragraaf in `docs/cockpit/token-saver-meet-harnas.md` §1 (boven §1.1 "De gekozen methode", na de TL;DR):
 
@@ -101,8 +130,10 @@ Eén nieuwe paragraaf in `docs/cockpit/token-saver-meet-harnas.md` §1 (boven §
 
 1. **Eerst falende test.** Nieuwe asserts in `test_measure_token_saver.sh` die na een `compare`-run controleren dat de vier `run_one`-bomen geen `.git` hebben EN dat een handgemaakte gebroken `claude.log` door dezelfde wrapper als `bad` wordt geregistreerd (negative control). Vóór de fix faalden de negatieve-controle-asserts omdat de buggenante wrapper `ok` meldde op een gebroken input.
 2. **Implementatie.** `run_one` altijd via `make_prompt_sandbox`; SANDBOX_CHECK-bash herschreven tot één wrapper die violations op STDERR zet en pass/fail op exit-code baseert (niet op stderr-bestandsgrootte).
-3. **Verificatie.** Bestaande unit-asserts + 6 sandbox-asserts + 6 nieuwe invariants (1 positieve + 5 negatieve-controle) + 1 `--allowedTools ""`-grep. Alles groen; de summary-teller sluit de ene *verwachte* `bad()`-rij van de negatieve controle uit zodat het script met exit 0 eindigt.
+3. **Bord-side (§3.4):** Task 6 voegt 10 asserts toe voor `isolate_kanban_writes`/`release_kanban_isolation`: install/cleanup van de nft-tabel, scope van de rule, fail-closed integratie. Negatieve controle op (v): na `release_kanban_isolation` moet een verse `isolate_kanban_writes` opnieuw slagen — anders maskeert een "toevallig toch onbereikbaar"-status een gebroken rule.
+4. **Verificatie.** Bestaande unit-asserts + 6 sandbox-asserts + 6 nieuwe invariants (1 positieve + 5 negatieve-controle) + 1 `--allowedTools ""`-grep + 10 bord-side asserts. Alles groen; de summary-teller sluit de ene *verwachte* `bad()`-rij van de negatieve controle uit zodat het script met exit 0 eindigt.
 
 ## 7. Open punten
 
 - De `headless_runner._build_argv`-missende `--strict-mcp-config` wordt **niet** in deze kaart opgelost. Het is een gerelateerde observatie uit de inventarisatie die om een eigen onderzoek vraagt (andere spawn-laag, andere test-aanspraken); als losse observatie gepost op de kaart-activity-feed.
+- `isolate_kanban_writes` vereist `sudo -n` op de host. Omgevingen zonder `sudo`-toegang (containers zonder cap, externe runners) krijgen een `kanban isolation failed`-rij. Dat is een fail-closed meting (geen cijfers), niet een crash — maar wie de harness op zo'n omgeving wil draaien moet een vervolg-kaart filen voor een `CAP_NET_ADMIN`-pad (user+net namespace via `unshare -Urn` + veth-paar + NAT, bv. via `slirp4netns`). Niet in scope van deze kaart.
