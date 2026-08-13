@@ -23,7 +23,7 @@ expliciet. Heropen deze vragen niet.
 | Onderwerp | Keuze | Gevolg |
 |---|---|---|
 | Security | Alles weg, dispatch permissief | Elk project valt terug op de meta-default: `skip_permissions` aan, host-worktree in plaats van sandcastle. Alleen een expliciete `KanbanMeta`-override wint nog. |
-| Presence | Pagina weg, WS-feed blijft | Presence verdwijnt als bestemming, niet als sensor. Agent Bridge houdt zijn attention-badges en de desktop-notificaties. |
+| Presence | Alles weg | Herzien tijdens fase 4, zie §2b. De WS-sensor had geen databron, dus die is mee verwijderd samen met de attention-badges en de desktop-notificaties. |
 | Agent Mail | Alles weg, inclusief MCP-tools en hooks | Agents kunnen niet meer cross-session coördineren. Reeds geïnstalleerde hooks vragen een apart opruimscript. |
 | Subscriptions/Usage | Repareren | Plan-tier corrigeren en signaalloze rijen verbergen. Het endpoint zelf werkt al. |
 
@@ -42,6 +42,25 @@ providers hebben geen quota-bron en zullen die ook niet krijgen.
 Het gevolg van de eerste: `beschikbaar` wordt `false`, waarna
 `backend/app/kanban/subscription_pool.py` de Anthropic-lane laat pauzeren.
 De tier corrigeren repareert dus ook de dispatch.
+
+## 2b. Waarom Presence alsnog helemaal weg ging
+
+De oorspronkelijke keuze was: pagina weg, WebSocket behouden als sensor voor
+Agent Bridge. Een meting tijdens fase 4 haalde die onderbouwing onderuit.
+
+Op deze machine stond **geen enkele** presence-HTTP-hook geïnstalleerd, van de
+zes hooks in totaal. De twee rijen in `presence_sessions` waren testresten van
+2026-07-08 (`sess-pane-1`, `sess-pane-2`), en `presence_events` bevatte drie
+rijen. De sensor had dus al vijf weken geen databron.
+
+Daarmee vervalt het argument om hem te behouden: de attention-badges en de
+desktop-notificaties draaiden op een lege feed. De PO koos daarop voor
+volledige verwijdering.
+
+Eén gevolg dat een nette vervanging kreeg: `/api/v1/status` telde actieve
+sessies uit `presence_sessions`. Dat leverde stale rijen of nul op. De teller
+leest nu `discover_agent_sessions()` — dezelfde tmux-ontdekking die Agent
+Bridge al gebruikt, zodat de header en die pagina het met elkaar eens zijn.
 
 ## 3. Codebase-feiten die je nodig hebt
 

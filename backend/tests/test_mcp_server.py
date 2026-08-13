@@ -128,18 +128,19 @@ async def test_mcp_tools_registered():
     from app.mcp_server.server import mcp
     tools = await mcp.list_tools()
     names = {t.name for t in tools}
-    assert "list_sessions" in names
-    assert "get_session" in names
     assert "list_mcp_servers" in names
     assert "get_mcp_server" in names
     assert "get_config" in names
     assert "list_config_files" in names
     assert "list_projects" in names
-    # The eight ``agent_mail_*`` tools were removed with the Agent Mail
-    # feature; the count below is the guard that keeps a re-added tool from
-    # slipping in unnoticed.
+    # Two removals shrank this surface: the eight ``agent_mail_*`` tools went
+    # with the Agent Mail feature, and ``list_sessions`` / ``get_session``
+    # went with Presence (they only ever read ``presence_sessions``). The
+    # asserts below keep any of them from silently reappearing.
     assert not any(n.startswith("agent_mail_") for n in names)
-    assert len(tools) == 7
+    assert "list_sessions" not in names
+    assert "get_session" not in names
+    assert len(tools) == 5
 
 
 @pytest.mark.asyncio

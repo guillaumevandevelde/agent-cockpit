@@ -186,35 +186,6 @@ class MCPServerCache(Base):
     )
 
 
-class PresenceEvent(Base):
-    """Raw event log from Claude Code HTTP hooks."""
-
-    __tablename__ = "presence_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(
-        String,
-        ForeignKey("presence_sessions.session_id", ondelete="CASCADE"),
-        index=True,
-        nullable=False,
-    )
-    event_type: Mapped[str] = mapped_column(String, nullable=False)
-    tool_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    tool_input: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    tool_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    message: Mapped[str | None] = mapped_column(String, nullable=True)
-    cwd: Mapped[str | None] = mapped_column(String, nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False
-    )
-    received_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-
 class BridgeSessionAttachment(Base):
     """Image attachment uploaded for an Agent Bridge tmux session."""
 
@@ -236,51 +207,6 @@ class BridgeSessionAttachment(Base):
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class PresenceSession(Base):
-    """Aggregated per-session state for the Presence Dashboard."""
-
-    __tablename__ = "presence_sessions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
-    label: Mapped[str | None] = mapped_column(String, nullable=True)
-    project_path: Mapped[str | None] = mapped_column(String, nullable=True)
-    status: Mapped[str] = mapped_column(String, default=SessionStatus.ACTIVE, nullable=False, index=True)
-    status_text: Mapped[str | None] = mapped_column(String, nullable=True)
-    last_narrative: Mapped[str | None] = mapped_column(String, nullable=True)
-    last_narrative_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    modified_files: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    last_command: Mapped[str | None] = mapped_column(String, nullable=True)
-    last_command_exit: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    activity_buckets: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    bucket_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    total_events: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    error_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False
-    )
-    last_event_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True
-    )
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_user_prompt: Mapped[str | None] = mapped_column(String, nullable=True)
-    tmux_pane: Mapped[str | None] = mapped_column(String, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-    # Deleting a session cascade-deletes its raw events. passive_deletes lets
-    # the DB-level ON DELETE CASCADE do the work (so bulk DELETEs are covered
-    # too) instead of the ORM loading and nulling children.
-    events: Mapped[list["PresenceEvent"]] = relationship(
-        "PresenceEvent",
-        primaryjoin="PresenceSession.session_id == PresenceEvent.session_id",
-        foreign_keys="PresenceEvent.session_id",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
 
 
 class SubscriptionPrefs(Base):

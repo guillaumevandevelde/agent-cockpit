@@ -9,7 +9,6 @@ import { TerminalView } from './TerminalView'
 import { LeaderHintOverlay } from './LeaderHintOverlay'
 import { NewSessionDialog } from './NewSessionDialog'
 import { KillSessionDialog } from './KillSessionDialog'
-import { useAttentionByPane } from './useAttentionByPane'
 import { renameSession } from './api'
 import { resolveLeaderNavigationTarget } from './leaderNavigation'
 import type { CCSession, LeaderNavigationDirection } from './types'
@@ -44,7 +43,6 @@ export function CCBridgePage() {
   const instance = status?.instance ?? null
   const { sessions, loading, error, refresh } = useCCSessions()
   const { teams, ungrouped, loading: teamsLoading, refresh: refreshTeams } = useTeams()
-  const attentionByPane = useAttentionByPane()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const [activeTargets, setActiveTargets] = useState<string[]>([])
@@ -170,15 +168,6 @@ export function CCBridgePage() {
     }
   }, [searchParams, sessions, attachTarget, refresh, setSearchParams])
 
-  // tmux_target -> pane_id, to look up per-pane attention for attached panes.
-  const paneByTarget = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const s of sessions) {
-      if (s.pane_id) map.set(s.tmux_target, s.pane_id)
-    }
-    return map
-  }, [sessions])
-
   const handleSpawned = (tmuxTarget: string) => {
     refresh()
     refreshTeams()
@@ -278,7 +267,6 @@ export function CCBridgePage() {
               providerFilter={providerFilter}
               canCreateSession={canCreateSession}
               createDisabledReason={canCreateSession ? null : createDisabledReason}
-              attentionByPane={attentionByPane}
               instance={instance}
             />
           </div>
@@ -325,10 +313,6 @@ export function CCBridgePage() {
                           setFullscreenTarget(isThisFullscreen ? null : target)
                         }
                         onClose={() => removeTarget(target)}
-                        attention={(() => {
-                          const pane = paneByTarget.get(target)
-                          return pane ? attentionByPane.get(pane) ?? null : null
-                        })()}
                         instance={instance}
                       />
                     </div>

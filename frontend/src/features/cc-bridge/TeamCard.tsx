@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { SessionCard } from './SessionCard'
 import type { RunGroup, CCSession } from './types'
-import type { AttentionKind } from './attention'
 import type { InstanceIdentity } from '@/types/status'
 
 interface TeamCardProps {
@@ -16,7 +15,6 @@ interface TeamCardProps {
   onKillSession: (session: CCSession) => void
   onRename: (session: CCSession, newName: string) => Promise<void>
   onOpenCard?: (cardId: string) => void
-  attentionByPane: Map<string, AttentionKind>
   instance?: InstanceIdentity | null
 }
 
@@ -27,7 +25,6 @@ export function TeamCard({
   onKillSession,
   onRename,
   onOpenCard,
-  attentionByPane,
   instance,
 }: TeamCardProps) {
   const [collapsed, setCollapsed] = useState(false)
@@ -92,7 +89,6 @@ export function TeamCard({
                       onKill={onKillSession}
                       onRename={onRename}
                       onOpenCard={onOpenCard}
-                      attention={session.pane_id ? attentionByPane.get(session.pane_id) ?? null : null}
                       instance={instance}
                     />
                   </div>

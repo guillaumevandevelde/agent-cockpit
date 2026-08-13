@@ -40,7 +40,6 @@ class SessionLimits:
     """Dynamic session limits based on hardware."""
     max_active_sessions: int
     max_cached_sessions: int
-    max_presence_events: int
     event_retention_hours: int
     cleanup_threshold_percent: float
 
@@ -100,7 +99,6 @@ def get_memory_status() -> MemoryStatus:
 def get_dynamic_limits(
     base_max_sessions: int = 20,
     base_max_cached: int = 500,
-    base_max_events: int = 10000,
     base_retention_hours: int = 168,  # 7 days
 ) -> SessionLimits:
     """Calculate dynamic session limits based on current memory status.
@@ -108,7 +106,6 @@ def get_dynamic_limits(
     Args:
         base_max_sessions: Base limit for active sessions (overridden if memory is tight)
         base_max_cached: Base limit for cached session metadata
-        base_max_events: Base limit for presence events
         base_retention_hours: Base event retention in hours
     
     Returns:
@@ -120,7 +117,6 @@ def get_dynamic_limits(
         # Under memory pressure: aggressive limits
         max_sessions = max(MIN_SESSIONS_GUARANTEED, min(base_max_sessions // 4, status.estimated_max_sessions))
         max_cached = max(50, base_max_cached // 4)
-        max_events = max(1000, base_max_events // 4)
         retention_hours = max(24, base_retention_hours // 4)  # 1 day minimum
         cleanup_threshold = MEMORY_CRITICAL_THRESHOLD
         logger.warning(
@@ -131,7 +127,6 @@ def get_dynamic_limits(
         # Moderate pressure: reduced limits
         max_sessions = max(MIN_SESSIONS_GUARANTEED, min(base_max_sessions // 2, status.estimated_max_sessions))
         max_cached = max(100, base_max_cached // 2)
-        max_events = max(2500, base_max_events // 2)
         retention_hours = max(48, base_retention_hours // 2)  # 2 days minimum
         cleanup_threshold = MEMORY_WARNING_THRESHOLD
         logger.info(
@@ -142,14 +137,12 @@ def get_dynamic_limits(
         # Comfortable: use base limits (capped by estimated max)
         max_sessions = min(base_max_sessions, status.estimated_max_sessions)
         max_cached = base_max_cached
-        max_events = base_max_events
         retention_hours = base_retention_hours
         cleanup_threshold = MEMORY_WARNING_THRESHOLD
 
     return SessionLimits(
         max_active_sessions=max_sessions,
         max_cached_sessions=max_cached,
-        max_presence_events=max_events,
         event_retention_hours=retention_hours,
         cleanup_threshold_percent=cleanup_threshold,
     )

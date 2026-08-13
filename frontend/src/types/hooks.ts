@@ -378,11 +378,4 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     model: "haiku",
     once: true,
   },
-  {
-    name: "Presence Dashboard Logger",
-    description: "Send events to Presence Dashboard via HTTP hook",
-    event: "PostToolUse",
-    type: "http",
-    url: `${window.location.origin}/api/v1/presence/events`,
-  },
 ];

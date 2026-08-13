@@ -4,7 +4,6 @@ import { Toaster } from 'sonner'
 import { ProjectProvider } from './contexts/ProjectContext'
 import { DashboardProvider } from './contexts/DashboardContext'
 import { ProviderProvider } from './contexts/ProviderContext'
-import { AttentionProvider } from './contexts/AttentionContext'
 import { MainLayout } from './components/layout/MainLayout'
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const ConfigViewerPage = lazy(() => import('./features/config/ConfigViewerPage').then((m) => ({ default: m.ConfigViewerPage })))
@@ -27,7 +26,6 @@ const ContextPage = lazy(() => import('./features/context/ContextPage').then((m)
 const PlansPage = lazy(() => import('./features/plans/PlansPage').then((m) => ({ default: m.PlansPage })))
 const PlanDetailPage = lazy(() => import('./features/plans/PlanDetailPage').then((m) => ({ default: m.PlanDetailPage })))
 const CCBridgePage = lazy(() => import('./features/cc-bridge/CCBridgePage').then((m) => ({ default: m.CCBridgePage })))
-const PresencePage = lazy(() => import('./features/presence/PresencePage').then((m) => ({ default: m.PresencePage })))
 const KanbanPage = lazy(() => import('./features/kanban/KanbanPage').then((m) => ({ default: m.default })))
 const ImpedimentPage = lazy(() => import('./features/kanban/ImpedimentPage').then((m) => ({ default: m.ImpedimentPage })))
 const ApmPage = lazy(() => import('./features/apm/ApmPage').then((m) => ({ default: m.ApmPage })))
@@ -45,7 +43,6 @@ function App() {
     <ProjectProvider>
       <ProviderProvider>
         <DashboardProvider>
-          <AttentionProvider>
           <BrowserRouter>
             <Toaster richColors position="top-right" />
             <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading...</div>}>
@@ -69,7 +66,6 @@ function App() {
                 <Route path="sessions" element={<SessionsPage />} />
                 <Route path="agent-bridge" element={<CCBridgePage />} />
                 <Route path="cc-bridge" element={<CCBridgePage />} />
-                <Route path="presence" element={<PresencePage />} />
                 <Route path="plans/:filename" element={<PlanDetailPage />} />
                 <Route path="plans" element={<PlansPage />} />
                 <Route path="context" element={<ContextPage />} />
@@ -89,7 +85,6 @@ function App() {
             </Routes>
             </Suspense>
           </BrowserRouter>
-          </AttentionProvider>
         </DashboardProvider>
       </ProviderProvider>
     </ProjectProvider>

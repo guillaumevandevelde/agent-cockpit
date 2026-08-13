@@ -4,13 +4,11 @@ import { Header } from './Header'
 import { Sidebar } from './Sidebar'
 import { Footer } from './Footer'
 import { SidebarContext } from '@/contexts/SidebarContext'
-import { useAttentionNotifications } from '@/hooks/useAttentionNotifications'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
 
 export function MainLayout() {
   const [collapsed, setCollapsed] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  useAttentionNotifications()
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

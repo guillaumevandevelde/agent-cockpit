@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils'
 import { fetchSessionGitStatus } from './api'
 import type { CCSession, GitStatusResponse } from './types'
 import { isVendorEqualToCli } from '@/types/providers'
-import type { AttentionKind } from './attention'
 import type { InstanceIdentity } from '@/types/status'
 
 interface SessionCardProps {
@@ -23,11 +22,10 @@ interface SessionCardProps {
    * affordance in that case.
    */
   onOpenCard?: (cardId: string) => void
-  attention?: AttentionKind | null
   instance?: InstanceIdentity | null
 }
 
-export function SessionCard({ session, gridPosition, onClick, onKill, onRename, onOpenCard, attention, instance }: SessionCardProps) {
+export function SessionCard({ session, gridPosition, onClick, onKill, onRename, onOpenCard, instance }: SessionCardProps) {
   const projectName = session.cwd.split('/').pop() || session.cwd
   const isActive = gridPosition !== null
 
@@ -98,15 +96,6 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
       <CardContent className="p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 min-w-0">
-            {attention && (
-              <span
-                className={cn(
-                  'h-2 w-2 rounded-full shrink-0',
-                  attention === 'error' ? 'bg-red-500' : 'bg-yellow-500'
-                )}
-                title={attention === 'error' ? 'Command failed' : 'Waiting for input'}
-              />
-            )}
             {editing ? (
               <Input
                 autoFocus

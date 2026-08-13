@@ -1,6 +1,5 @@
 import { Terminal, Radio, AlertCircle, Server } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { AttentionToggle } from "@/components/ui/attention-toggle";
 import { Badge } from "@/components/ui/badge";
 import { CockpitLogo } from "@/components/shared/CockpitLogo";
 import { useSystemStatus } from "@/hooks/useSystemStatus";
@@ -85,7 +84,6 @@ export function Header() {
               </Badge>
             </>
           )}
-          <AttentionToggle />
           <ThemeToggle />
         </div>
       </div>

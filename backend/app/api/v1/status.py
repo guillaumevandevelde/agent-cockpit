@@ -3,17 +3,14 @@ import asyncio
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.models.constants import SessionStatus
 from app.models.schemas import SystemStatusResponse
 from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 from app.services.instance_identity import get_instance_identity
 from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
-from app.services.presence_service import PresenceService
+from app.services.runs.discovery import discover_agent_sessions
 from app.services.scheduling.hook_installer import get_hooks_status
 
 router = APIRouter()
@@ -42,10 +39,15 @@ async def _get_claude_code_version() -> str | None:
         return version
 
 
-async def _get_active_count(db: AsyncSession) -> int:
-    service = PresenceService()
-    sessions = await service.get_all_sessions(db)
-    return sum(1 for s in sessions if s.status == SessionStatus.ACTIVE)
+async def _get_active_count() -> int:
+    """Count live agent sessions by discovering their tmux panes.
+
+    This used to read ``presence_sessions``, which was fed by opt-in HTTP
+    hooks. Those hooks were rarely installed, so the header counter showed
+    stale rows or zero. tmux discovery is the source the Agent Bridge
+    already trusts, so the header now agrees with what that page shows.
+    """
+    return await asyncio.to_thread(lambda: len(discover_agent_sessions()))
 
 
 async def _get_provider_statuses() -> dict[str, Any]:
@@ -61,11 +63,11 @@ async def _get_scheduling_hooks_installed() -> bool:
 
 
 @router.get("/status", response_model=SystemStatusResponse)
-async def get_system_status(db: AsyncSession = Depends(get_db)):
+async def get_system_status():
     """Return system status for header indicators."""
     version, active_count, provider_statuses, hooks_installed = await asyncio.gather(
         _get_claude_code_version(),
-        _get_active_count(db),
+        _get_active_count(),
         _get_provider_statuses(),
         _get_scheduling_hooks_installed(),
     )
@@ -87,7 +89,6 @@ class SystemResourcesResponse(BaseModel):
     memory_status: str  # "comfortable", "warning", "critical"
     max_active_sessions: int
     max_cached_sessions: int
-    max_presence_events: int
     event_retention_hours: int
     estimated_bytes_per_session: int
 
@@ -112,7 +113,6 @@ async def get_system_resources():
         memory_status=memory_status,
         max_active_sessions=limits.max_active_sessions,
         max_cached_sessions=limits.max_cached_sessions,
-        max_presence_events=limits.max_presence_events,
         event_retention_hours=limits.event_retention_hours,
         estimated_bytes_per_session=100 * 1024 * 1024,  # 100MB
     )

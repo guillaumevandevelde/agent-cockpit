@@ -16,7 +16,6 @@ import { getInstanceAccentClasses } from '@/lib/instanceAccent'
 import { cn } from '@/lib/utils'
 import { FileBrowserPopover } from './FileBrowserPopover'
 import { LEADER_PREFIX_LABEL, LEADER_SHORTCUTS } from './leaderShortcuts'
-import type { AttentionKind } from './attention'
 import type { BridgeAttachment, LeaderNavigationDirection } from './types'
 import type { InstanceIdentity } from '@/types/status'
 
@@ -28,7 +27,6 @@ interface TerminalViewProps {
   onClose?: () => void
   onLeaderNavigate?: (sourceTarget: string, direction: LeaderNavigationDirection) => void
   onLeaderStateChange?: (sourceTarget: string, active: boolean) => void
-  attention?: AttentionKind | null
   instance?: InstanceIdentity | null
 }
 
@@ -73,7 +71,6 @@ export function TerminalView({
   onClose,
   onLeaderNavigate,
   onLeaderStateChange,
-  attention,
   instance,
 }: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -232,15 +229,6 @@ export function TerminalView({
       {target && (
         <div className={cn("flex items-center justify-between gap-3 px-3 py-2 border-t bg-background", accentClasses.terminal)}>
           <div className="flex items-center gap-3 min-w-0">
-            {attention && (
-              <span
-                className={cn(
-                  'h-2 w-2 rounded-full shrink-0',
-                  attention === 'error' ? 'bg-red-500' : 'bg-yellow-500'
-                )}
-                title={attention === 'error' ? 'Command failed' : 'Waiting for input'}
-              />
-            )}
             <div className="flex items-center gap-2 text-sm">
               <button
                 className={cn(
