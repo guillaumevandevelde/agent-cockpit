@@ -253,7 +253,6 @@ class SandcastleService:
             if not config:
                 raise ValueError(f"Config {config_id} not found")
 
-            before_enabled = config.enabled
             config.enabled = not config.enabled
             config.updated_at = datetime.now(UTC)
             await session.commit()

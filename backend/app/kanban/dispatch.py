@@ -56,7 +56,6 @@ from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import (
     resolve_project_key,
-    resolve_project_path,
     safe_resolve_project_key,
 )
 from app.kanban.service import (
@@ -534,7 +533,6 @@ async def set_default_transport(session, project_key: str, value: str) -> None:
         raise ValueError(f"unknown transport: {value}")
     key = TRANSPORT_PREFIX + project_key
     row = await session.get(KanbanMeta, key)
-    before = row.value if row is not None else None
     if row is None:
         session.add(KanbanMeta(key=key, value=value))
     else:

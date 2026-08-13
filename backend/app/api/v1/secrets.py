@@ -29,7 +29,6 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
-from app.database import AsyncSessionLocal
 from app.services.secrets_store import (
     AGESecretStore,
     AuthenticationError,

@@ -32,13 +32,12 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from mcp.server.fastmcp import FastMCP
+from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
-
-from mcp.server.fastmcp import FastMCP
-from mcp.server.sse import SseServerTransport
 
 logger = logging.getLogger(__name__)
 

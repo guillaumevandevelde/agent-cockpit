@@ -25,9 +25,9 @@ import json
 import logging
 
 from app.services.scheduling.hook_script import (
+    HOOK_EVENT_PATH,
     LEGACY_HOOK_EVENT_MARKER,
     LEGACY_HOOK_EVENT_PATH,
-    HOOK_EVENT_PATH,
     render_hook_command,
     settings_hooks_block,
 )

@@ -31,8 +31,8 @@ from .recurring_triggers.router import router as recurring_triggers_router
 from .run_activity import router as run_activity_router
 from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
-from .session_hooks.router import router as session_hooks_router
 from .secrets import router as secrets_router
+from .session_hooks.router import router as session_hooks_router
 from .sessions import router as sessions_router
 from .status import router as status_router
 from .statusline import router as statusline_router

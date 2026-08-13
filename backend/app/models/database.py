@@ -6,7 +6,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config import settings
 from app.database import Base
-from app.models.constants import SessionStatus
 
 
 def _utcnow() -> datetime:
