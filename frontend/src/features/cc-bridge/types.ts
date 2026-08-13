@@ -85,7 +85,6 @@ export interface SpawnSessionRequest {
   bedrock_model?: string
   minimax_base_url?: string
   endpoint_name?: string
-  host_id?: number
   agent?: string
   context_tier?: string
   reasoning_effort?: string

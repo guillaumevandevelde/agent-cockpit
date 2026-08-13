@@ -22,7 +22,6 @@ import {
 import { MODAL_SIZES } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
-import { fetchHosts } from '@/features/hosts/api'
 import {
   spawnSession,
   fetchResumableSessions,
@@ -37,7 +36,6 @@ import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgenticCliId, CodexLaunchOptionsResponse } from '@/types/providers'
 import type { EndpointResponse, SpawnSessionRequest } from './types'
 import type { ResumableSession } from '@/types/sessions'
-import type { Host } from '@/features/hosts/types'
 import type { ProjectResponse } from '@/types/projects'
 
 type Mode = 'plain' | 'worktree' | 'resume' | 'fork'
@@ -176,9 +174,6 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set())
   const [loadingSessions, setLoadingSessions] = useState(false)
 
-  const [hosts, setHosts] = useState<Host[]>([])
-  const [loadingHosts, setLoadingHosts] = useState(false)
-  const [selectedHostId, setSelectedHostId] = useState<number | null>(null)
   const projectSearchRef = useRef<HTMLInputElement>(null)
   const projectOptionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
@@ -285,18 +280,6 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     return () => { cancelled = true }
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setLoadingHosts(true)
-    setHosts([])
-    fetchHosts()
-      .then((data) => { if (!cancelled) setHosts(data) })
-      .catch(() => { if (!cancelled) setHosts([]) })
-      .finally(() => { if (!cancelled) setLoadingHosts(false) })
-    return () => { cancelled = true }
-  }, [open])
-
   // Fetch Codex's known models/profiles once per dialog open, to back the
   // model/profile datalists with real values instead of pure free text.
   useEffect(() => {
@@ -352,8 +335,6 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setSelectedSessionIds(new Set())
       setRecentSessions([])
       setSubmitting(false)
-      setSelectedHostId(null)
-      setHosts([])
       setMinimaxConfigured(null)
       setSelectedEndpointName('')
       setEndpoints([])
@@ -467,7 +448,6 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
           provider: 'anthropic-compatible' as const,
           endpoint_name: selectedEndpoint.name,
         }),
-        ...(selectedHostId !== null && { host_id: selectedHostId }),
       }
 
       const response = await spawnSession(request)
@@ -516,33 +496,6 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          {/* Host selection (optional) */}
-          <div className="space-y-1.5">
-            <Label>Host</Label>
-            <Select
-              value={selectedHostId !== null ? String(selectedHostId) : ''}
-              onValueChange={(value) => {
-                setSelectedHostId(value ? Number(value) : null)
-                setError(null)
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={loadingHosts ? 'Loading hosts...' : 'Local (default)'} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Local (default)</SelectItem>
-                {hosts.map((host) => (
-                  <SelectItem key={host.id} value={String(host.id)}>
-                    {host.alias}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Select a remote host to run the session on, or leave as Local.
-            </p>
           </div>
 
           {/* Mode selector */}

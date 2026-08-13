@@ -16,7 +16,6 @@ configure_logging()
 from fastapi.staticfiles import StaticFiles
 
 import app.models.agent_mail  # noqa: F401  (register tables for create_all)
-import app.models.host  # noqa: F401  (register tables for create_all)
 import app.models.mcp_token  # noqa: F401  (register tables for create_all)
 import app.models.recurring_trigger  # noqa: F401  (register tables for create_all)
 import app.models.run_instance  # noqa: F401  (register tables for create_all)

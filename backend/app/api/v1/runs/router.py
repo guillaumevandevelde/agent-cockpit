@@ -41,7 +41,6 @@ from app.models.schemas import (
 from app.services.agentic_cli import get_agentic_cli
 from app.services.agentic_cli.base import SpawnCommandOptions
 from app.services.agentic_cli.provider_env import KNOWN_PROVIDERS
-from app.services.host_service import HostNotFoundError
 from app.services.runs import git_status as git_status_service
 from app.services.runs import groups as groups_service
 from app.services.runs import minimax_credentials
@@ -88,7 +87,6 @@ class SpawnRequest(BaseModel):
     bedrock_model: str | None = None
     minimax_base_url: str | None = None
     endpoint_name: str | None = None
-    host_id: int | None = None
     agent: str | None = None
     context_tier: str | None = None
     reasoning_effort: str | None = None
@@ -647,11 +645,6 @@ async def spawn_session_endpoint(
     try:
         get_agentic_cli(request.cli)
 
-        host_data = None
-        if request.host_id is not None:
-            from app.services.host_service import get_host as get_host_data
-            host_data = await get_host_data(db, request.host_id)
-
         # Resolve the named Anthropic-compatible endpoint (if any) into
         # the explicit fields the provider-env builder expects. We do
         # this here (and not inside ``spawn_session``) so the spawn
@@ -733,7 +726,6 @@ async def spawn_session_endpoint(
             endpoint_name=endpoint_name,
             endpoint_base_url=endpoint_base_url,
             endpoint_auth_token=endpoint_auth_token,
-            host_id=request.host_id,
             agent=request.agent,
             context_tier=request.context_tier,
             reasoning_effort=request.reasoning_effort,
@@ -742,11 +734,9 @@ async def spawn_session_endpoint(
             allow_all=request.allow_all,
             no_ask_user=request.no_ask_user,
         )
-        return spawn_session(request.cli, options, session_name=request.session_name, host_data=host_data)
+        return spawn_session(request.cli, options, session_name=request.session_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except HostNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
 
 
 class BulkResumeItem(BaseModel):

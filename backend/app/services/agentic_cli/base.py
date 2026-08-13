@@ -61,7 +61,6 @@ class SpawnCommandOptions:
     endpoint_name: str | None = None
     endpoint_base_url: str | None = None
     endpoint_auth_token: str | None = None
-    host_id: int | None = None
     agent: str | None = None
     context_tier: str | None = None
     reasoning_effort: str | None = None

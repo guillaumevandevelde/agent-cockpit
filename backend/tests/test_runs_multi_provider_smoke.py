@@ -52,7 +52,7 @@ async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_pa
 
     captured = {}
 
-    def fake_spawn(cli_id, options, session_name=None, host_data=None):
+    def fake_spawn(cli_id, options, session_name=None):
         captured["cli_id"] = cli_id
         captured["options"] = options
         return {

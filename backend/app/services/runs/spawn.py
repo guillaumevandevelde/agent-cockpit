@@ -19,7 +19,6 @@ from app.services.agentic_cli.provider_env import (
     build_provider_env,
     build_spawn_env,
 )
-from app.services.host_service import build_ssh_base
 from app.utils.git_ref import sanitize_git_branch_name
 
 logger = logging.getLogger(__name__)
@@ -124,51 +123,16 @@ def _unlink_prompt_file(path: str | None) -> None:
         pass
 
 
-def _spawn_session_remote(
-    host_data: dict,
-    cli_display_name: str,
-    name: str,
-    directory: str,
-    shell_command: str,
-    env_flags: list[str],
-) -> None:
-    """Run tmux new-session on a remote host via SSH."""
-    tmux_cmd = [
-        "tmux", "new-session", "-d", "-s", name, "-c", directory,
-        *env_flags, shell_command,
-    ]
-    ssh_cmd = build_ssh_base(host_data) + tmux_cmd
-    try:
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            raise ValueError(
-                f"Remote tmux new-session failed on {host_data['alias']}: "
-                f"{result.stderr.strip()}"
-            )
-    except FileNotFoundError:
-        raise ValueError("ssh is not installed or not in PATH")
-    except subprocess.TimeoutExpired:
-        raise ValueError("Remote tmux new-session timed out")
-    logger.info(
-        "Spawned remote session %s on %s (dir=%s)",
-        name, host_data["alias"], directory,
-    )
-
-
 def spawn_session(
     cli_id: str,
     options: SpawnCommandOptions,
     session_name: str | None = None,
-    host_data: dict | None = None,
     *,
     project_key: str | None = None,
     runtime: str | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> dict:
-    """Spawn a new agentic CLI session inside tmux.
-
-    When *host_data* is provided the session is spawned on that remote host
-    via SSH instead of locally.
+    """Spawn a new agentic CLI session inside tmux on the local host.
 
     The spawned tmux session receives an **explicit env** built from:
 
@@ -258,37 +222,32 @@ def spawn_session(
         env_var_names=list(spawn_env.env.keys()),
     )
 
-    if host_data:
-        # Remote still inlines the command over SSH — a separate transport with
-        # its own arg limits; the tmux ~16KB imsg cap is a local-socket concern.
-        _spawn_session_remote(host_data, cli.display_name, name, directory, shell_command, env_flags)
-    else:
-        # Deliver the prompt via a temp file so a large prompt never overflows
-        # tmux's ~16KB command-line limit ("command too long"). See
-        # _prompt_file_shell_command.
-        prompt_file: str | None = None
-        if options.prompt:
-            shell_command, prompt_file = _prompt_file_shell_command(command, options.prompt)
-        try:
-            result = subprocess.run(
-                ["tmux", "new-session", "-d", "-s", name, "-c", directory, *env_flags, shell_command],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                raise ValueError(f"tmux new-session failed: {result.stderr.strip()}")
-        except FileNotFoundError as exc:
-            _unlink_prompt_file(prompt_file)
-            raise ValueError("tmux is not installed or not in PATH") from exc
-        except subprocess.TimeoutExpired as exc:
-            _unlink_prompt_file(prompt_file)
-            raise ValueError("tmux new-session timed out") from exc
-        except Exception:
-            # tmux returned non-zero (or any other failure): the pane never ran,
-            # so it will not remove the prompt file — clean it up here.
-            _unlink_prompt_file(prompt_file)
-            raise
+    # Deliver the prompt via a temp file so a large prompt never overflows
+    # tmux's ~16KB command-line limit ("command too long"). See
+    # _prompt_file_shell_command.
+    prompt_file: str | None = None
+    if options.prompt:
+        shell_command, prompt_file = _prompt_file_shell_command(command, options.prompt)
+    try:
+        result = subprocess.run(
+            ["tmux", "new-session", "-d", "-s", name, "-c", directory, *env_flags, shell_command],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"tmux new-session failed: {result.stderr.strip()}")
+    except FileNotFoundError as exc:
+        _unlink_prompt_file(prompt_file)
+        raise ValueError("tmux is not installed or not in PATH") from exc
+    except subprocess.TimeoutExpired as exc:
+        _unlink_prompt_file(prompt_file)
+        raise ValueError("tmux new-session timed out") from exc
+    except Exception:
+        # tmux returned non-zero (or any other failure): the pane never ran,
+        # so it will not remove the prompt file — clean it up here.
+        _unlink_prompt_file(prompt_file)
+        raise
 
     _spawned_sessions[name] = {
         "cli": cli.id,
@@ -298,20 +257,17 @@ def spawn_session(
         "worktree_path": options.worktree_path,
         "repo_path": options.repo_path,
         "provider": options.provider,
-        "host_id": host_data["id"] if host_data else None,
-        "host_alias": host_data["alias"] if host_data else None,
         "project_key": project_key,
         "runtime": effective_runtime,
         "env_var_names": spawn_env.names,
     }
 
     logger.info(
-        "%s %s session %s in %s (mode=%s)",
-        "Remotely spawned" if host_data else "Spawned",
+        "Spawned %s session %s in %s (mode=%s)",
         cli.id, name, directory, options.mode,
     )
 
-    display_name = f"{cli.display_name} ({host_data['alias']})" if host_data else cli.display_name
+    display_name = cli.display_name
     return {
         "cli": cli.id,
         "cli_display_name": display_name,

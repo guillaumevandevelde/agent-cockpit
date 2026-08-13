@@ -18,7 +18,6 @@ from .deploy import router as deploy_router
 from .external_agent_mail import router as external_agent_mail_router
 from .files import router as files_router
 from .hooks import router as hooks_router
-from .hosts.router import router as hosts_router
 from .kanban.router import router as kanban_router
 from .mcp import router as mcp_router
 from .mcp_server import router as mcp_server_router
@@ -100,7 +99,6 @@ router.include_router(apm_router)
 router.include_router(files_router)
 router.include_router(mcp_server_router, tags=["MCP Server"])
 router.include_router(sandcastle_router, tags=["Sandcastle"])
-router.include_router(hosts_router, tags=["Hosts"])
 router.include_router(security_router)
 router.include_router(secrets_router, tags=["Secrets"])
 router.include_router(deploy_router)

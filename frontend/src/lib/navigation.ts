@@ -28,7 +28,6 @@ import {
   TrendingUp,
   Network,
   Castle,
-  Globe,
   Building2,
   type LucideIcon,
 } from 'lucide-react'
@@ -68,7 +67,6 @@ const commonNavigation: NavGroup[] = [
       { name: 'Plans', href: '/plans', icon: ClipboardList },
       { name: 'MCP Server', href: '/mcp-server', icon: Network },
       { name: 'Sandcastle', href: '/sandcastle', icon: Castle },
-      { name: 'Hosts', href: '/hosts', icon: Globe },
       { name: 'Backup', href: '/backup', icon: Archive, capability: 'backup' },
     ],
   },
