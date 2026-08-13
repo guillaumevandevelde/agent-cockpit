@@ -17,7 +17,12 @@ from ...models.schemas import (
     SettingsValidationResponse,
 )
 from ...services.config_service import ConfigService
-from ...utils.pattern_utils import migrate_deprecated_pattern, validate_permission_pattern
+from ...utils.pattern_utils import (
+    CROSS_SESSION_INBOUND_ALLOWED,
+    DIALOG_EXPIRY_ALLOWED,
+    migrate_deprecated_pattern,
+    validate_permission_pattern,
+)
 
 router = APIRouter(prefix="/config", tags=["config"])
 config_service = ConfigService()
@@ -114,12 +119,14 @@ async def validate_settings(request: SettingsValidationRequest):
     Validate permission patterns in settings without saving.
 
     Checks permissions.allow, permissions.ask, and permissions.deny arrays
-    for patterns that Claude Code would reject.
+    for patterns that Claude Code would reject, plus the CC-2.1.224
+    top-level surface Cockpit surfaces (``crossSessionInbound`` /
+    ``dialogExpiry`` — kanban card 9f90964e…).
     """
     issues: list[PatternIssue] = []
     permissions = request.settings.get("permissions", {})
     if not isinstance(permissions, dict):
-        return SettingsValidationResponse(valid=True, issues=[])
+        permissions = {}
 
     for category in ("allow", "ask", "deny"):
         rules = permissions.get(category)
@@ -142,6 +149,28 @@ async def validate_settings(request: SettingsValidationRequest):
                     error=error or "Invalid pattern",
                     suggestion=suggestion,
                 ))
+
+    # CC 2.1.224 surface — show policy: enum-validate, never default. The
+    # allow-lists mirror the ones in pattern_utils.py; if they diverge the
+    # regression test in test_pattern_utils.py::test_known_settings_*
+    # catches it on next run.
+    for key, allowed in (
+        ("crossSessionInbound", CROSS_SESSION_INBOUND_ALLOWED),
+        ("dialogExpiry", DIALOG_EXPIRY_ALLOWED),
+    ):
+        if key not in request.settings:
+            continue
+        value = request.settings[key]
+        if value is None or value in allowed:
+            continue
+        issues.append(PatternIssue(
+            pattern=f"{key}={value!r}",
+            category="setting",
+            error=(
+                f"{key} must be one of {sorted(allowed)} "
+                f"(Claude Code 2.1.224+); got {value!r}"
+            ),
+        ))
 
     return SettingsValidationResponse(
         valid=len(issues) == 0,
