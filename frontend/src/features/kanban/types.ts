@@ -454,39 +454,3 @@ export interface RunInstance {
   stopped_at: string | null;
 }
 
-// PO-wachtrij ("Wacht op jou") — see kanban card `c7ea21b0…` and
-// `docs/cockpit/product-owner-volgbaarheid-analyse.md` §2b/§4.1/§5 kaart B.
-// Mirrors the backend `WachtrijItem` / `WachtrijResponse` shapes from
-// `backend/app/kanban/schemas.py`.
-
-export type WachtrijKind =
-  | "impediment_needs_answer"
-  | "gate_open"
-  | "review_requested"
-  | "awaiting_plan_ref";
-
-// Human-readable label per kind, shown on the wachtrij card. Centralised
-// here so the badge is consistent if the same kind surfaces elsewhere
-// later (e.g. an inbox notification feed).
-export const WACHTRIJ_KIND_LABELS: Record<WachtrijKind, string> = {
-  impediment_needs_answer: "Impediment",
-  gate_open: "Open gate",
-  review_requested: "Review",
-  awaiting_plan_ref: "Wacht op plan",
-};
-
-export interface WachtrijItem {
-  card_id: string;
-  card_title: string;
-  card_column: string;
-  kind: WachtrijKind;
-  reason: string;
-  created_at: string;
-  wait_seconds: number;
-}
-
-export interface WachtrijResponse {
-  project_key: string;
-  total: number;
-  items: WachtrijItem[];
-}

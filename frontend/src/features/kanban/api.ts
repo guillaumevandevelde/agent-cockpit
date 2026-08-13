@@ -1,6 +1,4 @@
 import { apiAssetUrl, apiClient, apiUpload } from "@/lib/api";
-import { spawnSession } from "@/features/cc-bridge/api";
-import type { SpawnSessionResponse } from "@/features/cc-bridge/types";
 import type {
   Card,
   ActivityEntry,
@@ -263,18 +261,6 @@ export const kanbanApi = {
       `${BASE}/project-key?project_path=${encodeURIComponent(projectPath)}`
     ),
 
-  /**
-   * "Wacht op jou" — PO-facing aggregation of every human-blocked item in
-   * the project (kanban card `c7ea21b0…`). Returns a flat, oldest-first
-   * sorted list across impediment_needs_answer / gate_open /
-   * review_requested / awaiting_plan_ref. Empty when nothing is waiting
-   * (no 404 for an unknown project — a wachtrij is a *view*, not a write).
-   */
-  wachtrij: (projectKey: string): Promise<import("./types").WachtrijResponse> =>
-    apiClient<import("./types").WachtrijResponse>(
-      `${BASE}/wachtrij?project_key=${encodeURIComponent(projectKey)}`
-    ),
-
   mcpStatus: (projectPath: string): Promise<{ enabled: boolean }> =>
     apiClient<{ enabled: boolean }>(
       `${BASE}/mcp-status?project_path=${encodeURIComponent(projectPath)}`
@@ -315,19 +301,6 @@ export const kanbanApi = {
     apiClient<{ project_key: string }>(`${BASE}/enable`, {
       method: "POST",
       body: JSON.stringify({ project_path: projectPath, slug }),
-    }),
-
-  // Start the spec-driven /new-app interview for a fresh project. The
-  // `directory` is the cockpit repo (where `.claude/skills/new-app` lives);
-  // the new repo doesn't exist yet, so the interview runs in the cockpit
-  // checkout and creates the new repo at the end. See
-  // docs/cockpit/kaartloze-app-inceptie-decision.md §4.
-  startNewApp: (directory: string): Promise<SpawnSessionResponse> =>
-    spawnSession({
-      cli: "claude-code",
-      directory,
-      mode: "plain",
-      prompt: "/new-app",
     }),
 
   disable: (projectPath: string): Promise<{ enabled: boolean }> =>

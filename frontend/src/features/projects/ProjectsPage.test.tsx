@@ -1,19 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-
-const navigate = vi.fn()
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>(
-    'react-router-dom',
-  )
-  return {
-    ...actual,
-    useNavigate: () => navigate,
-  }
-})
 
 const fetchProjects = vi.fn()
 const metaProject = {
@@ -42,35 +30,11 @@ vi.mock('@/contexts/ProjectContext', () => ({
   }),
 }))
 
-const spawnSession = vi.fn()
-vi.mock('@/features/cc-bridge/api', () => ({
-  spawnSession,
-}))
-
-const toast = vi.fn()
-const toastError = vi.fn()
-const toastInfo = vi.fn()
-const toastSuccess = vi.fn()
-vi.mock('sonner', () => ({
-  toast: Object.assign(toast, {
-    error: toastError,
-    info: toastInfo,
-    success: toastSuccess,
-  }),
-  Toaster: () => null,
-}))
-
 const { ProjectsPage } = await import('./ProjectsPage')
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-  navigate.mockClear()
-  spawnSession.mockReset()
-  toast.mockReset()
-  toastError.mockReset()
-  toastInfo.mockReset()
-  toastSuccess.mockReset()
 })
 
 function renderPage() {
@@ -81,59 +45,30 @@ function renderPage() {
   )
 }
 
-describe('ProjectsPage "Start new app" button', () => {
-  it('renders the Start new app button', () => {
+describe('ProjectsPage', () => {
+  it('lists the tracked projects', () => {
     renderPage()
-    expect(
-      screen.getByRole('button', { name: /start new app/i }),
-    ).toBeInTheDocument()
+    expect(screen.getByText('Tracked Projects')).toBeInTheDocument()
+    expect(screen.getByText('1 project tracked')).toBeInTheDocument()
   })
 
-  it('spawns a /new-app session in the meta project directory on click', async () => {
-    spawnSession.mockResolvedValueOnce({
-      session_name: 'cockpit-abc',
-      tmux_target: 'cockpit-abc:0.0',
-      worktree_name: null,
-      worktree_name_adjusted: false,
-    })
-
+  it('offers the two surviving entry points: Add Folder and Discover', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: /start new app/i }))
-
-    await waitFor(() => expect(spawnSession).toHaveBeenCalledTimes(1))
-    expect(spawnSession).toHaveBeenCalledWith({
-      cli: 'claude-code',
-      directory: '/home/vdvgu/claude-cockpit',
-      mode: 'plain',
-      prompt: '/new-app',
-    })
+    expect(screen.getByRole('button', { name: /add folder/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /discover projects/i })).toBeInTheDocument()
   })
 
-  it('navigates to the spawned session after a successful spawn', async () => {
-    spawnSession.mockResolvedValueOnce({
-      session_name: 'cockpit-abc',
-      tmux_target: 'cockpit-abc:0.0',
-      worktree_name: null,
-      worktree_name_adjusted: false,
-    })
-
+  // Regression guard for the cleanup in docs/cockpit/kern-terugbrengen-plan.md
+  // §4 fase 6. Both blocks were removed on request; these negative assertions
+  // are what keeps them from drifting back in unnoticed.
+  it('does not render the spec-driven "start new app" block', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: /start new app/i }))
-
-    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1))
-    // /home/vdvgu/claude-cockpit → -home-vdvgu-claude-cockpit (slashes + dots → '-')
-    expect(navigate).toHaveBeenCalledWith(
-      '/sessions/-home-vdvgu-claude-cockpit/cockpit-abc',
-    )
+    expect(screen.queryByRole('button', { name: /start new app/i })).toBeNull()
+    expect(screen.queryByText(/spec-driven/i)).toBeNull()
   })
 
-  it('shows a toast error when the spawn fails', async () => {
-    spawnSession.mockRejectedValueOnce(new Error('boom: directory missing'))
-
+  it('does not render the "Wacht op jou" queue', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: /start new app/i }))
-
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(toastError).toHaveBeenCalledWith('boom: directory missing')
+    expect(screen.queryByText(/wacht op jou/i)).toBeNull()
   })
 })
