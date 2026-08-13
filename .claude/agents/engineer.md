@@ -456,8 +456,14 @@ bestanden.
   `.claude/worktrees/<branch>/`-voorvoegsel heeft — dat is de gedeelde
   checkout waar `master` staat en waar andere sessies live aan werken.
 
-Een write daarheen "slaagt" zonder foutmelding (de file bestaat, je hebt
-schrijfrechten), maar landt op andermans werk. **Lees** vanuit de
+Sinds 2026-08-13 weigert de `PreToolUse`-guard
+`.claude/hooks/worktree-write-guard.py` zo'n schrijfactie met een `Write` /
+`Edit` / `MultiEdit` / `NotebookEdit`; je krijgt dan een melding die naar het
+worktree-pad wijst. **Een shell-omleiding is níét gedekt** — een `echo X >
+/home/vdvgu/claude-cockpit/...` of een `git -C` naar de hoofd-checkout landt
+nog steeds zonder foutmelding op andermans werk. Zie
+[`docs/cockpit/worktree-isolatie-meting.md`](../../docs/cockpit/worktree-isolatie-meting.md)
+§5-§6. **Lees** vanuit de
 hoofd-checkout is prima — alleen schrijven is verboden. Als je per ongeluk
  tóch een pad naar de hoofd-checkout moet aanraken (bv. om een doc te
 lezen die nog niet in je worktree staat), doe dat uitsluitend met `Read`,
