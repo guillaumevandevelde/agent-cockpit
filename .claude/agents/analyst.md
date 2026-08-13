@@ -493,7 +493,12 @@ sessie.
   `/home/vdvgu/claude-cockpit/.claude/worktrees/<jouw-branch>/`.
 - **Schrijf-FOUT:** absolute paden naar `/home/vdvgu/claude-cockpit/...`
   *buiten* `.claude/worktrees/<jouw-branch>/` — dat is de hoofd-checkout.
-  Een write daar landt op iemand anders z'n werk zonder foutmelding.
+  Sinds 2026-08-13 weigert de `PreToolUse`-guard
+  `.claude/hooks/worktree-write-guard.py` die poging met een melding die naar
+  het worktree-pad wijst. Een **shell-omleiding** is niet gedekt en landt nog
+  steeds zonder foutmelding op andermans werk — zie
+  [`docs/cockpit/worktree-isolatie-meting.md`](../../docs/cockpit/worktree-isolatie-meting.md)
+  §5-§6.
 - **Lees** vanuit de hoofd-checkout is prima — alleen `Write` / `Edit` /
   `MultiEdit` / `NotebookEdit` zijn gevaarlijk.
 - Idem voor shell: geen `cd /home/vdvgu/claude-cockpit/...` in een
