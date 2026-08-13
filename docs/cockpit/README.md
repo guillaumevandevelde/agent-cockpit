@@ -121,7 +121,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Product-inceptie: van gesprek naar spec + plan die een project seedt](./product-inceptie-pipeline.md) | 🟢 active |
 | [Recipe-writing conventions — auto-recovery hoort in dezelfde if-tak](./recipe-writing-conventions.md) | 🟢 active |
 | [Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo](./repo-provisioning-bootstrap.md) | 🟢 active |
-| [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md) | 🟢 active |
+| [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md) | ⚪ superseded |
 | [Sandcastle Integration](./sandcastle.md) | 🟢 active |
 | [Skill Stats — per-project skill-gebruik](./skill-stats.md) | 🟢 active |
 | [Structured events / `headless_run` — ACP-isomorf event-schema](./structured-events-schema.md) | 🟢 active |
@@ -129,17 +129,17 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Taalgebruik — schrijfconventie voor alle tekst in dit project](./taalgebruik-conventies.md) | 🟢 active |
 | [Terminology — canonieke woordenlijst](./terminology.md) | 🟢 active |
 | [Test-doubles convention — patch where the consumer looks](./test-doubles-convention.md) | 🟢 active |
-| [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md) | 🟢 active |
+| [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md) | ⚪ superseded |
 
 ### Spec (7)
 
 | Document | Status |
 |---|---|
-| [Agent Mail — upstream sync (adapted port)](./agent-mail-spec.md) | 🟢 active |
+| [Agent Mail — upstream sync (adapted port)](./agent-mail-spec.md) | ⚪ superseded |
 | [Fase 2 — Spec: Scheduled messages](./fase-2-spec.md) | ⚪ superseded |
 | [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md) | 🟢 active |
 | [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md) | 🟢 active |
-| [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md) | 🟢 active |
+| [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md) | ⚪ superseded |
 | [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md) | 🟢 active |
 | [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md) | 🟢 active |
 
@@ -150,7 +150,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md) | ⚪ superseded |
 | [Kanban Implementation Plan](./kanban-plan.md) | 🟢 active |
 | [Kern terugbrengen — vijf features verwijderen, Usage repareren](./kern-terugbrengen-plan.md) | 🟢 active |
-| [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md) | 🟢 active |
+| [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md) | ⚪ superseded |
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
@@ -190,7 +190,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md) | 🔵 decided |
 | [Beslissing — één tijd-trigger: de klok maakt de kaart, de kaart is het werk](./scheduled-trigger-consolidatie-decision.md) | 🔵 decided |
 | [Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic](./schema-migrations-decision.md) | 🔵 decided |
-| [Code-scanning triage — dreigingsmodel, regelgroep-disposities, advanced setup](./security-scanning-decision.md) | 🔵 decided |
+| [Code-scanning triage — dreigingsmodel, regelgroep-disposities, advanced setup](./security-scanning-decision.md) | ⚪ superseded |
 | [Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)](./spec-driven-development-fase-0-decision.md) | 🔵 decided |
 | [Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR](./spike-claude-code-model-switching.md) | 🔵 decided |
 | [Spike: declaratieve multi-agent workflow-orchestratie — ADR](./spike-declarative-workflow-orchestration.md) | 🔵 decided |
@@ -199,10 +199,10 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument](./sync-vs-async-delegation-decision.md) | 🔵 decided |
 | [Token-saving mechanismen (RTK / Headroom / Caveman / Ponytail) — analyse & beslissing](./token-saver-mechanismen-decision.md) | 🔵 decided |
 | [Token-saver meet-harnas — ontwerp, proxy, en eerste counterbalanced meting](./token-saver-meet-harnas.md) | 🔵 decided |
-| ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md) | 🔵 decided |
+| ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md) | ⚪ superseded |
 | [Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing](./upstream-agent-teams-decision.md) | 🔵 decided |
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
-| [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
+| [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | ⚪ superseded |
 
 ### Analysis (36)
 
@@ -229,7 +229,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Orchestration-flow — is onze flow robuust genoeg? — analyse](./orchestration-flow-analysis.md) | 🟢 active |
 | [Cockpit als app-fabriek: consolidatie van vier facet-analyses](./platform-als-app-factory.md) | 🟢 active |
 | [Portfolio-orchestratie: meerdere product-apps beheren naast het meta-platform](./portfolio-orchestratie.md) | 🟢 active |
-| [Portfolio ↔ security overdracht — drie open vragen voor facet D](./portfolio-security-handoff.md) | 🟡 proposed |
+| [Portfolio ↔ security overdracht — drie open vragen voor facet D](./portfolio-security-handoff.md) | ⚪ superseded |
 | [Analyse — Volgbaarheid van het project voor de product owner](./product-owner-volgbaarheid-analyse.md) | 🟢 active |
 | [Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel](./recurring-cadence-proposal.md) | 🟡 proposed |
 | [Analyse — Resume auto-dispatch niet werkend (kaart 8489ff9b): wat er al staat en welk stukje ontbreekt](./resume-auto-dispatch-analyse.md) | 🟢 active |

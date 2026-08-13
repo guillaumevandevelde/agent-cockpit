@@ -286,19 +286,22 @@ log "backend healthy; same-origin UI at http://127.0.0.1:$PORT/"
 # ----------------------------------------------------------------------------
 # Step 5.5: POST demo-state.jsonl to the backend.
 #
-# `seed-demo-home.py` writes `$THROWAWAY_HOME/demo-state.jsonl` with three
-# kinds of entries — kanban cards, presence events, scheduled messages —
-# each shaped to match the matching Pydantic Create schema so we can
-# forward the payload verbatim. Without this step the kanban /
-# presence / scheduled-messages screenshots would be blank (the backend
+# `seed-demo-home.py` writes `$THROWAWAY_HOME/demo-state.jsonl` with two
+# kinds of entries — kanban cards and scheduled messages — each shaped to
+# match the matching Pydantic Create schema so we can forward the payload
+# verbatim. Without this step the kanban / scheduled-messages
+# screenshots would be blank (the backend
 # creates its DB schema on first launch but starts empty). The previous
 # ad-hoc flow (commit f2b2153 + kaart 35d372a0) did this seeding by hand;
 # this step folds it into the harness.
 #
 # Per-kind endpoint table:
 #   kanban_card       → POST /api/v1/kanban/cards
-#   presence_event    → POST /api/v1/presence/events
 #   scheduled_message → POST /api/v1/scheduled-messages
+#
+# ``presence_event`` entries are skipped by the ``*)`` branch below: the
+# Presence feature was removed on 2026-08-13. Old demo-state files that
+# still contain them stay harmless.
 #
 # A failed POST is logged but NOT fatal — the resulting screenshot will
 # still be captured (just less populated). Hard-failing here would make
@@ -316,8 +319,6 @@ if [ -f "$DEMO_STATE" ]; then
         case "$kind" in
             kanban_card)
                 endpoint="/api/v1/kanban/cards" ;;
-            presence_event)
-                endpoint="/api/v1/presence/events" ;;
             scheduled_message)
                 endpoint="/api/v1/scheduled-messages" ;;
             *)
@@ -371,10 +372,7 @@ const ROUTES = [
   ['portfolio',          '/portfolio',           'portfolio.png'],
   ['agent-performance',  '/agent-performance',   'agent-performance.png'],
   ['agent-bridge',       '/agent-bridge',        'cc-bridge.png'],
-  ['presence',           '/presence',            'presence.png'],
-  ['agent-mail',         '/agent-mail',          'agent-mail.png'],
   ['scheduled-messages', '/scheduled-messages',  'scheduled-messages.png'],
-  ['security',           '/security',            'security.png'],
   ['blueprints',         '/blueprints',          'blueprints.png'],
   ['usage',              '/usage',               'usage-tracking.png'],
   ['context',            '/context',             'context.png'],

@@ -29,7 +29,7 @@
 - [Product-inceptie: van gesprek naar spec + plan die een project seedt](./product-inceptie-pipeline.md): type=reference status=active
 - [Recipe-writing conventions — auto-recovery hoort in dezelfde if-tak](./recipe-writing-conventions.md): type=reference status=active
 - [Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo](./repo-provisioning-bootstrap.md): type=reference status=active
-- [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md): type=reference status=active
+- [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md): type=reference status=superseded
 - [Sandcastle Integration](./sandcastle.md): type=reference status=active
 - [Skill Stats — per-project skill-gebruik](./skill-stats.md): type=reference status=active
 - [Structured events / `headless_run` — ACP-isomorf event-schema](./structured-events-schema.md): type=reference status=active
@@ -37,15 +37,15 @@
 - [Taalgebruik — schrijfconventie voor alle tekst in dit project](./taalgebruik-conventies.md): type=reference status=active
 - [Terminology — canonieke woordenlijst](./terminology.md): type=reference status=active
 - [Test-doubles convention — patch where the consumer looks](./test-doubles-convention.md): type=reference status=active
-- [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md): type=reference status=active
+- [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md): type=reference status=superseded
 
 ## Spec
 
-- [Agent Mail — upstream sync (adapted port)](./agent-mail-spec.md): type=spec status=active
+- [Agent Mail — upstream sync (adapted port)](./agent-mail-spec.md): type=spec status=superseded
 - [Fase 2 — Spec: Scheduled messages](./fase-2-spec.md): type=spec status=superseded
 - [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md): type=spec status=active
 - [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md): type=spec status=active
-- [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md): type=spec status=active
+- [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md): type=spec status=superseded
 - [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md): type=spec status=active
 - [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md): type=spec status=active
 
@@ -54,7 +54,7 @@
 - [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md): type=plan status=superseded
 - [Kanban Implementation Plan](./kanban-plan.md): type=plan status=active
 - [Kern terugbrengen — vijf features verwijderen, Usage repareren](./kern-terugbrengen-plan.md): type=plan status=active
-- [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md): type=plan status=active
+- [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md): type=plan status=superseded
 - [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md): type=plan status=active
 - [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md): type=plan status=active
 
@@ -92,7 +92,7 @@
 - [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md): type=decision status=decided
 - [Beslissing — één tijd-trigger: de klok maakt de kaart, de kaart is het werk](./scheduled-trigger-consolidatie-decision.md): type=decision status=decided
 - [Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic](./schema-migrations-decision.md): type=decision status=decided
-- [Code-scanning triage — dreigingsmodel, regelgroep-disposities, advanced setup](./security-scanning-decision.md): type=decision status=decided
+- [Code-scanning triage — dreigingsmodel, regelgroep-disposities, advanced setup](./security-scanning-decision.md): type=decision status=superseded
 - [Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)](./spec-driven-development-fase-0-decision.md): type=decision status=decided
 - [Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR](./spike-claude-code-model-switching.md): type=decision status=decided
 - [Spike: declaratieve multi-agent workflow-orchestratie — ADR](./spike-declarative-workflow-orchestration.md): type=decision status=decided
@@ -101,10 +101,10 @@
 - [Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument](./sync-vs-async-delegation-decision.md): type=decision status=decided
 - [Token-saving mechanismen (RTK / Headroom / Caveman / Ponytail) — analyse & beslissing](./token-saver-mechanismen-decision.md): type=decision status=decided
 - [Token-saver meet-harnas — ontwerp, proxy, en eerste counterbalanced meting](./token-saver-meet-harnas.md): type=decision status=decided
-- ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md): type=decision status=decided
+- ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md): type=decision status=superseded
 - [Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing](./upstream-agent-teams-decision.md): type=decision status=decided
 - [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md): type=decision status=decided
-- [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md): type=decision status=decided
+- [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md): type=decision status=superseded
 
 ## Analysis
 
@@ -129,7 +129,7 @@
 - [Orchestration-flow — is onze flow robuust genoeg? — analyse](./orchestration-flow-analysis.md): type=analysis status=active
 - [Cockpit als app-fabriek: consolidatie van vier facet-analyses](./platform-als-app-factory.md): type=analysis status=active
 - [Portfolio-orchestratie: meerdere product-apps beheren naast het meta-platform](./portfolio-orchestratie.md): type=analysis status=active
-- [Portfolio ↔ security overdracht — drie open vragen voor facet D](./portfolio-security-handoff.md): type=analysis status=proposed
+- [Portfolio ↔ security overdracht — drie open vragen voor facet D](./portfolio-security-handoff.md): type=analysis status=superseded
 - [Analyse — Volgbaarheid van het project voor de product owner](./product-owner-volgbaarheid-analyse.md): type=analysis status=active
 - [Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel](./recurring-cadence-proposal.md): type=analysis status=proposed
 - [Analyse — Resume auto-dispatch niet werkend (kaart 8489ff9b): wat er al staat en welk stukje ontbreekt](./resume-auto-dispatch-analyse.md): type=analysis status=active

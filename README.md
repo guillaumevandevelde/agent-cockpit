@@ -11,14 +11,14 @@
 
 A self-hosted web application for running and managing local AI coding agents. Two things live in one app:
 
-1. **An agent work loop.** A kanban board where cards are dispatched to real agent sessions — the dispatcher claims a card, spawns an agent in its own git worktree, and the card moves across the board as the agent works, hands off, gets blocked, or ships. Larger cards can be split by an analyst agent into child cards with a dependency graph, and sessions can message each other through Agent Mail.
+1. **An agent work loop.** A kanban board where cards are dispatched to real agent sessions — the dispatcher claims a card, spawns an agent in its own git worktree, and the card moves across the board as the agent works, hands off, gets blocked, or ships. Larger cards can be split by an analyst agent into child cards with a dependency graph.
 2. **A control panel for the agent CLIs themselves.** Configuration, MCP servers, plugins, slash commands, hooks, agents, skills, permissions, transcripts, usage and backups for Claude Code, Codex CLI, OpenCode, GitHub Copilot CLI and MiMoCode — reading and writing the same files those CLIs use.
 
 Everything runs on your machine, against your real config files. No account, no cloud, no telemetry.
 
 ## Credits — Forked from claude-deck
 
-Agent Cockpit is a fork of [**claude-deck**](https://github.com/adrirubio/claude-deck) by Adrian Rubio-Punal and Juan A. Rubio, used under the MIT License. Their original copyright and license are retained in [`LICENSE`](./LICENSE). claude-deck contributed the configuration, MCP, sessions, usage and Agent Bridge surfaces; Agent Cockpit adds the kanban dispatch loop, multi-agent decomposition, Agent Mail, scheduled messages, sandboxed runs, and the multi-CLI provider layer on top.
+Agent Cockpit is a fork of [**claude-deck**](https://github.com/adrirubio/claude-deck) by Adrian Rubio-Punal and Juan A. Rubio, used under the MIT License. Their original copyright and license are retained in [`LICENSE`](./LICENSE). claude-deck contributed the configuration, MCP, sessions, usage and Agent Bridge surfaces; Agent Cockpit adds the kanban dispatch loop, multi-agent decomposition, scheduled messages, sandboxed runs, and the multi-CLI provider layer on top.
 
 ## Why This Exists
 
@@ -50,20 +50,16 @@ If you use one agent casually with mostly default config, Agent Cockpit is overk
 
 - **Kanban** — The board that drives the work loop. It has a fixed set of columns — `Backlog`, `Impediment`, `Awaiting Subtasks`, `Done` and `To Resume` — plus one column per agent, generated from the project's `.claude/agents/`. Auto-dispatch is opt-in per project: the poller claims a `Backlog` card, moves it into the target agent's column, and spawns that agent in a fresh git worktree. A card carries its own comments, deliverables (PR / branch / commit / link / note), labels, priority, work type, dependencies on other cards, and per-card model, provider or transport overrides. A blocked agent posts an impediment with a concrete question and candidate answers for a human to pick from.
 - **Multi-agent decomposition** — A card that is too big for one session goes to an analyst agent, which splits it into child cards with an explicit dependency DAG and attaches the plan. Executor sessions only start once their dependencies are `Done`.
-- **Agent Mail** — A mailbox between sessions. Each repository gets a durable identity; sessions send structured context requests, handoffs, broadcasts and answers, and a session that is asleep in tmux can be woken to read its inbox. The UI shows participants, roles, charters, inbox load and every pending request.
 - **Agent Bridge** — Discover and observe agent sessions running in tmux, per CLI. Attach up to 4 terminals at once in a 2x2 grid, each independently read-only or interactive, with fullscreen, per-pane controls, and spawn / resume / fork / kill from the UI.
-- **Presence** — A live feed of what each session is doing right now, fed by the agent CLI's hooks: current tool, last narrative line, changed files, and which sessions are waiting on your input.
 - **Scheduled Messages** — Queue a message for future delivery into a running (or resumable) session, as a one-shot timer or a recurring cron expression, with a choice of permission mode and what to do when the session is missing or busy. Includes auto-resume when a session hits its rate limit.
 - **Sandcastle** — Run agents in isolated Docker or Podman containers via [sandcastle](https://github.com/mattpocock/sandcastle), with parallel runs, kanban integration and live log streaming.
-- **Hosts** — Register remote machines over SSH and run agent sessions on them instead of locally.
 
 ### Overview and control
 
 - **Dashboard** — Which agent CLIs are installed on this machine and what each one actually supports, as a per-capability matrix (read-only vs read/write), plus counts for projects, MCP servers, commands, plugins, hooks and permissions.
 - **Portfolio** — Kanban totals across every tracked project at once: backlog, in progress, impediments, cards finished in the last 24h, dispatch on/off, and last activity.
 - **Agent Performance** — Time per task, success rate, tasks completed per agent and common failure reasons, derived from the kanban operation log.
-- **Security Profile** — Per project: risk class, default transport (worktree or sandbox), whether permission prompts may be skipped, network egress policy with an allowlist, and resource quotas applied to sandboxed runs.
-- **Subscriptions** — Credentials and quota for launching sessions against alternate providers instead of the default vendor, with per-provider usage.
+- **Subscriptions** — Credentials for launching sessions against alternate providers instead of the default vendor, plus the tokens each subscription consumed in the current rate window.
 - **Projects** — Discover, add and switch projects, including a directory browser; the active project scopes most other pages.
 - **Blueprints** — Version-pinned recipes that seed a new project's `.claude/` folder (settings, skills, agents, `CLAUDE.md`) so a new repository starts from a known-good baseline.
 - **MCP Server** — Agent Cockpit's own MCP endpoint, so agents can read and drive the board, sessions and scheduled messages as tools. Includes the client config snippet and token management.
@@ -116,20 +112,15 @@ All screenshots are taken against a throwaway instance seeded with demo data (`e
 | ![Portfolio](screenshots/portfolio.png) | ![Agent Performance](screenshots/agent-performance.png) |
 | Board totals across every tracked project at a glance | Throughput, success rate and time per task per agent |
 
-| Agent Bridge | Presence |
-|--------------|----------|
-| ![Agent Bridge](screenshots/cc-bridge.png) | ![Presence](screenshots/presence.png) |
-| Attach to a live tmux session, read-only or interactive | What each session is doing right now, and which ones are waiting on you |
+| Agent Bridge | Scheduled Messages |
+|--------------|--------------------|
+| ![Agent Bridge](screenshots/cc-bridge.png) | ![Scheduled Messages](screenshots/scheduled-messages.png) |
+| Attach to a live tmux session, read-only or interactive | Timer and cron messages queued for delivery into a session |
 
-| Agent Mail | Scheduled Messages |
-|------------|--------------------|
-| ![Agent Mail](screenshots/agent-mail.png) | ![Scheduled Messages](screenshots/scheduled-messages.png) |
-| Context requests and handoffs between sessions | Timer and cron messages queued for delivery into a session |
-
-| Security Profile | Blueprints |
-|------------------|------------|
-| ![Security Profile](screenshots/security.png) | ![Blueprints](screenshots/blueprints.png) |
-| Risk class, transport, egress policy and quotas per project | Version-pinned recipes that seed a new project's `.claude/` |
+| Blueprints | |
+|------------|--|
+| ![Blueprints](screenshots/blueprints.png) | |
+| Version-pinned recipes that seed a new project's `.claude/` | |
 
 | Usage Tracking | Context |
 |----------------|---------|
@@ -179,7 +170,7 @@ This builds and starts Agent Cockpit at http://localhost:8000, mounting your `~/
 
 ## Manual Installation
 
-**Prerequisites**: Python 3.11+, Node.js 18+. tmux is required for Agent Bridge, Presence, scheduled messages and kanban dispatch.
+**Prerequisites**: Python 3.11+, Node.js 18+. tmux is required for Agent Bridge, scheduled messages and kanban dispatch.
 
 ```bash
 git clone git@github.com:guillaumevandevelde/claude-cockpit.git

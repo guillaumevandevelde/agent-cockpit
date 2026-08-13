@@ -18,8 +18,6 @@ Dit is een **fork** van claude-deck, hernoemd naar **Agent Cockpit**. Het zwaart
   resolutiepad. Controleer SecretStore-namen read-only met
   `GET /api/v1/secrets/?project_key=<project-key>`; de response bevat namen,
   nooit waarden. Zie §3c van `docs/cockpit/kanban-conventions.md`.
-- **Agent Mail** — cross-session berichten tussen willekeurige sessies met durable
-  repo-identiteit en inspectable mailbox (`docs/cockpit/agent-mail-spec.md`).
 - **Taalgebruik** — élke tekst die een mens leest volgt één norm: docs,
   `CLAUDE.md`, persona's, skills, kaarttitels en Done-samenvattingen. De norm:
   conclusie eerst, maximaal 40 woorden per zin, diepte achter een verwijzing die
@@ -49,7 +47,7 @@ Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur 
 Het is de controlekamer waarin autonome agents een *software factory* aansturen.
 Op die lopende band doen agents twee dingen: (1) externe applicaties bouwen en
 beheren — de primaire bestaansreden — en (2) deze codebase continu verbeteren. De cockpit levert de
-factory-vloer (kanban-dispatch, multi-agent-decompositie, worktrees, agent mail,
+factory-vloer (kanban-dispatch, multi-agent-decompositie, worktrees,
 dependency-DAG, session-lifecycle) én het beheer-/observatiepaneel eromheen. De
 orchestratie-kern is agent- en repo-onafhankelijk ontworpen, zodat dezelfde software
 factory elke agent-runtime en elk doel-repo kan aandrijven. Volledige missietekst,
@@ -252,7 +250,7 @@ Done-kaart `d9447e49`).
 - Backups stored at `~/.claude-registry/backups/` (naast de kanban-DB; bewust portable gehouden)
 - `rm` is blocked via `.claude/settings.json` (`Bash(rm:*)` deny) — use `mv` to move unwanted files outside the repo, or `git clean -f -- <path>` for untracked files, instead
 - **Gebruik `pkill -f`/`pgrep -f` niet in een gedispatchte sessie — je raakt de sessie van een collega-agent.** Sinds Claude Code 2.1.214 weigert `pkill` de eigen CLI (geverifieerd op lokale CLI 2.1.221). Het blijvende risico zit in andermans sessie: de dispatcher zet de hele prompt in de cmdline (`backend/app/services/agentic_cli/claude_code.py:82-83`), dus een `-f`-patroon matcht veel breder dan je denkt.
-- Veilige alternatieven + de patronen die op deze box vaak fout gaan staan in [`docs/cockpit/pkill-safety.md`](./docs/cockpit/pkill-safety.md); ook [`docs/cockpit/updates-feature-decision.md:88`](./docs/cockpit/updates-feature-decision.md) blijft riskant op `pkill -f uvicorn`-vorm.
+- Veilige alternatieven + de patronen die op deze box vaak fout gaan staan in [`docs/cockpit/pkill-safety.md`](./docs/cockpit/pkill-safety.md).
 - **Pas nooit een stash toe die je niet zelf maakte — gebruik de baseline-scripts.** `git stash list` is per worktree, niet per sessie, dus `stash@{0}` kan van een sessie van uren geleden zijn. Toepassen geeft conflicten, en een `git reset --hard` om die apply af te breken wist je eigen ongecommitte bestanden — in één sessie 7 stuks (kaart `31c30dbb…`). Welke stash van wie is, en welke drie baseline-scriptparen de vraag zonder stash beantwoorden: [`docs/cockpit/git-stash-safety.md`](./docs/cockpit/git-stash-safety.md).
 - **Backend log timestamps zijn UTC ISO 8601** (`"2026-07-14T08:49:10.867Z"`, `Z`-suffix). Kanban-DB `created_at`/activity-timestamps zijn óók UTC, dus een log-dive vanaf een kaart-timestamp kan direct gedaan worden zonder `+2u`-correctie. Logs van vóór 2026-07-14 (`logs/backend/run-*.log` met prefix-datum) zijn nog in lokale CEST (`09:49:10` = UTC `07:49:10`); check de datum in de bestandsnaam om de era te bepalen.
 - **Kanban-router: een vastgehouden `service.get_card`-pre-check vergiftigt de post-commit `_reload`.** `service.get_card` doet `selectinload(deliverables, attachments)` en de sessie draait met `expire_on_commit=False`. Een loader-optie her-populeert géén relationship die al geladen is op een instance in de identity-map (dat vereist `populate_existing()`), dus `_reload` geeft de **pre-mutatie**-collectie terug. Het bijt alleen als *beide* voorwaarden gelden. **Eén:** het pre-check-resultaat is aan een **levende variabele** gebonden. De identity-map houdt weak refs, dus een ongebonden `if await service.get_card(...) is None:` wordt direct opgeruimd en triggert dit níet. **Twee:** de op wijzigt collectie-**membership**, dus een INSERT of DELETE van een deliverable- of attachment-rij. Een ORM-UPDATE van een al geladen rij synchroniseert wél, waardoor `update_plan_attachment` veilig is ondanks zijn gebonden `card`. Schrijf je een handler die een deliverable/attachment toevoegt of verwijdert, doe de existence-check dan met `await s.get(KanbanCard, cid)` (relationships blijven unloaded, zie `upload_attachment`), of `s.expire_all()` na de commit. Volledige uitleg: de `_reload`-docstring in `backend/app/api/v1/kanban/router.py`.

@@ -119,8 +119,11 @@ echo "Task 6: route list covers every README screenshot"
 # The route list may live as a bash array, a JSON map, or a Playwright test
 # file — be liberal in what we accept: grep for the route paths under the
 # relevant fixture filenames.
-for png in dashboard kanban portfolio agent-performance cc-bridge presence \
-           agent-mail scheduled-messages security blueprints usage-tracking \
+# Presence, Agent Mail and the Security Profile page were removed on
+# 2026-08-13 (docs/cockpit/kern-terugbrengen-plan.md); their routes are
+# deliberately absent from the list below.
+for png in dashboard kanban portfolio agent-performance cc-bridge \
+           scheduled-messages blueprints usage-tracking \
            context sessions mcp-servers config skills; do
     check "route list includes $png.png" \
         "echo \"\$src\" | grep -qE \"${png}\\.(png|/)\""
@@ -234,7 +237,7 @@ check "hero dark PNG emitted at repo root" \
 # ----------------------------------------------------------------------------
 echo
 echo "Task 11: demo-state POST loop — wrapper consumes demo-state.jsonl"
-# Without this step the kanban / presence / scheduled-messages
+# Without this step the kanban / scheduled-messages
 # screenshots would be blank (the previous ad-hoc flow did this
 # seeding by hand; commits f2b2153 + kaart 35d372a0 both shipped demo
 # data alongside the PNGs).
@@ -242,8 +245,6 @@ check "wrapper references demo-state.jsonl" \
     'echo "$src" | grep -qF "demo-state.jsonl"'
 check "wrapper POSTs to /api/v1/kanban/cards" \
     'echo "$src" | grep -qE "/api/v1/kanban/cards"'
-check "wrapper POSTs to /api/v1/presence/events" \
-    'echo "$src" | grep -qE "/api/v1/presence/events"'
 check "wrapper POSTs to /api/v1/scheduled-messages" \
     'echo "$src" | grep -qE "/api/v1/scheduled-messages"'
 check "wrapper uses curl with -X POST" \
@@ -278,7 +279,10 @@ for line in open(sys.argv[1]):
     except Exception: pass
 print(" ".join(sorted(k for k in seen if k)))
 ' "$seed_check_tmp/out/demo-state.jsonl")"
-        for expected in kanban_card presence_event scheduled_message; do
+        # ``presence_event`` is intentionally not required: Presence was
+        # removed on 2026-08-13. The seed script may still emit those lines
+        # for older fixtures; the wrapper skips them.
+        for expected in kanban_card scheduled_message; do
             check "demo-state.jsonl contains $expected entries" \
                 "printf '%s' \"\$kinds\" | grep -qF \"$expected\""
         done

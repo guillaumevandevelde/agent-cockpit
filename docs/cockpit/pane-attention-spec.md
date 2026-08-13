@@ -1,8 +1,14 @@
 ---
 title: "Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling"
 type: spec
-status: active
+status: superseded
 ---
+
+> **Superseded op 2026-08-13.** De feature die dit document beschrijft is uit
+> Agent Cockpit verwijderd tijdens de opruiming naar de kern. Wat er precies
+> weg is, waarom, en welke gedragsverandering dat opleverde staat in
+> [`kern-terugbrengen-plan.md`](./kern-terugbrengen-plan.md). Dit document
+> blijft staan als beslisspoor; behandel de inhoud niet als huidige toestand.
 
 # Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling
 

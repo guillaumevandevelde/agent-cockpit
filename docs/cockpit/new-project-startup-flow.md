@@ -14,6 +14,11 @@ status: active
 > duidelijk?"*
 >
 > Dit is een **analyse** (modus 2 leaf-deliverable): dit doc is het antwoord.
+>
+> **Noot 2026-08-13.** Het amber CTA-blok op de Projects-pagina, dat als
+> top-level instappunt was toegevoegd, is op verzoek van de PO verwijderd
+> tijdens de opruiming naar de kern. De `/new-app`-skill blijft de voordeur.
+> Zie [`kern-terugbrengen-plan.md`](./kern-terugbrengen-plan.md) fase 6.
 > De concrete resterende gaten worden als Backlog-vervolgkaarten gefileerd
 > (outcome `decomposed`), niet door dit doc geïmplementeerd.
 

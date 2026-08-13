@@ -46,7 +46,7 @@ terug op de standaard — gelijk aan hoe `set_enabled` werkt.
 ## Resolutie-volgorde
 
 `schedule_resume(cwd, reset_time, tz_name, message=…)` (in
-[`backend/app/services/scheduling/auto_resume.py`](../backend/app/services/scheduling/auto_resume.py))
+[`backend/app/services/scheduling/auto_resume.py`](../../backend/app/services/scheduling/auto_resume.py))
 kiest de tekst in deze volgorde:
 
 1. Expliciete `message`-parameter — blijft de override-route voor
