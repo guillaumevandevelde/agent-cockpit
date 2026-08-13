@@ -1,8 +1,14 @@
 """Plugin install / uninstall / toggle operations."""
+import hashlib
+import io
 import json
 import logging
+import re
 import shutil
+import zipfile
 from pathlib import Path
+
+import httpx
 
 from ..models.schemas import (
     Plugin,
@@ -11,11 +17,22 @@ from ..models.schemas import (
     PluginToggleResponse,
 )
 from ..utils.file_utils import read_json_file, write_json_file
-from ..utils.path_utils import get_claude_user_plugins_dir, get_claude_user_settings_file
+from ..utils.path_utils import (
+    get_claude_user_plugins_dir,
+    get_claude_user_settings_file,
+)
 from .cli_executor import CLIExecutor
 from .plugin_descriptions import get_plugin_info
 
 logger = logging.getLogger(__name__)
+
+# Parses `name@archive://https://host/path.zip[?sha256=<64-hex>]`.
+# URL must be https (archive:// over plaintext breaks the supply-chain
+# guarantee pinning is meant to provide). sha256, when present, must be
+# exactly 64 lowercase/uppercase hex chars.
+_ARCHIVE_SOURCE_RE = re.compile(
+    r"^(?P<name>[^@]+)@archive://(?P<url>https://[^\s?]+)(?:\?sha256=(?P<sha256>[0-9a-fA-F]{64}))?$"
+)
 
 
 class PluginInstaller:
@@ -69,15 +86,33 @@ class PluginInstaller:
         """
         Install a plugin using the Claude CLI.
 
+        For `name@archive://https://...zip[?sha256=<hex>]` references
+        (CC 2.1.224 archive source), downloads the zip, verifies sha256
+        when pinned, extracts into the user plugin dir, and registers
+        the verbatim archive URL as the source. All other inputs fall
+        through to the existing CLI install path unchanged.
+
         Args:
             request: Plugin installation request
 
         Returns:
             PluginInstallResponse with installation result
         """
+        logger.info("Installing plugin", extra={"plugin": request.name})
+
+        # Archive-source path (CC 2.1.224). Run before the CLI branch
+        # so the verifier owns the supply-chain check; the CLI branch
+        # is the legacy marketplace route.
+        archive = self._parse_archive_source(request.name)
+        if archive is not None:
+            return self._install_from_archive(
+                plugin_name=archive["plugin_name"],
+                url=archive["url"],
+                sha256=archive["sha256"],
+            )
+
         # For now, we'll use a simple install command
         # In the future, this could use marketplace-specific install commands
-        logger.info("Installing plugin", extra={"plugin": request.name})
         try:
             # Configure git to use HTTPS instead of SSH for GitHub
             # This allows cloning public repos without SSH keys
@@ -119,6 +154,182 @@ class PluginInstaller:
                 stdout="",
                 stderr=str(e),
             )
+
+    def _parse_archive_source(self, name: str) -> dict | None:
+        """Parse ``name@archive://https://...zip[?sha256=<hex>]`` into parts.
+
+        Returns ``None`` when ``name`` doesn't carry the archive scheme
+        so callers fall through to the existing CLI install path.
+        """
+        match = _ARCHIVE_SOURCE_RE.match(name or "")
+        if not match:
+            return None
+        return {
+            "plugin_name": match.group("name"),
+            "url": match.group("url"),
+            "sha256": match.group("sha256"),  # may be None when no ?sha256
+        }
+
+    def _verify_sha256(self, data: bytes, expected_hex: str) -> bool:
+        """Constant-time-ish compare (hexdigest comparison is short-circuit
+        on first byte diff, but the input is short and we are not protecting
+        a secret — the goal is rejection of wrong-content, not timing
+        side-channels)."""
+        if not isinstance(expected_hex, str) or len(expected_hex) != 64:
+            return False
+        try:
+            int(expected_hex, 16)
+        except ValueError:
+            return False
+        return hashlib.sha256(data).hexdigest() == expected_hex.lower()
+
+    def _install_from_archive(
+        self,
+        plugin_name: str,
+        url: str,
+        sha256: str | None,
+    ) -> PluginInstallResponse:
+        """Download zip, verify, extract, register.
+
+        Idempotent on overwrite: an existing plugin dir is replaced.
+        """
+        try:
+            response = httpx.get(url, follow_redirects=True, timeout=120.0)
+            response.raise_for_status()
+        except Exception as e:
+            logger.warning(
+                "Archive download failed",
+                extra={"plugin": plugin_name, "url": url, "error": str(e)},
+            )
+            return PluginInstallResponse(
+                success=False,
+                message=f"Failed to download archive for '{plugin_name}': {e}",
+                stderr=str(e),
+            )
+
+        payload = response.content
+
+        if sha256 is not None and not self._verify_sha256(payload, sha256):
+            digest = hashlib.sha256(payload).hexdigest()
+            msg = (
+                f"sha256 mismatch for '{plugin_name}': "
+                f"expected {sha256.lower()}, got {digest}"
+            )
+            logger.warning(msg, extra={"plugin": plugin_name, "url": url})
+            return PluginInstallResponse(
+                success=False,
+                message=msg,
+                stderr=msg,
+            )
+
+        plugins_dir = get_claude_user_plugins_dir()
+        plugin_dir = plugins_dir / plugin_name
+        if plugin_dir.exists():
+            shutil.rmtree(plugin_dir)
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+                names = [m.filename for m in zf.infolist() if m.filename]
+                # Strip a common top-level dir (e.g. `archive-foo/...`)
+                # so the manifest lands at plugin_dir/.claude-plugin/plugin.json
+                # rather than plugin_dir/archive-foo/.claude-plugin/plugin.json.
+                # Only strip when every entry is prefixed and stripping leaves
+                # no stray empty top-level name — anything else keeps the
+                # zip's own layout intact.
+                strip_prefix = ""
+                if names and all(n.startswith(plugin_name + "/") for n in names):
+                    strip_prefix = plugin_name + "/"
+
+                plugin_root = plugin_dir.resolve()
+                for member in zf.infolist():
+                    rel = member.filename[len(strip_prefix):] if strip_prefix else member.filename
+                    if not rel:
+                        continue  # the bare top-level dir entry itself
+                    target = (plugin_dir / rel).resolve()
+                    if not str(target).startswith(str(plugin_root) + "/") and target != plugin_root:
+                        raise ValueError(f"archive entry escapes plugin dir: {member.filename}")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if member.is_dir():
+                        continue
+                    with zf.open(member) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+        except Exception as e:
+            logger.exception(
+                "Archive extract failed",
+                extra={"plugin": plugin_name, "url": url, "error": str(e)},
+            )
+            return PluginInstallResponse(
+                success=False,
+                message=f"Failed to extract archive for '{plugin_name}': {e}",
+                stderr=str(e),
+            )
+
+        # Source string preserves the original `archive://` URL verbatim —
+        # including the `?sha256=` query when present — so the registry
+        # can re-parse it back into the same scheme (name@archive://...).
+        source = f"archive://{url}"
+        if sha256 is not None:
+            source = f"{source}?sha256={sha256}"
+
+        plugin_key = f"{plugin_name}@{source}"
+
+        installed_file = plugins_dir / "installed_plugins.json"
+        try:
+            data: dict = {}
+            if installed_file.exists():
+                with open(installed_file) as f:
+                    data = json.load(f) or {}
+            plugins_map = data.setdefault("plugins", {})
+            plugins_map[plugin_key] = [
+                {
+                    "installPath": str(plugin_dir),
+                    "version": "archive",
+                    "isLocal": True,
+                }
+            ]
+            installed_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(installed_file, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.exception(
+                "Failed to update installed_plugins.json",
+                extra={"plugin": plugin_name, "error": str(e)},
+            )
+            return PluginInstallResponse(
+                success=False,
+                message=f"Failed to register '{plugin_name}': {e}",
+                stderr=str(e),
+            )
+
+        # Enable in settings.json so `claude` picks it up next session.
+        settings_file = get_claude_user_settings_file()
+        try:
+            settings_data = read_json_file(settings_file) or {}
+            enabled = settings_data.setdefault("enabledPlugins", {})
+            enabled[plugin_key] = True
+            with open(settings_file, "w") as f:
+                json.dump(settings_data, f, indent=2)
+        except Exception as e:
+            logger.exception(
+                "Failed to update settings.json",
+                extra={"plugin": plugin_name, "error": str(e)},
+            )
+            return PluginInstallResponse(
+                success=False,
+                message=f"Failed to enable '{plugin_name}' in settings: {e}",
+                stderr=str(e),
+            )
+
+        logger.info(
+            "Archive plugin installed",
+            extra={"plugin": plugin_name, "url": url, "sha256": sha256},
+        )
+        return PluginInstallResponse(
+            success=True,
+            message=f"Installed '{plugin_name}' from {source}",
+            stdout=source,
+        )
 
     async def uninstall_plugin(
         self, name: str, project_path: str | None = None
