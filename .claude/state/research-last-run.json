@@ -1,67 +1,54 @@
 {
-  "last_run": "2026-07-28",
-  "previous_run": "2026-07-10",
-  "trigger_card": "210e5042d4584da9ba00579c47d3df68",
-  "successor_card": "d2f3a10de06f4bcc9a0e887a91b789f9",
-  "successor_scheduled_at": "2026-08-03T09:00:00+02:00",
+  "last_run": "2026-08-13",
+  "previous_run": "2026-07-28",
+  "trigger_card": "b8239bb59edf4661a0701f29430f30fd",
+  "successor_card": null,
+  "successor_note": "Deze kaart maakt geen opvolger — de cron-trigger doet dat (kaart-beschrijving, 2026-08-10).",
   "sources_seen": {
-    "claude-task-master (eyaltoledano/claude-task-master)": "No change. Latest release still 0.43.1 (Mar 31); repo `pushed_at` = 2026-04-28, no commits in the window. Effectively dormant — worth deciding next sweep whether it stays on the source list.",
-    "Aperant (AndyMik90/Aperant)": "SOURCE-LIST FIX: the skill table said `Aperant` / \"Auto Claude\" with no owner; `Aperant/Auto-Claude` 404s. Real repo is `AndyMik90/Aperant` (rebranded from Auto-Claude in Mar 2026, 14.5k stars). Public repo `pushed_at` = 2026-06-14, latest release v2.8.0-beta.6 (Mar 23) — nothing in the window. Per web search, 3.0 work sits in a separate private dev repo and will be merged back, so the public repo will look dead until then. Skill table updated with the correct owner.",
-    "claude-deck (adrirubio/claude-deck, fork upstream)": "No change. Zero commits on master since 2026-07-10; latest release still v2.0.1 (Jun 20). Divergence check clean.",
-    "Claude Code changelog (code.claude.com/docs/en/changelog)": "2.1.212 through 2.1.220 — the richest source this window; both filed cards come from it. Also noted but not filed: 2.1.218 `/code-review` now runs as a background subagent and `context: fork` skills default to background; 2.1.216 fixed worktree-isolated subagents redirecting git into the shared checkout via `git -C`/`--git-dir`/`GIT_DIR`; 2.1.214 added the EndConversation tool and fixed hooks with exit code 2 not blocking when their stdout JSON fails schema validation.",
-    "Claude Agent SDK Python (anthropics/claude-agent-sdk-python)": "17 releases in the window (0.2.112 -> 0.2.128). Substantive: 0.2.126 added `terminal_reason` on ResultMessage (completed/max_turns/aborted_streaming/aborted_tools) and typed `model_usage` with `canonicalModel`/`provider`; 0.2.127 fixed premature stdin closure killing SDK-MCP tool calls from background subagents; 0.2.121/0.2.124 hardened argv/flag injection via `resume` and `session_id`. Not filed: Cockpit spawns the CLI directly via subprocess/tmux and does not consume the SDK, so these matter only behind a future SDK-migration decision. Did check our own spawner (`agentic_cli/claude_code.py:67-84`) for the same argv-injection shape — `--resume` takes a store-generated session id and the prompt is a trailing positional, so no live exposure.",
-    "Anthropic API changelog (platform.claude.com/docs/en/release-notes/api)": "Opus 5 launched Jul 24 ($5/$25, 1M context, thinking on by default; disabling thinking now 400s at effort xhigh/max). Fast mode REMOVED for Opus 4.7 on Jul 24 (now errors, no fallback). Mid-conversation tool changes in beta. The rest of the window is Managed Agents surface (webhooks, initial_events, event deltas, effort on agent model config), which Cockpit does not use — it orchestrates CLI sessions, not raw API calls. The Opus 5 half fed the dedupe comment on eb26d1e7.",
-    "LangGraph (langchain-ai/langgraph)": "No change in the window. 1.2.9 (Jul 10) was already head at the previous sweep; nothing newer.",
-    "GitHub topics ai-agent / autonomous-coding / ai-coding-agents": "Still not pulled — the topic pages do not expose repo creation dates, so the '>1k stars, created last 30d' filter is not expressible via WebFetch. Same limitation as the previous sweep. Deferred again; a WebSearch-based discovery step remains the open follow-up on the skill."
+    "claude-task-master (eyaltoledano/claude-task-master)": "No change. Release atom feed head is still task-master-ai@0.43.1 (2026-03-31); the three entries below it are 0.43.0, 0.42.0, 0.41.0 (Feb/Jan). Second consecutive sweep with zero movement — the previous sweep already flagged the repo as effectively dormant. Recommendation for the next sweep: either drop it from the source list or downgrade it to a monthly check, because a weekly pull on a 4.5-month-dormant repo is pure cost.",
+    "Aperant (AndyMik90/Aperant)": "NOT PULLED — tooling blocked. Both `WebFetch` and `curl` are intercepted in this session by the context-mode plugin, which redirects them to `ctx_fetch_and_index` / `ctx_execute`; that MCP server was not connected, so neither surface was reachable. GitHub atom feeds fetched via curl DID work for the two repos above (the interception is per-URL-shape, not blanket), but the Aperant release feed was not retried before the budget ran out. WebSearch returned nothing indexable for the repo either. Previous sweep established the public repo has been quiet since 2026-06-14 with 3.0 work in a separate private repo, so the expected value of this source stays low until that merge lands.",
+    "claude-deck (adrirubio/claude-deck, fork upstream)": "No change. Commit atom feed for master has head 2026-07-04T17:27:38Z — same head as the previous sweep, so zero commits in the 2026-07-28..2026-08-13 window. Divergence check clean.",
+    "Claude Code changelog (code.claude.com/docs/en/changelog)": "2.1.221 through 2.1.228 — again the richest source, and both filed cards come from it. Pulled via `curl` on the raw CHANGELOG.md in anthropics/claude-code (the docs HTML page is 1.3MB of markup; the raw markdown is the cheap surface — worth remembering for the next sweep). Locally installed CLI is 2.1.228, so every entry in the window is live for us.",
+    "Claude Agent SDK Python (anthropics/claude-agent-sdk-python)": "NOT PULLED this sweep. Same rationale as the previous two sweeps' filter-reject: Cockpit spawns the CLI directly via subprocess/tmux and does not consume the SDK, so SDK releases only matter behind a future SDK-migration decision. Deliberately skipped rather than pulled-and-rejected, to keep the sweep cheap.",
+    "Anthropic API changelog (platform.claude.com/docs/en/release-notes/api)": "NOT PULLED directly, but the relevant slice surfaced through the Claude Code changelog: 2.1.227 mentions Sonnet 5 introductory pricing and a Fable usage-credits prompt bug. Pricing-table staleness is already tracked by the existing card the previous sweep commented on (eb26d1e7), so nothing new to file.",
+    "LangGraph (langchain-ai/langgraph)": "Two patch releases in the window: 1.2.10 (2026-07-28) and 1.2.11 (2026-08-07). Still on the 1.2.x line, no 1.3. No new agent-orchestration primitives worth comparing against cc-bridge / agent-bridge — filter-rejected.",
+    "GitHub topics ai-agent / autonomous-coding / ai-coding-agents": "Still not pulled — third consecutive sweep. The topic pages do not expose repo creation dates, so the '>1k stars, created last 30d' filter is not expressible via a page fetch. This is now a standing limitation, not an incident; the open follow-up on the skill remains a WebSearch-based discovery step to replace the unexpressible filter."
   },
   "findings": {
     "filed": [
       {
-        "card_id": "90a6117559fb42d495ab3697362db0ad",
-        "title": "[research] CLAUDE.md `pkill -f`-zelfval-gotcha is deels achterhaald — CC 2.1.214 fixte de zelf-kill, wij draaien 2.1.220",
-        "source": "Claude Code 2.1.214 (Jul 18, 2026)",
-        "scope": "~1-2 files (CLAUDE.md:217, plus a note on docs/cockpit/updates-feature-decision.md:88)",
-        "dedupe_check": "No existing card touches the pkill gotcha. grep over docs/cockpit/*.md + .claude/skills/*/SKILL.md found only references that cite it as still-true (approval-privilege-separation-analyse.md:391, lemma-platform-analyse.md:185, token-saver-mechanismen-decision.md:919) — none flags it as stale.",
-        "note": "Verified `claude --version` = 2.1.220 locally, so the upstream fix is live. Card explicitly says QUALIFY, not delete: only the self-kill is fixed; killing a CONCURRENT dispatched session on this shared box is still possible."
+        "card_id": "b935bd6f7342445aa2899d7f563e317e",
+        "title": "[research] Meet of CC 2.1.222's worktree-isolatie onze dispatch dekt — wij spawnen mode=\"plain\", niet --worktree",
+        "source": "Claude Code 2.1.222 (2026-08-04)",
+        "scope": "1 spike: measure two spawn shapes, write up the result, then either qualify the prose rule or recommend on --worktree mode",
+        "premise_check": "Verified in-repo before filing, so the card does not rest on a changelog reading alone. Dispatch spawns with `directory=worktree_path, mode=\"plain\"` (backend/app/kanban/dispatch.py:4406); the `--worktree` flag is only emitted by the separate worktree mode (backend/app/services/agentic_cli/claude_code.py:100-103), which dispatch does not use.",
+        "dedupe_check": "Backlog held only 2 cards at file time (eb75b599 REST-move bug, 744a09c1 git-stash self-improve); Impediment was empty. Neither touches worktree isolation."
       },
       {
-        "card_id": "4781e971dc00498d9da92b19944407a2",
-        "title": "[research] Detecteer een stil overgeslagen `--mcp-config` bij spawn via `mcp_server_errors` (CC 2.1.219)",
-        "source": "Claude Code 2.1.219 (Jul 24, 2026)",
-        "scope": "~2-3 files (headless stream-json spawn path in dispatch.py + 1 test)",
-        "dedupe_check": "grep -rn 'mcp_server_errors|MCP.*startup' backend/app/kanban/dispatch.py => no hits; no detection exists today. Backlog card a254b3111a2340478da726eb8fd015b9 concerns the REST-fallback docs for an MCP outage (recovery after the fact) — this is detection at spawn. Complementary, not duplicate."
+        "card_id": "30d45e5ffdb249b79c69f80f6853eec3",
+        "title": "[research] Claude Code heeft nu eigen cross-session SendMessage/ListAgents (2.1.224) — vergelijk met onze Agent Mail",
+        "source": "Claude Code 2.1.224 (2026-08-07), plus 2.1.222's permission-classifier change for SendMessage",
+        "scope": "1 comparison doc section + one explicit recommendation; removal work explicitly deferred to follow-up cards",
+        "premise_check": "Agent Mail confirmed present and non-trivial before filing: backend/app/services/agent_mail_service.py (785 lines), backend/app/services/external_agent_mail_service.py (291 lines), plus the hook installer under backend/app/services/agent_mail/. Spec at docs/cockpit/agent-mail-spec.md, wired as the card's spec_doc.",
+        "dedupe_check": "Same pass as above — no existing card compares Agent Mail against a native CLI capability."
       }
     ],
-    "deduped": [
-      {
-        "card_id": "eb26d1e7eafd42ccbd908f6d743db79a",
-        "title": "[research] Add `claude-opus-5` to Cockpit's context/pricing/settings surfaces",
-        "what_was_added": "Verified in pricing_service.py that `claude-opus-5` is absent from MODEL_PRICING and that the full fallback ladder in get_model_pricing (:179-208) — including the fuzzy substring pass — returns None for it. Also flagged PRICING_VERSION='2026-06-20' as stale, and that Sonnet 5 sits at $3/$15 while the API changelog states $2/$10 introductory pricing through Aug 31 2026."
-      },
-      {
-        "card_id": "aaa81b2350ee4f499c2777ee18e065d2",
-        "title": "[research] Surface Claude Code subagent-cap knobs as per-lane column_overrides",
-        "what_was_added": "The default this card is built on flipped within 3 days: 2.1.217 disabled nested subagents by default, 2.1.219 set the default nesting depth to 3 (was 1). The card must verify against the installed CLI, not a changelog line. Also noted the concurrency cap (default 20) and the 2.1.217 --max-budget-usd fix for background subagents."
-      },
-      {
-        "card_id": "824e6f8d2e0c4971a02519459b768764",
-        "title": "[research] Wire `--forward-subagent-text` into agent-bridge",
-        "what_was_added": "2.1.219 added nested subagent forwarding: depth-2+ subagents now appear, keyed by their spawning Agent `tool_use` id. The stream is no longer flat (needs parent-attribution in the session panel) and volume can be far higher than assumed given the depth-3 default."
-      }
-    ],
+    "deduped": [],
     "no_op": false,
     "filter_rejects": [
-      "Claude Agent SDK argv/flag-injection hardening (0.2.121, 0.2.124) — checked our own spawner for the same shape and found no live exposure; filing would be speculative hardening with no observed failure.",
-      "Agent SDK migration writ large (terminal_reason, typed model_usage, background-task stdin fix) — same call as the previous sweep: large architectural change, needs a parent card with an explicit decomposition callout, not a research card.",
-      "Managed Agents surface (webhooks, initial_events, event deltas, session config overrides) — Cockpit orchestrates CLI sessions, not the Managed Agents API. Not applicable.",
-      "Opus 5 / Sonnet 5 model launches as such — model availability is not a platform change for Cockpit; the only actionable slice is the pricing/settings table, already covered by eb26d1e7.",
-      "2.1.216 worktree-isolated subagent git-redirect fix — adjacent to our own worktree-scope safety rule (card 513e37a1), but it hardens the CLI's own `--worktree` isolation, which is not the mechanism dispatch uses (pre-made worktrees + cwd). No Cockpit change implied.",
-      "2.1.218 /code-review as background subagent + `context: fork` skills backgrounding by default — affects how the session-end FCR reads, but the FCR prose already picks its subagent type explicitly. No change needed until a failure is observed."
+      "2.1.224 removed the 200-subagent-per-session spawn cap — we have never observed a session hitting it, so filing would be speculative.",
+      "2.1.223 + 2.1.221 Bash permission-check bypasses (crafted commands, zsh `[[ ]]` regex conditionals, tab/invisible-Unicode padding) — real security fixes, but all landed upstream and we run 2.1.228, so there is nothing for us to change.",
+      "2.1.222 PreToolUse auto-allow hooks bypassing tool restrictions in background agent tasks — already covered by scripts/check-pretooluse-bg-agent-test.sh (card a712f5c6), which names this exact CC version.",
+      "2.1.225 transient-401 clobbering CLAUDE_CODE_OAUTH_TOKEN in headless sessions — would have hit our headless spawns, but it is fixed in a version we already run.",
+      "2.1.224 long-project-path session-directory collision (>200 chars) — measured our worktree paths at roughly 65 characters, so we are not in the affected class.",
+      "2.1.228 Write tool no longer requiring a prior read for newer models, and 2.1.223 /review becoming an alias of /code-review — cosmetic for us; no recipe depends on either behaviour.",
+      "LangGraph 1.2.10 / 1.2.11 — patch releases with no new orchestration primitive."
     ]
   },
-  "skill_changes": [
-    "Source table: `Aperant` / \"Auto Claude\" -> `AndyMik90/Aperant` (the unqualified name made this sweep 404 on a guessed path).",
-    "Step 7 anchor: compute next_scheduled_at from the host card's own `scheduled_at` + 7d, not from 'now' + 7d. This run fired a day late (host scheduled Mon Jul 27, dispatched Tue Jul 28) and the documented 'now'-anchored formula produced Aug 10 — 13 days out, silently converting the weekly cadence to fortnightly. Correct answer was Aug 3.",
-    "Step 7 trap: `create_card` has no `scheduled_at` parameter and silently creates the successor with null, which makes it immediately dispatchable rather than dormant until Monday. Documented the follow-up REST PATCH + verify."
+  "skill_changes": [],
+  "skill_notes_for_next_run": [
+    "Fetch the Claude Code changelog as raw markdown (raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md), not the rendered docs page — the HTML page is 1.3MB of markup for the same content.",
+    "GitHub release/commit atom feeds (<repo>/releases.atom, <repo>/commits/<branch>.atom) are a cheap and reliable no-change check; two of the eight sources were resolved that way in seconds.",
+    "claude-task-master has now been dormant across three sweeps. Decide next run whether it drops off the list or moves to a monthly cadence."
   ]
 }
