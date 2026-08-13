@@ -143,8 +143,13 @@
 - [Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)](./subscription-verbruik-inzicht-analyse.md): type=analysis status=active
 - [Token-optimalisatie — analyse & aanbevelingen](./token-optimization-analysis.md): type=analysis status=active
 - [Card work-type → agent-routing — analyse & aanbevelingen](./work-type-routing-analysis.md): type=analysis status=active
+- [Worktree-isolatie van Claude Code: wat onze dispatch wel en niet krijgt](./worktree-isolatie-meting.md): type=analysis status=active
 
 ## (geen type)
 
 - [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md): type=unknown status=unknown
 - [ci-gate-decision.md](./ci-gate-decision.md): type=unknown status=unknown
+
+## how-to
+
+- [Auto-resume — sessie hervatten na een limietmelding](./auto-resume.md): type=how-to status=active
