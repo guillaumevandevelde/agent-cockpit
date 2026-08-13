@@ -43,22 +43,31 @@ cross-session messaging tussen willekeurige CC-sessies op macOS/Linux,
 zonder Cockpit of kanban. Agent Mail vervangt die niet; beide bestaan
 naast elkaar met aanvullende scope.
 
-Agent Mail is **kanban-coupled** (elke message landt in `kanban_ops`
-als activity-feed entry, gekoppeld aan een `repo_id` + dispatched run)
-en voert een `kind`-taxonomie (`context_request`/`handoff`/`answer`)
-met `request_status`-lifecycle. CC native is **identity-loos** (sessies
-ontdekken elkaar via `name`) en heeft alleen platte messages. Geen
-`mail_team_members`-roster, geen externe-tool-actor-model, geen
-wakeability-loop, geen Frontend inbox-UI binnen Cockpit.
+Agent Mail voert een `kind`-taxonomie
+(`context_request`/`handoff`/`answer`) met `request_status`-lifecycle,
+een durable roster per repo, een externe-actor-API en een mailbox-UI.
+CC native heeft dat geen van alle: sessies ontdekken elkaar via `name`
+en wisselen platte berichten uit.
 
-Een operator die buiten Cockpit meerdere CC-sessies op meerdere
-machines laat praten, gebruikt vandaag terecht CC native. Agent Mail
-verplicht eerst een Cockpit-deployment — bewust, want de doelgroep is
-operator-die-Cockpit-gebruikt, niet willekeurige-CC-gebruiker.
+**Correctie 2026-08-13 (kaart `30d45e5f…`).** Een eerdere versie van
+deze paragraaf schreef dat elk bericht in `kanban_ops` landt als
+activity-feed-regel. Dat staat niet in de code — geen agent-mail-module
+schrijft kanban-state, en `MailMessage`
+(`backend/app/models/agent_mail.py:76-98`) heeft geen kaart-id en geen
+run-id. De claim is hier verwijderd.
 
-Volledige capability-mapping en de afweging (a) keep, (b) deprecate,
-(c) integrate staat in
-[`cc-native-cross-session-decision.md`](cc-native-cross-session-decision.md).
+**Uitkomst 2026-08-13: dunner maken.** De vier-assen-meting (bereik,
+duurzaamheid, zichtbaarheid, externe toegang) draaide de eerdere
+keep-beslissing om. Nul berichten in 36 dagen, en de native laag
+adresseert onze gedispatchte sessies fijner dan wij — per sessie in
+plaats van per repo, met tmux-doel erbij. De roster- en install-laag
+blijft, de berichten-, wake- en externe-actor-laag verdwijnt via drie
+vervolgkaarten. Meting, `file:line`-onderbouwing en de af te breken
+onderdelen staan in
+[`cc-native-cross-session-decision.md` § Herziening 2026-08-13](cc-native-cross-session-decision.md).
+
+Zolang die vervolgkaarten nog niet gedraaid zijn, beschrijft de rest van
+dit document de gebouwde staat.
 
 ## Wat hergebruikt wordt (i.p.v. herbouwd)
 
