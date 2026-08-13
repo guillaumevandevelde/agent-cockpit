@@ -9,12 +9,13 @@ Acceptance criteria under test:
   router-eindpunt row ``claude-code:anthropic-compatible`` (kaart
   390756e6... — geen betrouwbare quota-bron) render an honest
   ``betrouwbaarheid="onbekend"`` row, never a fabricated number;
-- the Anthropic row is always ``betrouwbaarheid="schatting"`` once a plan
-  tier is set, never ``"exact"``, **and stays distinct from the router
+- the Anthropic row is always ``betrouwbaarheid="schatting"`` when it has
+  an active block, never ``"exact"``, **and stays distinct from the router
   row** — geen cross-pollinatie wanneer een gebruiker een
   router-eindpunt configureert;
-- the plan-tier endpoints round-trip and reject unknown tiers / a
-  non-positive custom limit.
+- the Anthropic row reports an absolute token count with no ``limiet`` and
+  no ``drempel_gebruikt``: no published quota exists, so no ratio is
+  fabricated and the row never flips to "unavailable" on a guess.
 """
 from __future__ import annotations
 
@@ -71,24 +72,13 @@ def _no_real_disk_scan(monkeypatch):
     # UsageService.get_block_usage() otherwise scans this host's real
     # ~/.claude/projects/**/*.jsonl tree (billions of real tokens per the
     # subscription-verbruik-inzicht-analyse.md §4.2 host measurement) —
-    # far too slow for a unit test. No active block -> onbekend, which is
-    # exactly the "no plan tier yet" honest state this suite exercises
-    # unless a test overrides it.
+    # far too slow for a unit test. No active block -> onbekend, the honest
+    # idle state this suite exercises unless a test overrides it.
     monkeypatch.setattr(
         UsageService,
         "get_block_usage",
         AsyncMock(return_value=SimpleNamespace(active_block=None)),
     )
-
-
-@pytest.fixture(autouse=True)
-async def _reset_plan_tier():
-    # Clear any plan-tier pref left by a previous test in this module.
-    async with _client() as ac:
-        await ac.put("/api/v1/subscriptions/anthropic/plan-tier", json={"tier": None})
-    yield
-    async with _client() as ac:
-        await ac.put("/api/v1/subscriptions/anthropic/plan-tier", json={"tier": None})
 
 
 @pytest.mark.asyncio
@@ -144,11 +134,10 @@ async def test_router_subscription_row_is_honestly_onbekend():
 @pytest.mark.asyncio
 async def test_anthropic_row_still_schatting_not_router(monkeypatch):
     # Cross-pollinatie-guard: ook wanneer de ``anthropic-compatible``
-    # router-rij live is, moet de directe ``anthropic``-rij zijn
-    # eigen ``schatting``-label behouden (plan-tier is Anthropic,
-    # niet de router). Anders zou een naïeve "first match wins" in
-    # de endpoint-loop de Anthropic-rij met de router-rij kunnen
-    # overschrijven.
+    # router-rij live is, moet de directe ``anthropic``-rij zijn eigen
+    # ``schatting``-label behouden. Anders zou een naïeve "first match
+    # wins" in de endpoint-loop de Anthropic-rij overschrijven met de
+    # router-rij, die geen quota-bron heeft.
     active_block = SimpleNamespace(
         input_tokens=5_000,
         output_tokens=5_000,
@@ -162,10 +151,6 @@ async def test_anthropic_row_still_schatting_not_router(monkeypatch):
         AsyncMock(return_value=SimpleNamespace(active_block=active_block)),
     )
     async with _client() as ac:
-        put = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "pro"}
-        )
-        assert put.status_code == 200, put.text
         r = await ac.get("/api/v1/subscriptions/usage")
     rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
     assert rows["claude-code:anthropic"]["betrouwbaarheid"] == "schatting"
@@ -173,7 +158,7 @@ async def test_anthropic_row_still_schatting_not_router(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_anthropic_row_without_plan_tier_is_onbekend():
+async def test_anthropic_row_without_active_block_is_onbekend():
     async with _client() as ac:
         r = await ac.get("/api/v1/subscriptions/usage")
     rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
@@ -182,7 +167,7 @@ async def test_anthropic_row_without_plan_tier_is_onbekend():
 
 
 @pytest.mark.asyncio
-async def test_anthropic_row_with_plan_tier_is_schatting_never_exact(monkeypatch):
+async def test_anthropic_row_reports_absolute_usage_and_never_exact(monkeypatch):
     active_block = SimpleNamespace(
         input_tokens=10_000,
         output_tokens=10_000,
@@ -196,17 +181,17 @@ async def test_anthropic_row_with_plan_tier_is_schatting_never_exact(monkeypatch
         AsyncMock(return_value=SimpleNamespace(active_block=active_block)),
     )
     async with _client() as ac:
-        put = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "max_5x"}
-        )
-        assert put.status_code == 200, put.text
         r = await ac.get("/api/v1/subscriptions/usage")
     rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
     anthropic = rows["claude-code:anthropic"]
     assert anthropic["betrouwbaarheid"] == "schatting"
     assert anthropic["betrouwbaarheid"] != "exact"
-    assert anthropic["limiet"] == 220_000
     assert anthropic["verbruikt"] == 20_000
+    # No published quota exists, so no denominator is reported and the row
+    # never flips to "unavailable" on a guessed budget.
+    assert anthropic["limiet"] is None
+    assert anthropic["drempel_gebruikt"] is None
+    assert anthropic["beschikbaar"] is True
 
 
 @pytest.mark.asyncio
@@ -217,98 +202,3 @@ async def test_minimax_row_without_key_is_onbekend_no_fabrication():
     minimax = rows["claude-code:minimax"]
     assert minimax["betrouwbaarheid"] == "onbekend"
     assert minimax["drempel_gebruikt"] is None
-
-
-@pytest.mark.asyncio
-async def test_plan_tier_get_unset_returns_null():
-    async with _client() as ac:
-        r = await ac.get("/api/v1/subscriptions/anthropic/plan-tier")
-    assert r.status_code == 200
-    assert r.json() == {"tier": None, "custom_limit_tokens": None}
-
-
-@pytest.mark.asyncio
-async def test_plan_tier_put_then_get_round_trips():
-    async with _client() as ac:
-        put = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "pro"}
-        )
-        assert put.status_code == 200
-        assert put.json() == {"tier": "pro", "custom_limit_tokens": None}
-        get = await ac.get("/api/v1/subscriptions/anthropic/plan-tier")
-        assert get.json() == {"tier": "pro", "custom_limit_tokens": None}
-
-
-@pytest.mark.asyncio
-async def test_plan_tier_put_rejects_unknown_tier():
-    async with _client() as ac:
-        r = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "platinum"}
-        )
-    assert r.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_plan_tier_put_custom_requires_positive_limit():
-    async with _client() as ac:
-        r = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier",
-            json={"tier": "custom", "custom_limit_tokens": None},
-        )
-    assert r.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_plan_tier_put_custom_round_trips():
-    async with _client() as ac:
-        put = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier",
-            json={"tier": "custom", "custom_limit_tokens": 77_000},
-        )
-        assert put.status_code == 200, put.text
-        assert put.json() == {"tier": "custom", "custom_limit_tokens": 77_000}
-
-
-@pytest.mark.asyncio
-async def test_plan_tier_put_syncs_real_provider_into_pool_registry():
-    """The PUT endpoint doesn't just persist the pref — it also syncs the
-    pool-router's registry live (kaart d404a11f...), so a user picking a
-    plan tier doesn't need a backend restart before ``pick_subscription``
-    sees a real signal."""
-    from app.services.subscriptions import registry as reg
-    from app.services.subscriptions.anthropic import AnthropicUsageProvider
-
-    async with _client() as ac:
-        put = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "max_20x"}
-        )
-        assert put.status_code == 200, put.text
-
-    provider = reg.get_provider_for(cli="claude-code", provider="anthropic")
-    assert isinstance(provider, AnthropicUsageProvider)
-    assert provider._plan_tier_limit_tokens == 880_000
-
-
-@pytest.mark.asyncio
-async def test_plan_tier_clear_reverts_pool_registry_to_stub():
-    from app.services.subscriptions import registry as reg
-    from app.services.subscriptions.unknown import UnknownUsageProvider
-
-    async with _client() as ac:
-        await ac.put("/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "pro"})
-        put = await ac.put(
-            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": None}
-        )
-        assert put.status_code == 200, put.text
-
-    provider = reg.get_provider_for(cli="claude-code", provider="anthropic")
-    assert isinstance(provider, UnknownUsageProvider)
-
-
-@pytest.mark.asyncio
-async def test_plan_tiers_options_endpoint_exposes_constants():
-    async with _client() as ac:
-        r = await ac.get("/api/v1/subscriptions/anthropic/plan-tiers")
-    assert r.status_code == 200
-    keys = {tier["key"] for tier in r.json()["tiers"]}
-    assert keys == {"pro", "max_5x", "max_20x"}

@@ -137,59 +137,46 @@ class TestUnknownUsageProvider:
         assert usage.eenheid == "tokens"
 
 
-class TestAnthropicPlanTiers:
-    """The tier constants consumed by the Subscriptions-pagina plan-tier
-    picker (kaart 9bce091a...). Never labelled ``exact`` — these are
-    best-effort estimates, not published by Anthropic (analyse §7.2)."""
-
-    def test_known_tiers_have_label_and_token_budget(self):
-        from app.services.subscriptions.anthropic import ANTHROPIC_PLAN_TIERS
-
-        assert set(ANTHROPIC_PLAN_TIERS) == {"pro", "max_5x", "max_20x"}
-        for tier in ANTHROPIC_PLAN_TIERS.values():
-            assert isinstance(tier["label"], str) and tier["label"]
-            assert isinstance(tier["tokens_5h"], int) and tier["tokens_5h"] > 0
-
-
 class TestAnthropicUsageProvider:
-    """5h-venster-schatting uit UsageService + plan-tier limiet.
+    """Absolute 5h-block usage from UsageService — no ratio, no limit.
 
-    Per analyse §6.1: dit is altijd ``schatting``, nooit ``exact`` — er
-    is geen usage-API voor Pro/Max en de weekly-limiet is ongepubliceerd.
+    The plan-tier denominator was removed (see the module docstring in
+    ``app/services/subscriptions/anthropic.py``): every measured 5h block
+    on the reference machine exceeded even the Max 20x community estimate,
+    so the percentage was a ratio against a guess. The provider now reports
+    the measured token count and leaves ``limiet`` / ``drempel_gebruikt``
+    unset. ``betrouwbaarheid`` stays ``schatting`` — the count comes from
+    local JSONL logs, not from Anthropic.
     """
 
     def setup_method(self):
         self.usage_service = MagicMock()
-        self.plan_limit = 100_000
         self.provider = AnthropicUsageProvider(
             usage_service=self.usage_service,
-            plan_tier_limit_tokens=self.plan_limit,
             subscription_id="claude-code:anthropic",
             subscription_label="Claude Code (Anthropic)",
         )
 
-    async def test_active_block_below_limit_is_beschikbaar_and_schatting(self):
+    async def test_active_block_reports_absolute_usage_without_ratio(self):
         block = _make_block(total_tokens=40_000)
         self.usage_service.get_block_usage = AsyncMock(
             return_value=SimpleNamespace(active_block=block)
         )
         usage = await self.provider.get_usage()
         assert usage.betrouwbaarheid == "schatting"
-        assert usage.drempel_gebruikt == pytest.approx(0.4)
-        assert usage.beschikbaar is True
+        assert usage.verbruikt == 40_000
+        assert usage.drempel_gebruikt is None
+        assert usage.limiet is None
         assert usage.bron == "usage_service:active_block"
         assert usage.subscription_id == "claude-code:anthropic"
 
     async def test_active_block_populates_display_fields(self):
-        # kaart 9bce091a...: the Subscriptions-pagina needs raw
-        # verbruikt/limiet/venster/reset_op, not just the fraction.
         block = _make_block(total_tokens=40_000)
         self.usage_service.get_block_usage = AsyncMock(
             return_value=SimpleNamespace(active_block=block)
         )
         usage = await self.provider.get_usage()
         assert usage.verbruikt == 40_000
-        assert usage.limiet == self.plan_limit
         assert usage.eenheid == "tokens"
         assert usage.venster_label == "5h rate"
         assert usage.reset_op is not None
@@ -205,18 +192,7 @@ class TestAnthropicUsageProvider:
         assert usage.venster_label is None
         assert usage.reset_op is None
 
-    async def test_active_block_at_or_above_limit_is_not_beschikbaar(self):
-        block = _make_block(total_tokens=110_000)
-        self.usage_service.get_block_usage = AsyncMock(
-            return_value=SimpleNamespace(active_block=block)
-        )
-        usage = await self.provider.get_usage()
-        assert usage.beschikbaar is False
-        assert usage.drempel_gebruikt == pytest.approx(1.1)
-        assert usage.betrouwbaarheid == "schatting"
-
     async def test_no_active_block_returns_onbekend(self):
-        # No block at all → can't estimate usage.
         self.usage_service.get_block_usage = AsyncMock(
             return_value=SimpleNamespace(active_block=None)
         )
@@ -225,30 +201,24 @@ class TestAnthropicUsageProvider:
         assert usage.drempel_gebruikt is None
         assert usage.beschikbaar is True
 
-    async def test_no_plan_limit_returns_onbekend(self):
-        # Without a user-selected plan-tier limit we cannot compute the
-        # ratio — fabricate nothing, mark the signal "onbekend" so the UI
-        # can show "limit not published".
-        provider = AnthropicUsageProvider(
-            usage_service=self.usage_service,
-            plan_tier_limit_tokens=None,
-            subscription_id="claude-code:anthropic",
-            subscription_label="Claude Code (Anthropic)",
-        )
-        block = _make_block(total_tokens=10_000)
+    async def test_huge_block_stays_beschikbaar(self):
+        # The whole point of dropping the denominator: a block far above any
+        # community tier estimate must NOT flip ``beschikbaar`` to False and
+        # pause the lane. The real backstop is the per-provider rate-limit
+        # pause, not a guessed budget.
+        block = _make_block(total_tokens=3_500_000)
         self.usage_service.get_block_usage = AsyncMock(
             return_value=SimpleNamespace(active_block=block)
         )
-        usage = await provider.get_usage()
-        assert usage.betrouwbaarheid == "onbekend"
+        usage = await self.provider.get_usage()
+        assert usage.beschikbaar is True
         assert usage.drempel_gebruikt is None
-        assert usage.bron == "geen_plan_tier"
+        assert usage.verbruikt == 3_500_000
 
     async def test_betrouwbaarheid_is_never_exact(self):
-        # Belt-and-braces: even on a perfect-looking block we label this
-        # ``schatting`` because Anthropic publishes no usage API. Pinning
-        # this here so a future refactor can't accidentally upgrade the
-        # label.
+        # The count is summed from local logs, so it measures what this
+        # machine recorded, not what Anthropic billed. Pinned so a refactor
+        # can't quietly upgrade the label.
         block = _make_block(total_tokens=1)
         self.usage_service.get_block_usage = AsyncMock(
             return_value=SimpleNamespace(active_block=block)
@@ -257,36 +227,24 @@ class TestAnthropicUsageProvider:
         assert usage.betrouwbaarheid == "schatting"
         assert usage.betrouwbaarheid != "exact"
 
-    async def test_large_cache_read_does_not_push_over_limit(self):
+    async def test_cache_read_is_excluded_from_the_count(self):
         # Regressie voor kaart d63e83f0... — docs/cockpit/cache-read-quota-decision.md
-        # (Scenario B, gemeten w≈0): cache_read kost geen abonnementsquotum.
-        # Een 5M cache_read-block bovenop 40k gewoon verbruik mag de drempel
-        # NIET over de limiet duwen (pre-fix: (40k+5M)/100k = 50.4x -> pauze).
+        # (Scenario B, gemeten w≈0): cache_read kost geen abonnementsquotum en
+        # mag het gerapporteerde verbruik dus niet opblazen.
         block = _make_block(total_tokens=40_000, cache_read_tokens=5_000_000)
         self.usage_service.get_block_usage = AsyncMock(
             return_value=SimpleNamespace(active_block=block)
         )
         usage = await self.provider.get_usage()
-        assert usage.drempel_gebruikt == pytest.approx(0.4)
-        assert usage.beschikbaar is True
         assert usage.verbruikt == 40_000
+        assert usage.beschikbaar is True
 
-    async def test_zero_limit_does_not_divide_by_zero(self):
-        # A bogus plan-tier limit of 0 must not crash and must not report
-        # a fake ratio — return onbekend instead.
-        provider = AnthropicUsageProvider(
-            usage_service=self.usage_service,
-            plan_tier_limit_tokens=0,
-            subscription_id="claude-code:anthropic",
-            subscription_label="Claude Code (Anthropic)",
-        )
-        block = _make_block(total_tokens=10_000)
-        self.usage_service.get_block_usage = AsyncMock(
-            return_value=SimpleNamespace(active_block=block)
-        )
-        usage = await provider.get_usage()
+    async def test_usage_service_failure_returns_onbekend(self):
+        self.usage_service.get_block_usage = AsyncMock(side_effect=RuntimeError("boom"))
+        usage = await self.provider.get_usage()
         assert usage.betrouwbaarheid == "onbekend"
         assert usage.drempel_gebruikt is None
+        assert usage.bron == "usage_service:fout"
 
 
 class TestAnthropicUsageProviderModelAttribution:
@@ -319,9 +277,8 @@ class TestAnthropicUsageProviderModelAttribution:
             )
 
         # 10k Anthropic tokens + 90k MiniMax tokens in the same active
-        # block. Pre-fix, get_block_usage summed both -> drempel_gebruikt
-        # would be 100_000 / 100_000 = 1.0 (not beschikbaar). Post-fix,
-        # only the 10k Anthropic tokens should count.
+        # block. Pre-fix, get_block_usage summed both and reported 100k as
+        # Anthropic usage. Post-fix, only the 10k Anthropic tokens count.
         usage_service.get_all_usage_entries = AsyncMock(
             return_value=[
                 entry("claude-sonnet-4-20250514", 10_000),
@@ -331,14 +288,13 @@ class TestAnthropicUsageProviderModelAttribution:
 
         provider = AnthropicUsageProvider(
             usage_service=usage_service,
-            plan_tier_limit_tokens=100_000,
             subscription_id="claude-code:anthropic",
             subscription_label="Claude Code (Anthropic)",
         )
 
         usage = await provider.get_usage()
 
-        assert usage.drempel_gebruikt == pytest.approx(0.1)
+        assert usage.verbruikt == 10_000
         assert usage.beschikbaar is True
 
 
@@ -586,12 +542,11 @@ class TestRouterTokensDoNotPolluteAnthropicCount:
 
         provider = AnthropicUsageProvider(
             usage_service=usage_service,
-            plan_tier_limit_tokens=100_000,
         )
 
         usage = await provider.get_usage()
 
-        assert usage.drempel_gebruikt == pytest.approx(0.05)
+        assert usage.verbruikt == 5_000
         assert usage.beschikbaar is True
 
     async def test_routed_gemini_tokens_excluded_from_anthropic(self):
@@ -623,12 +578,10 @@ class TestRouterTokensDoNotPolluteAnthropicCount:
 
         provider = AnthropicUsageProvider(
             usage_service=usage_service,
-            plan_tier_limit_tokens=70_000,
         )
 
         usage = await provider.get_usage()
 
-        assert usage.drempel_gebruikt == pytest.approx(0.1)
         assert usage.verbruikt == 7_000
 
     async def test_attribution_function_returns_unknown_for_router_upstreams(self):
@@ -730,7 +683,6 @@ class TestRegistrySeeding:
 
         real = AnthropicUsageProvider(
             usage_service=MagicMock(),
-            plan_tier_limit_tokens=100_000,
         )
         reg.register_provider(real)
         assert reg.get_provider_for(cli="claude-code", provider="anthropic") is real
@@ -937,7 +889,6 @@ class TestNoCrossVendorNormalization:
         )
         anthropic = AnthropicUsageProvider(
             usage_service=usage_service,
-            plan_tier_limit_tokens=100_000,
             subscription_id="claude-code:anthropic",
             subscription_label="Claude Code (Anthropic)",
         )
@@ -951,7 +902,10 @@ class TestNoCrossVendorNormalization:
         # inequality, so callers can render "schatting vs onbekend" rather
         # than treating both as numbers.
         assert u_usage.betrouwbaarheid != a_usage.betrouwbaarheid
-        # And the drempel_gebruikt is None for one, a fraction for the
-        # other — different units of comparison by design.
+        # Neither publishes a ratio: the stub has no signal at all, the
+        # Anthropic row has a measured absolute count but no honest
+        # denominator. ``verbruikt`` is what separates them.
         assert u_usage.drempel_gebruikt is None
-        assert a_usage.drempel_gebruikt is not None
+        assert a_usage.drempel_gebruikt is None
+        assert u_usage.verbruikt is None
+        assert a_usage.verbruikt is not None

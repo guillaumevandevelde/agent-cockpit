@@ -25,7 +25,7 @@ expliciet. Heropen deze vragen niet.
 | Security | Alles weg, dispatch permissief | Elk project valt terug op de meta-default: `skip_permissions` aan, host-worktree in plaats van sandcastle. Alleen een expliciete `KanbanMeta`-override wint nog. |
 | Presence | Alles weg | Herzien tijdens fase 4, zie §2b. De WS-sensor had geen databron, dus die is mee verwijderd samen met de attention-badges en de desktop-notificaties. |
 | Agent Mail | Alles weg, inclusief MCP-tools en hooks | Agents kunnen niet meer cross-session coördineren. Reeds geïnstalleerde hooks vragen een apart opruimscript. |
-| Subscriptions/Usage | Repareren | Plan-tier corrigeren en signaalloze rijen verbergen. Het endpoint zelf werkt al. |
+| Subscriptions/Usage | Repareren, zonder percentage | Herzien tijdens fase 7, zie §2c. Geen enkele plan-tier past, dus het percentage verdwijnt en het gemeten absolute verbruik blijft. |
 
 ## 2. Waarom Usage kapot lijkt
 
@@ -42,6 +42,28 @@ providers hebben geen quota-bron en zullen die ook niet krijgen.
 Het gevolg van de eerste: `beschikbaar` wordt `false`, waarna
 `backend/app/kanban/subscription_pool.py` de Anthropic-lane laat pauzeren.
 De tier corrigeren repareert dus ook de dispatch.
+
+## 2c. Waarom het Usage-percentage verdween
+
+De eerste diagnose was "verkeerde tier gekozen". Een meting van de
+5h-blokhistorie liet zien dat dat te optimistisch was.
+
+Alle vier de gevulde 5h-blokken overschrijden élke gepubliceerde tier, ook
+Max 20x. De piek is 3,47M billable tokens tegen een geschat budget van
+880.000. Er bestaat dus geen tier die een eerlijke noemer oplevert.
+
+Het percentage was daarmee decoratie op een gok. Erger: een ratio boven 1,0
+zette `beschikbaar=False`, waarna `subscription_pool` de Anthropic-lane
+pauzeerde op een verzonnen limiet.
+
+De provider rapporteert nu het absolute tokenaantal en laat `limiet` en
+`drempel_gebruikt` leeg. `_is_above_threshold` leest een ontbrekende ratio
+als "beschikbaar", wat klopt: de echte rem is de per-provider pause die op
+werkelijke rate-limit-events vuurt.
+
+Daarmee verviel de hele plan-tier-laag. Die bestond alleen om die noemer te
+leveren: de prefs-service, drie endpoints, de `subscription_prefs`-tabel met
+zijn EAV-migratie, de tier-select in de UI en vier testbestanden.
 
 ## 2b. Waarom Presence alsnog helemaal weg ging
 

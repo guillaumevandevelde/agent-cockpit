@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { fetchSubscriptionUsage } from './api'
-import { AnthropicPlanTierSelect } from './AnthropicPlanTierSelect'
 import { SubscriptionUsageRowItem } from './SubscriptionUsageRowItem'
 import type { SubscriptionUsageRow } from './types'
-
-const ANTHROPIC_SUBSCRIPTION_ID = 'claude-code:anthropic'
 
 export function SubscriptionUsageSection() {
   const [rows, setRows] = useState<SubscriptionUsageRow[] | null>(null)
@@ -29,24 +26,54 @@ export function SubscriptionUsageSection() {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [load])
 
+  // Most providers publish nothing at all. Listing seven rows of which six
+  // say "no signal" buries the one row that carries a real number, so the
+  // signal-less ones collapse into a footnote instead.
+  const [measured, silent] = useMemo(() => {
+    const all = rows ?? []
+    return [
+      all.filter((r) => r.betrouwbaarheid !== 'onbekend'),
+      all.filter((r) => r.betrouwbaarheid === 'onbekend'),
+    ]
+  }, [rows])
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Usage</CardTitle>
         <CardDescription>
-          How much of each subscription's quota is used right now. Each provider keeps its own labels — the
-          numbers are not comparable across providers.
+          Tokens consumed in the current rate window, summed from local session logs. Anthropic publishes no
+          quota figure for Pro/Max, so there is no percentage here — only what was measured.
         </CardDescription>
       </CardHeader>
-      <CardContent className="divide-y">
+      <CardContent>
         {error && <p className="text-xs text-destructive">{error}</p>}
         {!rows && !error && <p className="text-xs text-muted-foreground">Loading...</p>}
-        {rows?.map((row) => (
-          <div key={row.subscription_id}>
-            <SubscriptionUsageRowItem row={row} />
-            {row.subscription_id === ANTHROPIC_SUBSCRIPTION_ID && <AnthropicPlanTierSelect onChange={load} />}
-          </div>
-        ))}
+
+        <div className="divide-y">
+          {measured.map((row) => (
+            <SubscriptionUsageRowItem key={row.subscription_id} row={row} />
+          ))}
+        </div>
+
+        {measured.length === 0 && rows && !error && (
+          <p className="text-xs text-muted-foreground">No subscription reports usage right now.</p>
+        )}
+
+        {silent.length > 0 && (
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs text-muted-foreground">
+              {silent.length} subscription{silent.length === 1 ? '' : 's'} publish no usage signal
+            </summary>
+            <ul className="mt-2 space-y-1 pl-1">
+              {silent.map((row) => (
+                <li key={row.subscription_id} className="text-xs text-muted-foreground">
+                  {row.subscription_label}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </CardContent>
     </Card>
   )

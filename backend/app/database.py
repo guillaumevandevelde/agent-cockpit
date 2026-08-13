@@ -64,66 +64,6 @@ async def init_db() -> None:
         async with engine.begin() as conn:
             await _migrate_terminology_columns(conn)
             await _migrate_project_columns(conn)
-            await _migrate_subscription_prefs_shape(conn)
-
-
-async def _migrate_subscription_prefs_shape(conn) -> None:
-    """Convert a pre-2026-07-17 EAV ``subscription_prefs`` to the singleton shape.
-
-    The table was created on 2026-07-08 as ``(provider_id, key) -> value``; the
-    model was reshaped on 2026-07-17 to a wide singleton row
-    (``anthropic_plan_tier`` / ``anthropic_custom_limit_tokens``) with no
-    migration. ``create_all`` only creates *missing* tables, so an existing DB
-    kept the old shape and every startup since raised ``no such column:
-    subscription_prefs.anthropic_plan_tier`` out of the lifespan hook.
-
-    This is a table *reshape*, not an ``ADD COLUMN``, so unlike the sibling
-    migrations above it rebuilds the table from the model and replays the old
-    key/value pairs into the new row. Dropping the DB is not an option — the
-    registry store also holds MCP servers, commands, permissions and plugin
-    state, and the stored tier resolves to a real 5h token budget.
-
-    Idempotent: stands down when the table is absent (fresh install, where
-    ``create_all`` already produced the right shape) or is already migrated.
-    """
-    from app.models.database import SubscriptionPrefs
-
-    rows = (
-        await conn.exec_driver_sql("PRAGMA table_info(subscription_prefs)")
-    ).fetchall()
-    cols = {row[1] for row in rows}
-    if not cols:
-        return  # table absent — nothing to reshape
-    if "provider_id" not in cols:
-        return  # already the singleton shape
-
-    legacy = (
-        await conn.exec_driver_sql(
-            "SELECT provider_id, key, value FROM subscription_prefs"
-        )
-    ).fetchall()
-    prefs = {
-        (provider_id, key): value
-        for provider_id, key, value in legacy
-    }
-
-    tier = prefs.get(("anthropic", "plan_tier"))
-    raw_limit = prefs.get(("anthropic", "custom_limit_tokens"))
-    try:
-        custom_limit = int(raw_limit) if raw_limit is not None else None
-    except (TypeError, ValueError):
-        # A non-numeric legacy value is not worth failing startup over; the
-        # tier itself still carries the meaningful setting.
-        custom_limit = None
-
-    await conn.exec_driver_sql("DROP TABLE subscription_prefs")
-    await conn.run_sync(SubscriptionPrefs.__table__.create)
-    await conn.exec_driver_sql(
-        "INSERT INTO subscription_prefs "
-        "(id, anthropic_plan_tier, anthropic_custom_limit_tokens, updated_at) "
-        "VALUES (1, ?, ?, CURRENT_TIMESTAMP)",
-        (tier, custom_limit),
-    )
 
 
 async def _migrate_project_columns(conn) -> None:

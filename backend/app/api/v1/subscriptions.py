@@ -20,21 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.schemas import (
-    AnthropicPlanTierOption,
-    AnthropicPlanTierOptionsResponse,
-    AnthropicPlanTierResponse,
-    AnthropicPlanTierUpdateRequest,
     SubscriptionUsageListResponse,
     SubscriptionUsageRow,
 )
 from app.services.agentic_cli.provider_env import PROVIDER_COMPATIBLE
-from app.services.subscription_prefs_service import (
-    get_or_create_prefs,
-    resolve_anthropic_plan_tier_limit,
-    set_anthropic_plan_tier,
-    sync_anthropic_provider_registration,
-)
-from app.services.subscriptions.anthropic import ANTHROPIC_PLAN_TIERS, AnthropicUsageProvider
+from app.services.subscriptions.anthropic import AnthropicUsageProvider
 from app.services.subscriptions.base import SubscriptionUsage
 from app.services.subscriptions.minimax import MinimaxUsageProvider
 from app.services.subscriptions.registry import get_provider_for
@@ -80,18 +70,12 @@ def _to_row(usage: SubscriptionUsage) -> SubscriptionUsageRow:
 
 @router.get("/usage", response_model=SubscriptionUsageListResponse)
 async def get_subscription_usage(db: AsyncSession = Depends(get_db)):
-    prefs = await get_or_create_prefs(db)
-    plan_limit = resolve_anthropic_plan_tier_limit(
-        prefs.anthropic_plan_tier, prefs.anthropic_custom_limit_tokens
-    )
     usage_service = UsageService(db)
 
     rows: list[SubscriptionUsageRow] = []
     for cli, provider_name in KNOWN_SUBSCRIPTIONS:
         if cli == "claude-code" and provider_name == "anthropic":
-            provider = AnthropicUsageProvider(
-                usage_service=usage_service, plan_tier_limit_tokens=plan_limit
-            )
+            provider = AnthropicUsageProvider(usage_service=usage_service)
         elif cli == "claude-code" and provider_name == "minimax":
             provider = MinimaxUsageProvider(
                 api_key=settings.minimax_api_key, probe_url=None
@@ -122,49 +106,3 @@ async def get_subscription_usage(db: AsyncSession = Depends(get_db)):
         rows.append(_to_row(await provider.get_usage()))
 
     return SubscriptionUsageListResponse(subscriptions=rows)
-
-
-@router.get("/anthropic/plan-tiers", response_model=AnthropicPlanTierOptionsResponse)
-async def get_anthropic_plan_tier_options():
-    return AnthropicPlanTierOptionsResponse(
-        tiers=[
-            AnthropicPlanTierOption(key=key, label=cfg["label"], tokens_5h=cfg["tokens_5h"])  # type: ignore[arg-type]
-            for key, cfg in ANTHROPIC_PLAN_TIERS.items()
-        ]
-    )
-
-
-@router.get("/anthropic/plan-tier", response_model=AnthropicPlanTierResponse)
-async def get_anthropic_plan_tier(db: AsyncSession = Depends(get_db)):
-    prefs = await get_or_create_prefs(db)
-    return AnthropicPlanTierResponse(
-        tier=prefs.anthropic_plan_tier,
-        custom_limit_tokens=prefs.anthropic_custom_limit_tokens,
-    )
-
-
-@router.put("/anthropic/plan-tier", response_model=AnthropicPlanTierResponse)
-async def put_anthropic_plan_tier(
-    body: AnthropicPlanTierUpdateRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        prefs = await set_anthropic_plan_tier(
-            db, tier=body.tier, custom_limit_tokens=body.custom_limit_tokens
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    try:
-        await sync_anthropic_provider_registration(db)
-    except Exception:
-        # The pref itself already persisted — a registry-sync failure must
-        # not turn into a 500 on a saved preference. Worst case the pool
-        # router keeps routing on the previous registration until the next
-        # app restart or successful sync.
-        logger.exception(
-            "failed to sync Anthropic provider registration after plan-tier update"
-        )
-    return AnthropicPlanTierResponse(
-        tier=prefs.anthropic_plan_tier,
-        custom_limit_tokens=prefs.anthropic_custom_limit_tokens,
-    )

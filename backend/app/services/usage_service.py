@@ -859,7 +859,7 @@ class UsageService:
         entries whose ``model`` maps to that subscription (see
         ``subscriptions.attribution.subscription_id_for_model``) — e.g. so
         ``AnthropicUsageProvider`` doesn't sum MiniMax tokens into the
-        Anthropic plan-tier ratio (kaart d160d13f...).
+        Anthropic block total (kaart d160d13f...).
         """
         cache_key = await self.get_cache_key(
             "block",

@@ -17,20 +17,3 @@ export interface SubscriptionUsageRow {
 export interface SubscriptionUsageListResponse {
   subscriptions: SubscriptionUsageRow[]
 }
-
-export interface AnthropicPlanTierOption {
-  key: string
-  label: string
-  tokens_5h: number
-}
-
-export interface AnthropicPlanTierOptionsResponse {
-  tiers: AnthropicPlanTierOption[]
-}
-
-export interface AnthropicPlanTier {
-  tier: string | null
-  custom_limit_tokens: number | null
-}
-
-export const CUSTOM_PLAN_TIER = 'custom'

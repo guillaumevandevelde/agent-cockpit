@@ -2170,27 +2170,3 @@ class SubscriptionUsageListResponse(BaseModel):
     subscriptions: list[SubscriptionUsageRow]
 
 
-class AnthropicPlanTierOption(BaseModel):
-    key: str
-    label: str
-    tokens_5h: int
-
-
-class AnthropicPlanTierOptionsResponse(BaseModel):
-    """`GET /api/v1/subscriptions/anthropic/plan-tiers` response."""
-
-    tiers: list[AnthropicPlanTierOption]
-
-
-class AnthropicPlanTierResponse(BaseModel):
-    """`GET`/`PUT /api/v1/subscriptions/anthropic/plan-tier` response."""
-
-    tier: str | None
-    custom_limit_tokens: int | None = None
-
-
-class AnthropicPlanTierUpdateRequest(BaseModel):
-    """`PUT /api/v1/subscriptions/anthropic/plan-tier` request body."""
-
-    tier: str | None = None
-    custom_limit_tokens: int | None = Field(default=None, gt=0)

@@ -33,11 +33,10 @@ from app.services.subscriptions.unknown import UnknownUsageProvider
 # returning ``None``, which the router treats as "no signal".
 #
 # ``claude-code:anthropic`` is upgraded from the stub to a real
-# ``AnthropicUsageProvider`` by
-# ``subscription_prefs_service.sync_anthropic_provider_registration``
-# (kaart d404a11f...) once the user has configured a plan tier — called
-# at app startup and again on every ``PUT /subscriptions/anthropic/plan
-# -tier``. ``claude-code:minimax`` stays on the ``UnknownUsageProvider``
+# ``AnthropicUsageProvider`` by ``register_default_providers`` at app
+# startup, unconditionally — it reads the 5h block from local session
+# logs and needs no user configuration.
+# ``claude-code:minimax`` stays on the ``UnknownUsageProvider``
 # stub: ``MinimaxUsageProvider`` is fully implemented but has no
 # confirmed usage/balance endpoint to probe yet (``probe_url`` is always
 # ``None`` at its only call site, ``api/v1/subscriptions.py``) — wiring
@@ -54,8 +53,7 @@ from app.services.subscriptions.unknown import UnknownUsageProvider
 # registration uses ``UnknownUsageProvider`` (honest no-signal, no
 # fabrication per analyse §6.1) — keeps the snapshot path "alive"
 # without inventing data, so a later call to ``register_provider``
-# with a real ``AnthropicUsageProvider`` (e.g. once a plan-tier is
-# configured) replaces the stub by id without ceremony.
+# with a real provider replaces the stub by id without ceremony.
 #
 # Kaart 390756e6... extends the seed with the
 # ``claude-code:anthropic-compatible`` slot: 9router / LiteLLM
@@ -146,6 +144,16 @@ def register_default_providers() -> None:
                 subscription_id=f"{cli_id}:{prov}",
                 subscription_label=f"{cli_label} ({prov} — geen signaal-bron)",
             ))
+        # ``claude-code:anthropic`` has a real local signal: the 5h block
+        # summed from JSONL logs. Registering it here (over the stub just
+        # seeded above) means the pool sees an absolute token count from
+        # startup, with no user configuration step. It reports no ratio —
+        # no published limit exists — so the pool treats it as available
+        # and the per-provider rate-limit pause remains the real backstop.
+        if cli_id == "claude-code":
+            from app.services.subscriptions.anthropic import AnthropicUsageProvider
+            from app.services.usage_service import UsageService
+            register_provider(AnthropicUsageProvider(usage_service=UsageService()))
         # Kaart 390756e6... (router-eindpunt): ``anthropic-compatible`` is
         # de provider-id voor een data-driven eindpunt (zie
         # ``agentic_cli/endpoints.py`` — 9router / LiteLLM / etc. zijn
