@@ -24,6 +24,28 @@ TOOL_SUBCOMMAND_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):\*$")
 # Regex to detect deprecated :* inside Tool(...) arguments
 DEPRECATED_COLON_STAR_RE = re.compile(r":\*$")
 
+# CC settings Cockpit surfaces + enum-validates (kanban card 9f90964e…).
+# Policy: show (validate enum, no default) — see the comment on the card
+# activity feed for the reasoning. Values pulled from the CC settings docs
+# (Claude Code 2.1.224+); widen the frozensets upstream-side-by-side with CC.
+# `crossSessionInbound`: strictness ladder `accept < hold < refuse` per
+# https://code.claude.com/docs/en/settings (`crossSessionInbound` row).
+CROSS_SESSION_INBOUND_ALLOWED: frozenset[str] = frozenset({
+    "accept",
+    "hold",
+    "refuse",
+})
+# `dialogExpiry`: deadline for held-message approval dialogs (and other
+# remote-client dialogs). CC reads it from user/managed/--settings sources
+# only — Cockpit-side project/local writes are silently ignored by CC, but
+# we still validate them so an operator typo doesn't pass the gate silently.
+DIALOG_EXPIRY_ALLOWED: frozenset[str] = frozenset({
+    "60s",
+    "5m",
+    "10m",
+    "never",
+})
+
 
 def validate_permission_pattern(pattern: str) -> tuple[bool, str | None]:
     """
@@ -100,6 +122,43 @@ def migrate_deprecated_pattern(pattern: str) -> str | None:
     return None
 
 
+def _validate_cc_known_settings(
+    settings: dict[str, Any],
+    removed: list[dict[str, str]],
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Enum-validate the top-level CC settings Cockpit surfaces (kanban
+    card 9f90964e…, CC 2.1.224 surface). Policy: ``show`` — accept every
+    value in the allow-list, drop everything else with a reason attached.
+    ``None`` values are kept (treated as "operator wants to remove the
+    key but didn't type it out"); CC's own unset/default behaviour applies.
+
+    Returns ``(sanitized_settings, removed)`` so callers can extend the same
+    ``removed`` accumulator they pass to ``sanitize_permission_rules``.
+    """
+    sanitized = settings
+    for key, allowed in (
+        ("crossSessionInbound", CROSS_SESSION_INBOUND_ALLOWED),
+        ("dialogExpiry", DIALOG_EXPIRY_ALLOWED),
+    ):
+        if not isinstance(sanitized, dict) or key not in sanitized:
+            continue
+        value = sanitized[key]
+        if value is None or value in allowed:
+            continue
+        allowed_sorted = sorted(allowed)
+        removed.append({
+            "pattern": f"{key}={value!r}",
+            "category": "setting",
+            "reason": (
+                f"{key} must be one of {allowed_sorted} "
+                f"(Claude Code 2.1.224+); got {value!r}"
+            ),
+        })
+        sanitized = {**sanitized}
+        del sanitized[key]
+    return sanitized, removed
+
+
 def sanitize_permission_rules(settings: dict[str, Any]) -> dict[str, Any]:
     """
     Validate and sanitize all permission patterns in a settings dict.
@@ -113,6 +172,8 @@ def sanitize_permission_rules(settings: dict[str, Any]) -> dict[str, Any]:
     Args:
         settings: The settings dictionary potentially containing
                   permissions.allow, permissions.ask, permissions.deny
+                  plus top-level ``crossSessionInbound`` / ``dialogExpiry``
+                  (kanban card 9f90964e… — CC 2.1.224 surface).
 
     Returns:
         Dict with migrated, removed, and sanitized_settings keys.
@@ -120,15 +181,25 @@ def sanitize_permission_rules(settings: dict[str, Any]) -> dict[str, Any]:
     migrated: list[dict[str, str]] = []
     removed: list[dict[str, str]] = []
 
-    permissions = settings.get("permissions")
+    # Run the CC-2.1.224 known-settings validator first so an unknown value
+    # never reaches permission validation with a stale setting alongside it.
+    sanitized_settings, removed = _validate_cc_known_settings(
+        settings, removed
+    )
+
+    permissions = sanitized_settings.get("permissions")
     if not isinstance(permissions, dict):
         return {
             "migrated": migrated,
             "removed": removed,
-            "sanitized_settings": settings,
+            "sanitized_settings": sanitized_settings,
         }
 
-    sanitized_settings = {**settings, "permissions": {**permissions}}
+    # Re-bind the now-pruned permissions dict onto a fresh top-level copy.
+    sanitized_settings = {
+        **sanitized_settings,
+        "permissions": {**permissions},
+    }
 
     for category in ("allow", "ask", "deny"):
         rules = permissions.get(category)
