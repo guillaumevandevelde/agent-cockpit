@@ -42,7 +42,6 @@ from .sessions import router as sessions_router
 from .status import router as status_router
 from .statusline import router as statusline_router
 from .subscriptions import router as subscriptions_router
-from .update.router import router as update_router
 from .usage import router as usage_router
 from .webhooks.router import router as webhooks_router
 
@@ -102,7 +101,6 @@ router.include_router(files_router)
 router.include_router(mcp_server_router, tags=["MCP Server"])
 router.include_router(sandcastle_router, tags=["Sandcastle"])
 router.include_router(hosts_router, tags=["Hosts"])
-router.include_router(update_router)
 router.include_router(security_router)
 router.include_router(secrets_router, tags=["Secrets"])
 router.include_router(deploy_router)
