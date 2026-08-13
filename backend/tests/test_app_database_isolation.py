@@ -95,7 +95,7 @@ async def test_app_database_reset_clears_rows_between_tests():
 
     Kanban uses ``KanbanBase.metadata``; app.database uses the wider
     ``Base.metadata`` (the device-local ``claude_registry.db`` Base), which
-    includes projects / mcp_tokens / sandcastle / security_audit / etc.
+    includes projects / mcp_tokens / sandcastle / etc.
     The drop_all+create_all pass exercises every one.
     """
     from app.database import AsyncSessionLocal

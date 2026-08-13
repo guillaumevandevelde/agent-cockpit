@@ -135,9 +135,6 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 ./scripts/check-card-where-paths.sh           # Flag open kaarten waarvan een `Where:`-pad niet bestaat; strip `:line`/`::symbol`/`#anchor` (advisory; --strict = exit 1)
 ./scripts/check-card-where-paths.sh --card=<id>  # Authoring-time check op één net gefilede kaart (bereikt ook Done-kaarten)
 
-# Kanban-meta vs. security-profile conflict check (zichtbaarheid voor load-bearing overrides — kaart d5642a57…)
-./scripts/check-kanban-meta-security-conflicts.sh   # Flag KanbanMeta skip_permissions/transport overrides die het project_security_profiles-risicoprofiel tegenspreken (advisory; --strict = exit 1)
-
 # Dispatch resolver-usage self-check (gate dat ad-hoc provider/model lookups in dispatch.py flagt — kaart 931855b0…)
 ./scripts/check-dispatch-resolver-usage.sh          # Flag ad-hoc provider/model lookups in backend/app/kanban/dispatch.py die de canonieke resolve_effective_provider_and_model omzeilen (advisory; --strict = exit 1)
 

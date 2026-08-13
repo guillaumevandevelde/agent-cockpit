@@ -20,12 +20,6 @@ this module is a thin FastAPI shell. The store writes
 ``0o600``, encrypted under a symmetric passphrase (env-var or OS keyring).
 See ``docs/features/secrets.md`` for the threat model and recovery
 procedure.
-
-Mutations (PUT/DELETE) also write one row per call to the
-``security_audit`` table — see
-``docs/cockpit/veilig-bouwen-en-uitleveren.md`` §4.8. The audit row
-carries the secret *name* and never the value (the value lives only
-in the encrypted file and the request body).
 """
 from __future__ import annotations
 
@@ -36,7 +30,6 @@ from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
 from app.database import AsyncSessionLocal
-from app.models.security_audit import SecurityAuditKind
 from app.services.secrets_store import (
     AGESecretStore,
     AuthenticationError,
@@ -44,7 +37,6 @@ from app.services.secrets_store import (
     SecretNotFound,
     SecretStoreError,
 )
-from app.services.security_audit_service import record as audit_record
 
 logger = logging.getLogger(__name__)
 
@@ -154,20 +146,6 @@ async def put_secret(
     except SecretStoreError as e:
         logger.exception("put secret failed for %s/%s", project_key, name)
         raise HTTPException(status_code=500, detail=f"put failed: {e}")
-    # Audit row — name only, never the value. Best-effort: an audit
-    # failure logs and continues; the secret itself is already on disk.
-    try:
-        async with AsyncSessionLocal() as db:
-            await audit_record(
-                db,
-                kind=SecurityAuditKind.SECRETS_PUT,
-                project_key=project_key,
-                actor="secrets-api",
-                payload_ref={"name": name},
-            )
-            await db.commit()
-    except Exception:
-        logger.exception("security_audit insert failed for secrets_put (%s/%s)", project_key, name)
     # Logged without the value (the store does the same internally).
     logger.info("secret upserted for project=%s name=%s", project_key, name)
     return SecretGetResponse(name=name, value=payload.value)
@@ -240,19 +218,6 @@ async def delete_secret(
     except SecretStoreError as e:
         logger.exception("delete secret failed for %s/%s", project_key, name)
         raise HTTPException(status_code=500, detail=f"delete failed: {e}")
-    # Audit row — name only. Best-effort.
-    try:
-        async with AsyncSessionLocal() as db:
-            await audit_record(
-                db,
-                kind=SecurityAuditKind.SECRETS_DELETE,
-                project_key=project_key,
-                actor="secrets-api",
-                payload_ref={"name": name},
-            )
-            await db.commit()
-    except Exception:
-        logger.exception("security_audit insert failed for secrets_delete (%s/%s)", project_key, name)
     logger.info("secret deleted for project=%s name=%s", project_key, name)
 
 

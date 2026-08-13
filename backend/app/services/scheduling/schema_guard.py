@@ -40,7 +40,6 @@ async def ensure_model_columns(engine: AsyncEngine) -> None:
     import app.models.database  # noqa: F401
     import app.models.mcp_token  # noqa: F401
     import app.models.sandcastle  # noqa: F401
-    import app.models.security_profile  # noqa: F401
     from app.database import Base
 
     async with engine.begin() as conn:

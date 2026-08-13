@@ -90,63 +90,6 @@ from app.utils.timeutils import ensure_aware
 logger = logging.getLogger(__name__)
 
 
-# ---- security-audit invulpunten -------------------------------------------
-#
-# Dispatch mutates ``KanbanMeta`` (in the kanban DB) while the security-audit
-# table lives in the app DB (per docs/cockpit/veilig-bouwen-en-uitleveren.md
-# §4.8 "Apart"). The two stores have no shared transaction, so the audit
-# insert runs in its own short-lived session and is **best-effort**: a failed
-# audit row is logged and dropped, never propagated back to the caller. The
-# meta-flip is the security-relevant action; the audit is observability.
-#
-# ``actor`` is the request-level actor (user/operator). For dispatch we use
-# the same constant the REST router uses — there's no per-user identity
-# layer yet, so anything that mutates the board via the REST API is
-# attributed to the same default actor. Per-user attribution is follow-up.
-
-
-async def _record_audit(
-    kanban_session,
-    *,
-    kind: str,
-    project_key: str,
-    payload_ref: dict,
-) -> None:
-    """Insert one security-audit row, swallowing all errors.
-
-    The leading ``kanban_session`` is the kanban-DB session the caller is
-    already using for the meta write above; it's accepted (and ignored)
-    purely so the call-site reads naturally as a sibling of the meta
-    write. The audit insert runs against the **app DB** (``security_audit``
-    lives there — see veilig-bouwen-en-uitleveren.md §4.8) via its own
-    short-lived session.
-
-    Best-effort: a failed audit row is logged and dropped, never
-    propagated back to the caller. The meta-flip is the security-relevant
-    action; the audit is observability.
-    """
-    try:
-        from app.database import AsyncSessionLocal
-        from app.models.security_audit import SecurityAuditKind
-        from app.services.security_audit_service import record
-
-        async with AsyncSessionLocal() as db:
-            await record(
-                db,
-                kind=SecurityAuditKind(kind),
-                project_key=project_key,
-                actor="dispatch-api",
-                payload_ref=payload_ref,
-            )
-            await db.commit()
-    except Exception:
-        logger.exception(
-            "security_audit insert failed (kind=%s project_key=%s); "
-            "the dispatch write itself was NOT rolled back",
-            kind,
-            project_key,
-        )
-
 def _cli_id_for_opencode_provider(
     cli_id: str,
     provider: str | None,
@@ -364,12 +307,6 @@ async def set_autodispatch(session, project_key: str, enabled: bool) -> None:
         # start at <ts>" hint.
         await clear_boot_disabled_marker(session, project_key)
     await session.flush()
-    await _record_audit(
-        session,
-        kind="autodispatch_change",
-        project_key=project_key,
-        payload_ref={"enabled": enabled},
-    )
 
 
 # ---- boot-disabled visibility marker (per-project) -------------------------
@@ -560,65 +497,18 @@ async def reset_autodispatch_for_boot(session) -> bool:
     return False
 
 
-# ---- risk_class-driven dispatch defaults ----------------------------------
-#
-# A project's ``ProjectSecurityProfile.risk_class`` (docs/cockpit/risk-class-
-# taxonomie.md §0) drives the safe-by-default dispatch stance when no explicit
-# per-project KanbanMeta override is set. Only the path-anchored ``meta`` class
-# (Cockpit's own repo) keeps the historical permissive defaults — every
-# product/untrusted class enforces permissions and runs in a sandbox. Signals
-# may lower trust autonomously, never raise it.
-
-
-async def _project_risk_class(project_key: str) -> str | None:
-    """Resolve ``project_key`` to its ``ProjectSecurityProfile.risk_class``.
-
-    Returns ``None`` when the key can't be resolved to a registered project
-    path, the project has no security profile yet, or on any DB error —
-    callers treat ``None`` as "no profile, keep the permissive meta default".
-    """
-    try:
-        project_path = await resolve_project_path(project_key)
-        if project_path is None:
-            return None
-        from app.database import AsyncSessionLocal
-        from app.services.security_profile_service import SecurityProfileService
-        async with AsyncSessionLocal() as db:
-            profile = await SecurityProfileService(db).get(project_path)
-        return profile.risk_class if profile is not None else None
-    except Exception:
-        logger.debug("risk_class lookup failed for %s", project_key, exc_info=True)
-        return None
-
-
-def _skip_permissions_for_risk_class(risk_class: str | None) -> bool:
-    """Safe ``skip_permissions`` default for a ``risk_class``.
-
-    Only ``meta`` (and the no-profile fallback) keep the permissive bypass;
-    every product/untrusted class defaults to enforcing permissions.
-    """
-    return risk_class is None or risk_class == "meta"
-
-
-def _transport_for_risk_class(risk_class: str | None) -> str:
-    """Safe ``default_transport`` for a ``risk_class``.
-
-    ``meta`` (and the no-profile fallback) stay on the host worktree; every
-    product/untrusted class defaults to the isolating ``sandcastle`` transport.
-    """
-    if risk_class is None or risk_class == "meta":
-        return DEFAULT_TRANSPORT
-    return "sandcastle"
-
-
 async def get_skip_permissions(session, project_key: str) -> bool:
+    """Whether dispatch passes the permission-bypass flag for a project.
+
+    An explicit per-project ``KanbanMeta`` override wins. Without one the
+    answer is ``True`` — the permissive default this repo ran on before the
+    risk_class layer existed, and the default it went back to when the
+    Security feature was removed.
+    """
     row = await session.get(KanbanMeta, SKIP_PERMISSIONS_PREFIX + project_key)
     if row is not None:
         return row.value == "1"  # explicit per-project override wins
-    # No explicit override: consult the project's security profile. A
-    # product/untrusted risk_class enforces permissions (skip=False); a meta
-    # project (or no profile at all) keeps the historical bypass.
-    return _skip_permissions_for_risk_class(await _project_risk_class(project_key))
+    return True
 
 
 async def set_skip_permissions(session, project_key: str, enabled: bool) -> None:
@@ -630,21 +520,13 @@ async def set_skip_permissions(session, project_key: str, enabled: bool) -> None
     else:
         row.value = "1" if enabled else "0"
     await session.flush()
-    await _record_audit(
-        session,
-        kind="skip_permissions_flip",
-        project_key=project_key,
-        payload_ref={"enabled": enabled},
-    )
 
 
 async def get_default_transport(session, project_key: str) -> str:
     row = await session.get(KanbanMeta, TRANSPORT_PREFIX + project_key)
     if row and row.value in TRANSPORTS:
         return row.value  # explicit per-project override wins
-    # No explicit override: let the project's risk_class pick the transport
-    # (product/untrusted -> sandcastle, meta/none -> worktree).
-    return _transport_for_risk_class(await _project_risk_class(project_key))
+    return DEFAULT_TRANSPORT
 
 
 async def set_default_transport(session, project_key: str, value: str) -> None:
@@ -659,12 +541,6 @@ async def set_default_transport(session, project_key: str, value: str) -> None:
         row.value = value
     await session.flush()
     await _sync_sandcastle_enabled(project_key, value == "sandcastle")
-    await _record_audit(
-        session,
-        kind="transport_change",
-        project_key=project_key,
-        payload_ref={"before": before, "after": value},
-    )
 
 
 # ---- model options: device-local cache of `claude -p "/model"`'s alias list ----
@@ -4565,9 +4441,10 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
     session_registry.reserve_external(session_name)
 
     # Project-scoped secrets reach the sandbox container as env vars (never the
-    # backend's os.environ). risk_class-driven defaults route product/untrusted
-    # projects here, so this is the transport where per-project secret isolation
-    # actually matters. Best-effort: no store / no passphrase -> {}.
+    # backend's os.environ). This is the transport where per-project secret
+    # isolation actually matters, so a project that opts into it via an
+    # explicit KanbanMeta transport override gets that isolation here.
+    # Best-effort: no store / no passphrase -> {}.
     project_key = safe_resolve_project_key(directory)
     extra_env = _resolve_project_secrets(project_key)
 

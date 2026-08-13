@@ -19,7 +19,7 @@ a session that still holds it.
 
 Scope: **remote**-derived identity only. Path-derived columns
 (``resume_project_folder``, ``session_cache.project_folder``,
-``usage_cache.project_path``, ``mail_*``, ``project_security_profiles``) encode
+``usage_cache.project_path``) encode
 the on-disk checkout location and are untouched — they only change if the
 working directory itself is renamed, which is a separate migration.
 
@@ -53,7 +53,6 @@ TARGETS = [
     ("kanban", "kanban_columns", "project_key", "exact"),
     ("kanban", "kanban_gates", "project_key", "exact"),
     ("kanban", "kanban_meta", "key", "prefix"),
-    ("registry", "security_audit", "project_key", "exact"),
 ]
 
 

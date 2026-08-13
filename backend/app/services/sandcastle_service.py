@@ -12,8 +12,6 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models.sandcastle import SandcastleConfig, SandcastleRun
-from app.models.security_audit import SecurityAuditKind
-from app.services.security_audit_service import record as audit_record
 from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
@@ -242,13 +240,6 @@ class SandcastleService:
                 if hasattr(config, k) and before.get(k) != getattr(config, k, None)
             }
             if changed:
-                await audit_record(
-                    session,
-                    kind=SecurityAuditKind.SANDCASTLE_CONFIG_CHANGE,
-                    project_key=project_path,
-                    actor="sandcastle-api",
-                    payload_ref={"changed": changed},
-                )
                 await session.commit()
             return config
 
@@ -268,18 +259,6 @@ class SandcastleService:
             await session.commit()
             await session.refresh(config)
 
-            await audit_record(
-                session,
-                kind=SecurityAuditKind.SANDCASTLE_CONFIG_CHANGE,
-                project_key=config.project_path,
-                actor="sandcastle-api",
-                payload_ref={
-                    "changed": {
-                        "enabled": {"before": before_enabled, "after": config.enabled},
-                    },
-                },
-            )
-            await session.commit()
             return config
 
     async def list_configs(self) -> list[SandcastleConfig]:
@@ -305,8 +284,7 @@ class SandcastleService:
         the run-config JSON and injected as the sandbox provider's ``env`` by
         ``sandcastle_runner.mjs`` for the container providers (docker/podman);
         the no-sandbox provider runs on the host and takes no ``env`` option, so
-        secrets are not injected there (moot — risk_class routes product/
-        untrusted projects to a container, not no-sandbox).
+        secrets are not injected there.
         """
         async with AsyncSessionLocal() as session:
             # Get config

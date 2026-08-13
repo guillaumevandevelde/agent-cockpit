@@ -33,7 +33,6 @@ from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
 from .session_hooks.router import router as session_hooks_router
 from .secrets import router as secrets_router
-from .security import router as security_router
 from .sessions import router as sessions_router
 from .status import router as status_router
 from .statusline import router as statusline_router
@@ -85,7 +84,6 @@ router.include_router(status_router, tags=["Status"])
 router.include_router(session_hooks_router)
 router.include_router(webhooks_router)
 router.include_router(recurring_triggers_router)
-router.include_router(security_router)
 router.include_router(kanban_router)
 router.include_router(run_activity_router)
 router.include_router(app_runs_router)
@@ -93,6 +91,5 @@ router.include_router(apm_router)
 router.include_router(files_router)
 router.include_router(mcp_server_router, tags=["MCP Server"])
 router.include_router(sandcastle_router, tags=["Sandcastle"])
-router.include_router(security_router)
 router.include_router(secrets_router, tags=["Secrets"])
 router.include_router(deploy_router)

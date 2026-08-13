@@ -35,7 +35,6 @@ const SandcastlePage = lazy(() => import('./features/sandcastle/SandcastlePage')
 const SubscriptionsPage = lazy(() => import('./features/subscriptions/SubscriptionsPage').then((m) => ({ default: m.SubscriptionsPage })))
 const BlueprintsPage = lazy(() => import('./features/blueprints').then((m) => ({ default: m.BlueprintsPage })))
 const PortfolioPage = lazy(() => import('./features/portfolio/PortfolioPage').then((m) => ({ default: m.PortfolioPage })))
-const SecurityProfilePage = lazy(() => import('./features/security/SecurityProfilePage').then((m) => ({ default: m.SecurityProfilePage })))
 const EndpointsPage = lazy(() => import('./features/endpoints/EndpointsPage').then((m) => ({ default: m.EndpointsPage })))
 
 function App() {
@@ -79,7 +78,6 @@ function App() {
                 <Route path="subscriptions" element={<SubscriptionsPage />} />
                 <Route path="blueprints" element={<BlueprintsPage />} />
                 <Route path="portfolio" element={<PortfolioPage />} />
-                <Route path="security" element={<SecurityProfilePage />} />
                 <Route path="endpoints" element={<EndpointsPage />} />
               </Route>
             </Routes>

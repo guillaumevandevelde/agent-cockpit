@@ -19,8 +19,6 @@ import app.models.mcp_token  # noqa: F401  (register tables for create_all)
 import app.models.recurring_trigger  # noqa: F401  (register tables for create_all)
 import app.models.run_instance  # noqa: F401  (register tables for create_all)
 import app.models.sandcastle  # noqa: F401  (register tables for create_all)
-import app.models.security_audit  # noqa: F401  (register tables for create_all)
-import app.models.security_profile  # noqa: F401  (register tables for create_all)
 from app.api.v1.router import router as api_v1_router
 from app.config import settings
 from app.database import init_db

@@ -56,7 +56,6 @@ const commonNavigation: NavGroup[] = [
     name: 'Operations',
     items: [
       { name: 'Portfolio', href: '/portfolio', icon: Building2 },
-      { name: 'Security', href: '/security', icon: Shield },
       { name: 'APM', href: '/apm', icon: Boxes },
       { name: 'Kanban', href: '/kanban', icon: KanbanSquare },
       { name: 'Agent Performance', href: '/agent-performance', icon: TrendingUp },

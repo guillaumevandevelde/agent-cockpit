@@ -407,22 +407,15 @@ def build_spawn_env(
     return SpawnEnv(env=merged, names=sorted(merged.keys()))
 
 
-# Audit-log sink for security-relevant spawn events. Persists one row per
-# invocation to the ``security_audit`` table; best-effort by design —
-# callers must not depend on this hook returning anything (always
-# callable, never raises) and var *names* are the only stable identifier
-# (no secret values).
+# Audit-log sink for security-relevant spawn events. Best-effort by design —
+# callers must not depend on this hook returning anything (always callable,
+# never raises) and var *names* are the only stable identifier (no secret
+# values).
 #
-# The function is **sync** because it lives in a sync call-site
-# (every spawn runs tmux via subprocess, not in an await chain). The
-# actual DB write is dispatched to the running event loop via
-# ``asyncio.ensure_future``; if no loop is running (sync tooling, test
-# fixtures without an async context), the write is dropped — the
-# ``logger.info`` line is the contract for that case.
-#
-# The function also still emits the structured ``logger.info`` line that
-# ``test_runs_spawn_env_isolation`` and the grep-style tooling rely on,
-# so an upgrade to a real table doesn't drop the log signal.
+# This used to also persist a row to the ``security_audit`` table. That table
+# went with the Security feature; the structured ``logger.info`` line below is
+# now the whole contract, and it is what ``test_runs_spawn_env_isolation`` and
+# the grep-style tooling read.
 def _record_audit(
     project_key: str | None,
     runtime: str | None,
@@ -430,7 +423,7 @@ def _record_audit(
     env_var_names: list[str],
     kind: str = "env_inject",
 ) -> None:
-    """Insert one ``security_audit`` row for an env-inject / run-start / run-stop.
+    """Log one audit line for an env-inject / run-start / run-stop.
 
     Replaces the two near-identical audit helpers that used to live in
     ``services/runs/spawn.py`` and ``services/runs/cc_spawn.py``. Spawn
@@ -449,41 +442,3 @@ def _record_audit(
         session_name,
         sorted(env_var_names),
     )
-    try:
-        import asyncio
-
-        from app.database import AsyncSessionLocal
-        from app.models.security_audit import SecurityAuditKind
-        from app.services.security_audit_service import record
-
-        async def _do_record() -> None:
-            async with AsyncSessionLocal() as db:
-                await record(
-                    db,
-                    kind=SecurityAuditKind(kind),
-                    project_key=project_key,
-                    actor="run-service",
-                    payload_ref={
-                        "session_or_instance": session_name,
-                        "runtime": runtime,
-                        "env_var_names": sorted(env_var_names),
-                    },
-                )
-                await db.commit()
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop is not None:
-            # Inside an event loop — schedule without blocking the
-            # originating sync call. Tests can monkeypatch this helper
-            # directly (see test_runs_spawn_env_isolation) when they
-            # need to capture the audit payload without a DB.
-            loop.create_task(_do_record())
-    except Exception:
-        logger.exception(
-            "security_audit insert failed (kind=%s project_key=%s)",
-            kind,
-            project_key,
-        )

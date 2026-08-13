@@ -23,7 +23,7 @@ import app.kanban.models  # noqa: F401
 
 # Same rationale for ``app.models``: the device-local ``claude_registry.db``
 # tables (project / mcp_token / sandcastle / scheduled /
-# security_audit / ...) only land on ``Base.metadata`` once each module in
+# ...) only land on ``Base.metadata`` once each module in
 # ``app/models/*.py`` has been imported. Without this, a test that only
 # pulls in ``app.services.x`` would see a test DB missing any table
 # registered by a model file the test didn't import transitively. The
@@ -90,7 +90,7 @@ async def _reset_app_database_tables():
 
     Mirrors ``_reset_test_db`` for the wider ``claude_registry.db`` schema:
     every test starts with a fresh set of project / mcp_token / sandcastle /
-    scheduled / security_audit / ... rows so prior tests can't
+    scheduled / ... rows so prior tests can't
     leak into the current one. The drop_all + create_all pass is fast enough
     that even tests that don't touch the DB pay only milliseconds.
 
