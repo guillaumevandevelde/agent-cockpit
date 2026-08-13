@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 126 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 128 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -203,7 +203,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
 | [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
 
-### Analysis (36)
+### Analysis (37)
 
 | Document | Status |
 |---|---|
@@ -243,6 +243,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)](./subscription-verbruik-inzicht-analyse.md) | 🟢 active |
 | [Token-optimalisatie — analyse & aanbevelingen](./token-optimization-analysis.md) | 🟢 active |
 | [Card work-type → agent-routing — analyse & aanbevelingen](./work-type-routing-analysis.md) | 🟢 active |
+| [Worktree-isolatie van Claude Code: wat onze dispatch wel en niet krijgt](./worktree-isolatie-meting.md) | 🟢 active |
 
 ### (geen type) (2)
 
@@ -250,6 +251,12 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 |---|---|
 | [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md) | — |
 | [ci-gate-decision.md](./ci-gate-decision.md) | — |
+
+### how-to (1)
+
+| Document | Status |
+|---|---|
+| [Auto-resume — sessie hervatten na een limietmelding](./auto-resume.md) | 🟢 active |
 
 <!-- END GENERATED DOC INDEX -->
 ## Regels
