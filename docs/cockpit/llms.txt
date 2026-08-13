@@ -53,6 +53,7 @@
 
 - [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md): type=plan status=superseded
 - [Kanban Implementation Plan](./kanban-plan.md): type=plan status=active
+- [Kern terugbrengen — vijf features verwijderen, Usage repareren](./kern-terugbrengen-plan.md): type=plan status=active
 - [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md): type=plan status=active
 - [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md): type=plan status=active
 - [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md): type=plan status=active
@@ -148,3 +149,7 @@
 
 - [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md): type=unknown status=unknown
 - [ci-gate-decision.md](./ci-gate-decision.md): type=unknown status=unknown
+
+## how-to
+
+- [Auto-resume — sessie hervatten na een limietmelding](./auto-resume.md): type=how-to status=active

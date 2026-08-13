@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 126 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 128 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -143,12 +143,13 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md) | 🟢 active |
 | [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md) | 🟢 active |
 
-### Plan (5)
+### Plan (6)
 
 | Document | Status |
 |---|---|
 | [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md) | ⚪ superseded |
 | [Kanban Implementation Plan](./kanban-plan.md) | 🟢 active |
+| [Kern terugbrengen — vijf features verwijderen, Usage repareren](./kern-terugbrengen-plan.md) | 🟢 active |
 | [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md) | 🟢 active |
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
@@ -250,6 +251,12 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 |---|---|
 | [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md) | — |
 | [ci-gate-decision.md](./ci-gate-decision.md) | — |
+
+### how-to (1)
+
+| Document | Status |
+|---|---|
+| [Auto-resume — sessie hervatten na een limietmelding](./auto-resume.md) | 🟢 active |
 
 <!-- END GENERATED DOC INDEX -->
 ## Regels
