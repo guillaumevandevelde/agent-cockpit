@@ -95,8 +95,8 @@ async def test_app_database_reset_clears_rows_between_tests():
 
     Kanban uses ``KanbanBase.metadata``; app.database uses the wider
     ``Base.metadata`` (the device-local ``claude_registry.db`` Base), which
-    includes agent_mail / projects / mcp_tokens / sandcastle /
-    security_audit / etc. The drop_all+create_all pass exercises every one.
+    includes projects / mcp_tokens / sandcastle / security_audit / etc.
+    The drop_all+create_all pass exercises every one.
     """
     from app.database import AsyncSessionLocal
     from app.models.database import Project
@@ -130,16 +130,16 @@ async def test_app_database_tables_cover_all_models_after_eager_import():
     """After the conftest's eager ``import app.models``, ``Base.metadata`` has a
     table for every model in every ``app/models/*.py`` file.
 
-    The agent_mail tests previously had to call ``create_all`` themselves
-    because ``Base.metadata`` was empty until something imported
-    ``app.models.agent_mail``. With the shared mechanism, the conftest does
-    that import once and every test inherits a fully-populated metadata.
+    Tests used to call ``create_all`` themselves because ``Base.metadata``
+    stayed empty until something imported the model module they needed. With
+    the shared mechanism, the conftest does that import once and every test
+    inherits a fully-populated metadata.
     """
     tables = set(Base.metadata.tables.keys())
 
     expected_core_tables = {
         "projects", "backups", "mcp_access_tokens",
-        "mail_team_members", "mail_messages", "mail_agent_sessions",
+        "sandcastle_configs", "sandcastle_runs",
     }
     missing = expected_core_tables - tables
     assert not missing, f"Base.metadata is missing core tables after eager import: {missing}"

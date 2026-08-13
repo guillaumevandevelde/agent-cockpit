@@ -196,7 +196,7 @@ ToolSearch defert ze). Referentie-meetrecept:
    - **Zet `metadata={"spec_doc": "<repo-relatief docpad>"}`** op een kind-kaart
      die een specifiek canoniek `docs/cockpit/*.md`-doc **implementeert of
      bijwerkt** — op het `create_card`-moment (bv.
-     `metadata={"spec_doc": "docs/cockpit/agent-mail-spec.md"}`). Dit is de
+     `metadata={"spec_doc": "docs/cockpit/sandcastle.md"}`). Dit is de
      voorwaartse *implements*-link: het doc dat de kaart aanstuurt, óók als de
      kaart dat doc niet zelf edit. Jij hebt de doc-context nu in de hand — je
      hebt net de bron-analyse gelezen — dus dit is het goedkoopste, meest

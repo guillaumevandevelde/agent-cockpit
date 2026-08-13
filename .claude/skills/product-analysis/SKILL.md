@@ -114,7 +114,7 @@ file reference (`backend/app/kanban/dispatch.py:1187`) or a doc reference
 know that it exists.
 
 **Start from `docs/cockpit/cockpit-capability-baseline.md`** — one screen per
-capability area (dispatch, worktrees + ship, multi-agent DAG, agent mail,
+capability area (dispatch, worktrees + ship, multi-agent DAG,
 providers/pool, board + Done gates, session lifecycle, observability), each
 claim already carrying a `file:line`. It saves you re-deriving our own side
 from scratch, which the first three analyses each did independently.

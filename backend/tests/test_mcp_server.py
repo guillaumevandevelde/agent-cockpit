@@ -135,15 +135,11 @@ async def test_mcp_tools_registered():
     assert "get_config" in names
     assert "list_config_files" in names
     assert "list_projects" in names
-    assert "agent_mail_whoami" in names
-    assert "agent_mail_list_team" in names
-    assert "agent_mail_check_inbox" in names
-    assert "agent_mail_send_message" in names
-    assert "agent_mail_reply" in names
-    assert "agent_mail_ack_message" in names
-    assert "agent_mail_request_context" in names
-    assert "agent_mail_create_handoff" in names
-    assert len(tools) == 15
+    # The eight ``agent_mail_*`` tools were removed with the Agent Mail
+    # feature; the count below is the guard that keeps a re-added tool from
+    # slipping in unnoticed.
+    assert not any(n.startswith("agent_mail_") for n in names)
+    assert len(tools) == 7
 
 
 @pytest.mark.asyncio

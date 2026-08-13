@@ -5,7 +5,7 @@ lifecycle-hook ingest (``/hook-event``), the hook install/status pair, and
 the auto-resume toggle. None of those were scheduled-messages concerns;
 they sit on top of the shared session substrate (``idle_state``,
 ``session_registry``, ``session_signals``, ``auto_resume``) and feed
-kanban-dispatch + Agent Mail. The endpoints moved here so the URL line
+kanban-dispatch. The endpoints moved here so the URL line
 up with what they do, and the scheduled-messages feature itself could
 be deleted (see ``docs/cockpit/scheduled-trigger-consolidatie-decision.md``
 §5.2).

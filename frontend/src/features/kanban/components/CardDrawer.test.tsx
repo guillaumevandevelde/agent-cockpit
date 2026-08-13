@@ -778,13 +778,13 @@ describe("CardDrawer spec link", () => {
   it("shows the linked spec doc path from metadata.spec_doc", () => {
     const card: Card = {
       ...baseCard,
-      metadata: { spec_doc: "docs/cockpit/agent-mail-spec.md" },
+      metadata: { spec_doc: "docs/cockpit/sandcastle.md" },
     };
     render(
       <CardDrawerWithRouter card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
     const section = screen.getByTestId("spec-link-section");
-    expect(section.textContent).toMatch(/docs\/cockpit\/agent-mail-spec\.md/);
+    expect(section.textContent).toMatch(/docs\/cockpit\/sandcastle\.md/);
   });
 
   it("renders a URL spec_doc as a clickable link", () => {

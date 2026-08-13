@@ -55,7 +55,7 @@ test_engine = create_async_engine(
 def _set_sqlite_pragma(dbapi_conn, _):
     # Same WAL + busy_timeout + foreign_keys pragmas as the prod
     # ``app.database`` engine, so a test that writes a tight loop of
-    # commits (agent_mail inbox fan-out, runs bulk resume, etc.) doesn't
+    # commits (runs bulk resume, etc.) doesn't
     # see "database is locked" on the *next* test's reset pass under
     # NullPool's per-checkout connection churn.
     cur = dbapi_conn.cursor()

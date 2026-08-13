@@ -22,7 +22,7 @@ import app.kanban.db as _kanban_db
 import app.kanban.models  # noqa: F401
 
 # Same rationale for ``app.models``: the device-local ``claude_registry.db``
-# tables (project / mcp_token / sandcastle / scheduled / agent_mail /
+# tables (project / mcp_token / sandcastle / scheduled /
 # security_audit / ...) only land on ``Base.metadata`` once each module in
 # ``app/models/*.py`` has been imported. Without this, a test that only
 # pulls in ``app.services.x`` would see a test DB missing any table
@@ -36,7 +36,7 @@ import app.models  # noqa: F401
 # set: Project, Backup, AutoBackupSettings, Marketplace, ...). Import it
 # explicitly here so the per-test ``drop_all``/``create_all`` pass sees
 # every core table. Without this, a test that only pulls in e.g.
-# ``app.services.agent_mail_service`` would see ``projects``/``backups``
+# ``app.services.project_service`` would see ``projects``/``backups``
 # missing from the test DB and fail with ``no such table: projects``.
 import app.models.database  # noqa: F401
 from tests.app_database_test_db import TestSessionLocal as _AppDbSessionLocal
@@ -90,7 +90,7 @@ async def _reset_app_database_tables():
 
     Mirrors ``_reset_test_db`` for the wider ``claude_registry.db`` schema:
     every test starts with a fresh set of project / mcp_token / sandcastle /
-    scheduled / agent_mail / security_audit / ... rows so prior tests can't
+    scheduled / security_audit / ... rows so prior tests can't
     leak into the current one. The drop_all + create_all pass is fast enough
     that even tests that don't touch the DB pay only milliseconds.
 
@@ -111,9 +111,8 @@ def _reset_singleton_state():
 
     Sibling to ``_reset_app_database_tables``: the DB reset makes
     auto-increment ids restart at 1 every test, which collides with
-    singletons that key per-id state on the instance (e.g.
-    ``external_agent_mail_service._send_windows`` keyed by ``actor.id``,
-    ``agent_mail_service._last_auto_nudge_at`` keyed by ``member_id``).
+    singletons that key per-id state on the instance (a rate-limit window
+    keyed by actor id, a cooldown timestamp keyed by member id).
 
     Self-improve kanban card 42f44a05: keeps the list in one place
     (``app.services._testing.reset_all_singleton_test_state``) so the next

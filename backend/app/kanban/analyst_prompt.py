@@ -137,7 +137,7 @@ Werkwijze (modus 1):
    **Spec-link (metadata["spec_doc"]):** implementeert/bijwerkt een kind-kaart
    een specifiek canoniek `docs/cockpit/*.md`-doc, zet dan op het create_card-
    moment metadata={"spec_doc": "<repo-relatief docpad>"} op die kind-kaart
-   (bv. metadata={"spec_doc": "docs/cockpit/agent-mail-spec.md"}). Dit is de
+   (bv. metadata={"spec_doc": "docs/cockpit/sandcastle.md"}). Dit is de
    voorwaartse "implements"-link: het doc dat de kaart aanstuurt, ook als de
    kaart dat doc niet zelf edit. Je hebt de doc-context nu in de hand (je hebt
    net de bron-analyse gelezen), dus dit is het enige moment waarop de link
