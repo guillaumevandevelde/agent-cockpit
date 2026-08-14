@@ -26,9 +26,12 @@ export function SubscriptionUsageSection() {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [load])
 
-  // Most providers publish nothing at all. Listing seven rows of which six
-  // say "no signal" buries the one row that carries a real number, so the
-  // signal-less ones collapse into a footnote instead.
+  // A silent row must never bury a measured one. This mattered most when
+  // six of seven rows said "no signal"; the list is four held
+  // subscriptions now and all four have a quota source, so the footnote
+  // should normally be empty — if it is not, something stopped
+  // reporting, which is exactly when it deserves to be visible but not
+  // dominant.
   const [measured, silent] = useMemo(() => {
     const all = rows ?? []
     return [
@@ -42,8 +45,10 @@ export function SubscriptionUsageSection() {
       <CardHeader>
         <CardTitle>Usage</CardTitle>
         <CardDescription>
-          Tokens consumed in the current rate window, summed from local session logs. Anthropic publishes no
-          quota figure for Pro/Max, so there is no percentage here — only what was measured.
+          Consumption per rate window, against each vendor's own limit. Windows differ per subscription —
+          Anthropic and MiniMax meter a session and a week, ChatGPT Go a single month, opencode Go three
+          dollar caps. "Measured" is the vendor's own figure; "measured locally" is computed here from
+          local records and a published limit.
         </CardDescription>
       </CardHeader>
       <CardContent>
