@@ -25,6 +25,7 @@ terechtkomen — het regressie-schild tegen herhaling van de
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,6 +37,24 @@ from app.services.subscriptions.base import SubscriptionUsage, SubscriptionUsage
 from app.services.subscriptions.minimax import MinimaxUsageProvider
 from app.services.subscriptions.router import RouterUsageProvider
 from app.services.subscriptions.unknown import UnknownUsageProvider
+
+
+@pytest.fixture(autouse=True)
+def _no_real_statusline_capture(monkeypatch, tmp_path):
+    """Keep the Anthropic ladder on its local-estimate rung by default.
+
+    ``read_windows`` otherwise reads this developer's real
+    ``~/.claude-registry/rate-limits.json``. Once the statusline wrapper
+    is installed that file exists, and every assertion in this module
+    about ``schatting``/``verbruikt`` would flip to ``exact`` depending
+    on whether a terminal happened to be open — a suite that passes or
+    fails based on host state. Tests that want the official rung build
+    their own capture file and pass its path explicitly.
+    """
+    monkeypatch.setattr(
+        "app.services.subscriptions.statusline_state.DEFAULT_STATE_PATH",
+        tmp_path / "no-capture.json",
+    )
 
 
 def _make_block(
@@ -298,6 +317,48 @@ class TestAnthropicUsageProviderModelAttribution:
         assert usage.beschikbaar is True
 
 
+#: Verbatim shape of ``GET /v1/token_plan/remains``, captured from a live
+#: Coding Plan key on 2026-08-14. Interval window ``end-start`` is exactly
+#: 18,000,000 ms (5h); weekly is exactly 604,800,000 ms (7d). The account
+#: was at 100% interval remaining and 56% weekly remaining, i.e. 44% of
+#: the week consumed — the numbers the assertions below are pinned to.
+MINIMAX_LIVE_PAYLOAD = {
+    "model_remains": [
+        {
+            "start_time": 1786701600000,
+            "end_time": 1786719600000,
+            "remains_time": 9864695,
+            "current_interval_total_count": 0,
+            "current_interval_usage_count": 0,
+            "model_name": "general",
+            "current_weekly_total_count": 0,
+            "current_weekly_usage_count": 0,
+            "weekly_start_time": 1786320000000,
+            "weekly_end_time": 1786924800000,
+            "weekly_remains_time": 215064695,
+            "current_interval_status": 1,
+            "current_interval_remaining_percent": 100,
+            "current_weekly_status": 1,
+            "current_weekly_remaining_percent": 56,
+        },
+        {
+            # Separate product on its own windows — must never be summed
+            # into, or mistaken for, the text/coding quota.
+            "start_time": 1786665600000,
+            "end_time": 1786752000000,
+            "model_name": "video",
+            "weekly_start_time": 1786320000000,
+            "weekly_end_time": 1786924800000,
+            "current_interval_status": 3,
+            "current_interval_remaining_percent": 100,
+            "current_weekly_status": 3,
+            "current_weekly_remaining_percent": 100,
+        },
+    ],
+    "base_resp": {"status_code": 0, "status_msg": "success"},
+}
+
+
 class TestMinimaxUsageProvider:
     """MiniMax remote API — exact wanneer de probe werkt, anders onbekend.
 
@@ -307,8 +368,7 @@ class TestMinimaxUsageProvider:
 
     def setup_method(self):
         self.api_key = "test-key"
-        self.base_url = "https://api.minimax.io/anthropic"
-        self.probe_url = "https://api.minimax.io/anthropic/account/usage"
+        self.probe_url = "https://api.minimax.io/v1/token_plan/remains"
         self.provider = MinimaxUsageProvider(
             api_key=self.api_key,
             probe_url=self.probe_url,
@@ -316,88 +376,192 @@ class TestMinimaxUsageProvider:
             subscription_label="Claude Code (MiniMax)",
         )
 
+    @staticmethod
+    @contextmanager
+    def _probe_returns(payload=None, *, json_error=False, http_error=False):
+        """Patch the httpx client used by the provider for one probe."""
+        import httpx
+
+        response = MagicMock()
+        response.status_code = 200
+        response.raise_for_status = MagicMock()
+        if json_error:
+            response.json.side_effect = ValueError("not json")
+        else:
+            response.json.return_value = payload
+
+        with patch(
+            "app.services.subscriptions.minimax.httpx.AsyncClient"
+        ) as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(
+                side_effect=httpx.HTTPError("boom") if http_error else None,
+                return_value=None if http_error else response,
+            )
+            mock_client_cls.return_value = mock_client
+            yield
+
     async def test_no_api_key_returns_onbekend_no_fabrication(self):
         # Without credentials we can't probe — don't fabricate.
-        provider = MinimaxUsageProvider(
-            api_key=None,
-            probe_url=self.probe_url,
-            subscription_id="claude-code:minimax",
-            subscription_label="Claude Code (MiniMax)",
-        )
+        provider = MinimaxUsageProvider(api_key=None, probe_url=self.probe_url)
         usage = await provider.get_usage()
         assert usage.betrouwbaarheid == "onbekend"
         assert usage.drempel_gebruikt is None
         assert usage.beschikbaar is True
         assert usage.bron == "minimax_api:no_credentials"
 
-    async def test_no_probe_url_returns_onbekend(self):
-        # We can't guess MiniMax's usage endpoint — absent an explicit
-        # probe URL we mark the signal onbekend (subscriptions.md:
-        # "no fabrication").
-        provider = MinimaxUsageProvider(
-            api_key=self.api_key,
-            probe_url=None,
-            subscription_id="claude-code:minimax",
-            subscription_label="Claude Code (MiniMax)",
-        )
+    async def test_explicit_none_probe_url_returns_onbekend(self):
+        provider = MinimaxUsageProvider(api_key=self.api_key, probe_url=None)
         usage = await provider.get_usage()
         assert usage.betrouwbaarheid == "onbekend"
         assert usage.bron == "minimax_api:no_probe_url"
 
-    async def test_successful_probe_with_remaining_ratio_returns_exact(self):
-        # The probe returns a structured payload with a 0-1 remaining
-        # ratio. Convert to drempel_gebruikt = 1 - remaining.
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = {"remaining_ratio": 0.4}
-        response.raise_for_status = MagicMock()
+    async def test_default_probe_url_is_the_international_host(self):
+        # The quota probe and the dispatch traffic must share a hostname;
+        # a default of None would silently disable the whole provider.
+        provider = MinimaxUsageProvider(api_key=self.api_key)
+        assert provider._probe_url == (
+            "https://api.minimax.io/v1/token_plan/remains"
+        )
 
-        with patch("app.services.subscriptions.minimax.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=response)
-            mock_client_cls.return_value = mock_client
-
+    async def test_live_payload_yields_both_windows_exact(self):
+        with self._probe_returns(MINIMAX_LIVE_PAYLOAD):
             usage = await self.provider.get_usage()
 
         assert usage.betrouwbaarheid == "exact"
-        assert usage.drempel_gebruikt == pytest.approx(0.6)
+        assert usage.bron == "minimax_api:token_plan_remains"
+        assert [w.label for w in usage.windows] == ["5h", "weekly"]
+
+    async def test_remaining_percent_is_inverted_to_used(self):
+        # The endpoint reports what is LEFT. 56% remaining is 44% used;
+        # shipping 0.56 here would tell the router the opposite of the
+        # truth and route onto the more-exhausted lane.
+        with self._probe_returns(MINIMAX_LIVE_PAYLOAD):
+            usage = await self.provider.get_usage()
+
+        five_h, weekly = usage.windows
+        assert five_h.used_fraction == pytest.approx(0.0)
+        assert weekly.used_fraction == pytest.approx(0.44)
+        assert weekly.verbruikt == pytest.approx(44.0)
+        assert weekly.limiet == pytest.approx(100.0)
+        assert weekly.eenheid == "%"
+
+    async def test_drempel_gebruikt_is_the_worst_window(self):
+        # 0% of the 5h and 44% of the week -> the scalar the router reads
+        # must be 0.44, not the average and not the first window.
+        with self._probe_returns(MINIMAX_LIVE_PAYLOAD):
+            usage = await self.provider.get_usage()
+
+        assert usage.drempel_gebruikt == pytest.approx(0.44)
+        assert usage.venster_label == "weekly"
         assert usage.beschikbaar is True
-        assert usage.bron == "minimax_api:probe"
-        assert usage.subscription_id == "claude-code:minimax"
 
-    async def test_successful_probe_at_or_near_limit_not_beschikbaar(self):
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = {"remaining_ratio": 0.0}
-        response.raise_for_status = MagicMock()
-
-        with patch("app.services.subscriptions.minimax.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=response)
-            mock_client_cls.return_value = mock_client
-
+    async def test_reset_timestamps_parsed_from_epoch_ms(self):
+        with self._probe_returns(MINIMAX_LIVE_PAYLOAD):
             usage = await self.provider.get_usage()
 
+        five_h, weekly = usage.windows
+        assert five_h.resets_at == datetime.fromtimestamp(1786719600, tz=UTC)
+        assert weekly.resets_at == datetime.fromtimestamp(1786924800, tz=UTC)
+        # Window durations are a property of the payload, not an assumption.
+        assert (1786719600000 - 1786701600000) == 5 * 60 * 60 * 1000
+        assert (1786924800000 - 1786320000000) == 7 * 24 * 60 * 60 * 1000
+
+    async def test_video_entry_is_never_read_as_the_text_quota(self):
+        # ``video`` sits at 100% remaining; picking model_remains[0] or
+        # merging entries would mask a nearly-exhausted coding quota.
+        payload = {
+            "model_remains": [
+                MINIMAX_LIVE_PAYLOAD["model_remains"][1],
+                {
+                    **MINIMAX_LIVE_PAYLOAD["model_remains"][0],
+                    "current_weekly_remaining_percent": 5,
+                },
+            ],
+            "base_resp": {"status_code": 0},
+        }
+        with self._probe_returns(payload):
+            usage = await self.provider.get_usage()
+
+        assert usage.drempel_gebruikt == pytest.approx(0.95)
+
+    async def test_missing_text_plan_returns_onbekend(self):
+        payload = {
+            "model_remains": [MINIMAX_LIVE_PAYLOAD["model_remains"][1]],
+            "base_resp": {"status_code": 0},
+        }
+        with self._probe_returns(payload):
+            usage = await self.provider.get_usage()
+
+        assert usage.betrouwbaarheid == "onbekend"
+        assert usage.bron == "minimax_api:no_text_plan"
+
+    async def test_application_error_under_http_200_returns_onbekend(self):
+        # MiniMax answers 200 for auth/quota failures; the verdict is in
+        # base_resp.status_code. Trusting the HTTP status would turn an
+        # error body into a fabricated "0% used".
+        payload = {
+            "base_resp": {"status_code": 1004, "status_msg": "auth failed"},
+        }
+        with self._probe_returns(payload):
+            usage = await self.provider.get_usage()
+
+        assert usage.betrouwbaarheid == "onbekend"
+        assert usage.bron == "minimax_api:probe_error"
+
+    async def test_inactive_window_status_is_dropped_not_guessed(self):
+        payload = {
+            "model_remains": [
+                {
+                    **MINIMAX_LIVE_PAYLOAD["model_remains"][0],
+                    "current_interval_status": 3,
+                }
+            ],
+            "base_resp": {"status_code": 0},
+        }
+        with self._probe_returns(payload):
+            usage = await self.provider.get_usage()
+
+        assert [w.label for w in usage.windows] == ["weekly"]
         assert usage.betrouwbaarheid == "exact"
-        assert usage.drempel_gebruikt == pytest.approx(1.0)
-        assert usage.beschikbaar is False
+
+    async def test_all_windows_inactive_returns_onbekend(self):
+        payload = {
+            "model_remains": [
+                {
+                    **MINIMAX_LIVE_PAYLOAD["model_remains"][0],
+                    "current_interval_status": 3,
+                    "current_weekly_status": 3,
+                }
+            ],
+            "base_resp": {"status_code": 0},
+        }
+        with self._probe_returns(payload):
+            usage = await self.provider.get_usage()
+
+        assert usage.betrouwbaarheid == "onbekend"
+        assert usage.drempel_gebruikt is None
+
+    async def test_out_of_range_percent_is_rejected(self):
+        payload = {
+            "model_remains": [
+                {
+                    **MINIMAX_LIVE_PAYLOAD["model_remains"][0],
+                    "current_interval_remaining_percent": 140,
+                    "current_weekly_remaining_percent": -3,
+                }
+            ],
+            "base_resp": {"status_code": 0},
+        }
+        with self._probe_returns(payload):
+            usage = await self.provider.get_usage()
+
+        assert usage.betrouwbaarheid == "onbekend"
 
     async def test_probe_http_error_returns_onbekend(self):
-        import httpx
-
-        with patch("app.services.subscriptions.minimax.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(
-                side_effect=httpx.HTTPError("boom")
-            )
-            mock_client_cls.return_value = mock_client
-
+        with self._probe_returns(http_error=True):
             usage = await self.provider.get_usage()
 
         assert usage.betrouwbaarheid == "onbekend"
@@ -406,19 +570,7 @@ class TestMinimaxUsageProvider:
         assert usage.bron == "minimax_api:probe_failed"
 
     async def test_probe_unparseable_payload_returns_onbekend(self):
-        # The endpoint returned 200 but with no usable usage signal.
-        response = MagicMock()
-        response.status_code = 200
-        response.json.side_effect = ValueError("not json")
-        response.raise_for_status = MagicMock()
-
-        with patch("app.services.subscriptions.minimax.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=response)
-            mock_client_cls.return_value = mock_client
-
+        with self._probe_returns(json_error=True):
             usage = await self.provider.get_usage()
 
         assert usage.betrouwbaarheid == "onbekend"

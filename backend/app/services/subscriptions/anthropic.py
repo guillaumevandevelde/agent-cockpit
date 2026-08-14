@@ -4,6 +4,15 @@ Per ``docs/cockpit/subscription-flexibiliteit-analyse.md`` §2.4 / §6.1:
 Anthropic publishes no usage API for Pro/Max. The only honest signal we
 have locally is the 5h billing block derived from JSONL logs.
 
+**Superseded in part, 2026-08-14.** The premise below — "Anthropic
+publishes no usage API for Pro/Max" — was true of *APIs* and is still
+true of them, but Claude Code itself now hands the official
+``rate_limits`` (5h + 7d utilization with reset times) to whatever
+renders the statusline. ``statusline_state.read_windows`` reads the
+capture of that blob, and it takes precedence over everything described
+here. The local estimate below is the fallback for when no capture
+exists — an unwrapped statusline, or no session since the window rolled.
+
 This provider used to scale that number by a user-picked plan-tier limit
 and report a percentage. That was removed: a measurement on this machine
 found every non-empty 5h block exceeding even the Max 20x community
@@ -26,12 +35,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app.services.subscriptions.base import (
     SubscriptionUsage,
     SubscriptionUsageProvider,
 )
+from app.services.subscriptions.statusline_state import read_windows
 
 if TYPE_CHECKING:
     from app.services.usage_service import UsageService
@@ -67,12 +78,34 @@ class AnthropicUsageProvider(SubscriptionUsageProvider):
         usage_service: UsageService,
         subscription_id: str = DEFAULT_ID,
         subscription_label: str = DEFAULT_LABEL,
+        state_path: Path | None = None,
+        now: datetime | None = None,
     ):
         self._usage_service = usage_service
         self.id = subscription_id
         self.label = subscription_label
+        self._state_path = state_path
+        self._now = now
 
     async def get_usage(self) -> SubscriptionUsage:
+        # Rung 1: Anthropic's own numbers, captured from the statusline.
+        # This is the only rung with a real denominator — the fallback
+        # below has no published limit to divide by, which is the whole
+        # reason this row used to report a bare token count.
+        official = read_windows(self._state_path, now=self._now)
+        if official:
+            return SubscriptionUsage.from_windows(
+                subscription_id=self.id,
+                subscription_label=self.label,
+                bron="statusline:rate_limits",
+                betrouwbaarheid="exact",
+                windows=official,
+            )
+
+        # Rung 2/3: the pre-existing local estimate, unchanged. Reached
+        # whenever no fresh capture exists — no statusline wrapper
+        # installed, no session rendered since the last window rolled
+        # over, or an account that publishes no limits.
         try:
             blocks = await self._usage_service.get_block_usage(
                 active=True, subscription_id=self.id

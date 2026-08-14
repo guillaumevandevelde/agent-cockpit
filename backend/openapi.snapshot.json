@@ -15326,7 +15326,7 @@
         "type": "object"
       },
       "SubscriptionUsageRow": {
-        "description": "One row on the Subscriptions-pagina \u2014 a single subscription's\n``SubscriptionUsage`` snapshot (``app.services.subscriptions.base``),\nwired to the wire format. Per-subscription; never normalised into a\ncross-vendor score (analyse \u00a76.2).",
+        "description": "One row on the Subscriptions-pagina \u2014 a single subscription's\n``SubscriptionUsage`` snapshot (``app.services.subscriptions.base``),\nwired to the wire format. Per-subscription; never normalised into a\ncross-vendor score (analyse \u00a76.2).\n\n``drempel_gebruikt`` is the worst of ``windows``; the list keeps the\nper-window detail that the max throws away, so the UI can render\n\"5h: 0% \u00b7 week: 44%\" instead of one unattributable number.",
         "properties": {
           "beschikbaar": {
             "title": "Beschikbaar",
@@ -15413,6 +15413,14 @@
               }
             ],
             "title": "Verbruikt"
+          },
+          "windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UsageWindowRow"
+            },
+            "title": "Windows",
+            "type": "array"
           }
         },
         "required": [
@@ -15914,6 +15922,64 @@
           "summary"
         ],
         "title": "UsageSummaryResponse",
+        "type": "object"
+      },
+      "UsageWindowRow": {
+        "description": "One rate window of a subscription \u2014 the wire form of\n``app.services.subscriptions.base.UsageWindow``.\n\n``used_fraction`` is always the part **consumed**, whatever the\nvendor reported (MiniMax publishes what is left and the provider\ninverts it). Values above 1.0 are legal: opencode Go's \"Use balance\"\noption lets spend run past the cap instead of blocking.",
+        "properties": {
+          "eenheid": {
+            "default": "%",
+            "title": "Eenheid",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "limiet": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limiet"
+          },
+          "resets_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resets At"
+          },
+          "used_fraction": {
+            "title": "Used Fraction",
+            "type": "number"
+          },
+          "verbruikt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verbruikt"
+          }
+        },
+        "required": [
+          "label",
+          "used_fraction"
+        ],
+        "title": "UsageWindowRow",
         "type": "object"
       },
       "ValidationError": {

@@ -2145,11 +2145,32 @@ class CITemplateApplyResponse(BaseModel):
     force: bool = False
 
 
+class UsageWindowRow(BaseModel):
+    """One rate window of a subscription — the wire form of
+    ``app.services.subscriptions.base.UsageWindow``.
+
+    ``used_fraction`` is always the part **consumed**, whatever the
+    vendor reported (MiniMax publishes what is left and the provider
+    inverts it). Values above 1.0 are legal: opencode Go's "Use balance"
+    option lets spend run past the cap instead of blocking."""
+
+    label: str
+    used_fraction: float
+    resets_at: datetime | None = None
+    verbruikt: float | None = None
+    limiet: float | None = None
+    eenheid: str = "%"
+
+
 class SubscriptionUsageRow(BaseModel):
     """One row on the Subscriptions-pagina — a single subscription's
     ``SubscriptionUsage`` snapshot (``app.services.subscriptions.base``),
     wired to the wire format. Per-subscription; never normalised into a
-    cross-vendor score (analyse §6.2)."""
+    cross-vendor score (analyse §6.2).
+
+    ``drempel_gebruikt`` is the worst of ``windows``; the list keeps the
+    per-window detail that the max throws away, so the UI can render
+    "5h: 0% · week: 44%" instead of one unattributable number."""
 
     subscription_id: str
     subscription_label: str
@@ -2162,6 +2183,7 @@ class SubscriptionUsageRow(BaseModel):
     eenheid: str = "tokens"
     venster_label: str | None = None
     reset_op: datetime | None = None
+    windows: list[UsageWindowRow] = []
 
 
 class SubscriptionUsageListResponse(BaseModel):

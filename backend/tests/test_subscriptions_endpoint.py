@@ -2,17 +2,15 @@
 per-subscription usage view (kaart 9bce091a...).
 
 Acceptance criteria under test:
-- one row per known subscription (claude-code:{anthropic,minimax,bedrock,
-  anthropic-compatible}, codex-cli:codex, copilot-cli:copilot,
-  open-code:open-code);
-- Codex/Copilot/OpenCode/Bedrock (no usable local signal) and the
-  router-eindpunt row ``claude-code:anthropic-compatible`` (kaart
-  390756e6... — geen betrouwbare quota-bron) render an honest
+- one row per **held** subscription — claude-code:{anthropic,minimax},
+  codex-cli:codex, open-code:open-code — and no row for a subscription
+  nobody owns. ``bedrock``, ``copilot-cli`` and the router row
+  ``anthropic-compatible`` were dropped: they could only ever render
+  "no signal", so they buried the rows that carry numbers;
+- a subscription whose provider is not wired yet still renders an honest
   ``betrouwbaarheid="onbekend"`` row, never a fabricated number;
 - the Anthropic row is always ``betrouwbaarheid="schatting"`` when it has
-  an active block, never ``"exact"``, **and stays distinct from the router
-  row** — geen cross-pollinatie wanneer een gebruiker een
-  router-eindpunt configureert;
+  an active block, never ``"exact"``;
 - the Anthropic row reports an absolute token count with no ``limiet`` and
   no ``drempel_gebruikt``: no published quota exists, so no ratio is
   fabricated and the row never flips to "unavailable" on a guess.
@@ -68,6 +66,31 @@ def _isolated_minimax_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_opencode_or_codex_state(monkeypatch, tmp_path):
+    """Point the opencode and codex providers at empty temp dirs.
+
+    Both read this developer's real data — ``~/.local/share/opencode/
+    opencode.db`` (571 MB, $57 of live spend) and ``~/.codex/sessions``.
+    Without this the suite's assertions would depend on whoever ran
+    opencode last, and would differ between this box and CI.
+
+    Patched **on the consumer modules**, not on their source: both
+    providers do ``from ... import name`` at import time, so patching
+    ``agentic_cli.open_code`` / ``agentic_cli.codex_cli`` would leave the
+    already-bound reference untouched and the test would silently keep
+    reading the real paths (CLAUDE.md, "patch where the consumer looks").
+    """
+    monkeypatch.setattr(
+        "app.services.subscriptions.opencode_go._opencode_db_path",
+        lambda data_dir=None: tmp_path / "absent" / "opencode.db",
+    )
+    monkeypatch.setattr(
+        "app.services.subscriptions.codex.get_codex_home",
+        lambda: tmp_path / "absent-codex",
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_real_disk_scan(monkeypatch):
     # UsageService.get_block_usage() otherwise scans this host's real
     # ~/.claude/projects/**/*.jsonl tree (billions of real tokens per the
@@ -82,7 +105,7 @@ def _no_real_disk_scan(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_usage_lists_one_row_per_known_subscription():
+async def test_usage_lists_one_row_per_held_subscription():
     async with _client() as ac:
         r = await ac.get("/api/v1/subscriptions/usage")
     assert r.status_code == 200, r.text
@@ -90,20 +113,42 @@ async def test_usage_lists_one_row_per_known_subscription():
     assert ids == {
         "claude-code:anthropic",
         "claude-code:minimax",
-        "claude-code:bedrock",
-        "claude-code:anthropic-compatible",
         "codex-cli:codex",
-        "copilot-cli:copilot",
         "open-code:open-code",
     }
 
 
 @pytest.mark.asyncio
-async def test_no_signal_subscriptions_are_honestly_onbekend():
+async def test_unheld_subscriptions_are_absent_not_empty_rows():
+    # Regression guard for the shape this endpoint used to have: seven
+    # rows of which six said "no signal". These three describe
+    # subscriptions nobody owns — bedrock was never configured,
+    # copilot-cli is not a plan we hold, and anthropic-compatible is an
+    # endpoint shape rather than a subscription. An empty row for a thing
+    # you do not own is clutter, not honesty.
+    async with _client() as ac:
+        r = await ac.get("/api/v1/subscriptions/usage")
+    ids = {row["subscription_id"] for row in r.json()["subscriptions"]}
+    for gone in (
+        "claude-code:bedrock",
+        "claude-code:anthropic-compatible",
+        "copilot-cli:copilot",
+    ):
+        assert gone not in ids
+
+
+@pytest.mark.asyncio
+async def test_providers_without_local_state_are_honestly_onbekend():
+    # With no opencode.db and no codex rollouts on disk these rows must
+    # say "no signal" rather than report a confident zero — "we cannot
+    # see" and "you have used nothing" are different claims, and only
+    # one of them is true here.
     async with _client() as ac:
         r = await ac.get("/api/v1/subscriptions/usage")
     rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
-    for sub_id in ("claude-code:bedrock", "codex-cli:codex", "copilot-cli:copilot", "open-code:open-code"):
+    assert rows["codex-cli:codex"]["bron"] == "codex_rollout:no_sessions"
+    assert rows["open-code:open-code"]["bron"] == "opencode_db:absent"
+    for sub_id in ("codex-cli:codex", "open-code:open-code"):
         row = rows[sub_id]
         assert row["betrouwbaarheid"] == "onbekend"
         assert row["drempel_gebruikt"] is None
@@ -112,49 +157,14 @@ async def test_no_signal_subscriptions_are_honestly_onbekend():
 
 
 @pytest.mark.asyncio
-async def test_router_subscription_row_is_honestly_onbekend():
-    # Kaart 390756e6... AC#3: het router-eindpunt (achter
-    # ``anthropic-compatible``) toont op de Subscriptions-pagina een
-    # "Unknown"-rij — geen verzonnen cijfers. Zonder dit zou de UI
-    # van die rij een "0/220000"-progressbar kunnen tonen die de
-    # product owner misleidt.
+async def test_rows_without_windows_report_an_empty_list():
+    # The ``windows`` field must always be present so the frontend can
+    # map over it unconditionally — a missing key would make every
+    # no-signal row a runtime error in the row component.
     async with _client() as ac:
         r = await ac.get("/api/v1/subscriptions/usage")
-    rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
-    router = rows["claude-code:anthropic-compatible"]
-    assert router["betrouwbaarheid"] == "onbekend"
-    assert router["drempel_gebruikt"] is None
-    assert router["verbruikt"] is None
-    assert router["limiet"] is None
-    # En de label herinnert de UI eraan dat dit een router-rij is,
-    # anders wordt het een anonieme "Unknown"-cel.
-    assert "Router" in router["subscription_label"] or "router" in router["bron"]
-
-
-@pytest.mark.asyncio
-async def test_anthropic_row_still_schatting_not_router(monkeypatch):
-    # Cross-pollinatie-guard: ook wanneer de ``anthropic-compatible``
-    # router-rij live is, moet de directe ``anthropic``-rij zijn eigen
-    # ``schatting``-label behouden. Anders zou een naïeve "first match
-    # wins" in de endpoint-loop de Anthropic-rij overschrijven met de
-    # router-rij, die geen quota-bron heeft.
-    active_block = SimpleNamespace(
-        input_tokens=5_000,
-        output_tokens=5_000,
-        cache_creation_tokens=0,
-        cache_read_tokens=0,
-        end_time=None,
-    )
-    monkeypatch.setattr(
-        UsageService,
-        "get_block_usage",
-        AsyncMock(return_value=SimpleNamespace(active_block=active_block)),
-    )
-    async with _client() as ac:
-        r = await ac.get("/api/v1/subscriptions/usage")
-    rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
-    assert rows["claude-code:anthropic"]["betrouwbaarheid"] == "schatting"
-    assert rows["claude-code:anthropic-compatible"]["betrouwbaarheid"] == "onbekend"
+    for row in r.json()["subscriptions"]:
+        assert row["windows"] == []
 
 
 @pytest.mark.asyncio
