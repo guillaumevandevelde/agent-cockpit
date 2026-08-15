@@ -108,6 +108,22 @@ Een kaart-id staat nooit in een kop en nooit als enige onderbouwing.
 cockpit iets doet of juist niet doet, geef dan het pad erbij. Dan kost
 natrekken één stap in plaats van een leespas.
 
+**Beslisdocs (`docs/cockpit/*-decision.md`) ook onder deze regel.** Een
+beslisdoc zonder ankers is alleen te weerleggen met een verse leespas;
+de keep-beslissing op Agent Mail (kaart `30d45e5f…`) bleek drie dagen
+besloten op een `kanban_ops`-coupling die niet in de code stond. Een
+tabel met tabelnamen was geen anker (de geleerde les staat in
+`cc-native-cross-session-decision.md`, op de keep-rij van 2026-08-10).
+
+Een anker is `backend/app/<pad>:NN` of `frontend/src/<pad>:NN` —
+`backend/tests/<pad>:NN` is even geldig als canonieke cite-target.
+Kale `:NN`-verwijzingen, paden onder `docs/`, en `worker.py:42`
+midden in een codeblock tellen niet. `scripts/check-decision-doc-anchors.sh`
+is de meetkant van deze regel, advisory met `--strict` als gate.
+
+Nieuwe beslisdocs dragen vanaf nu een anker; bestaande docs wachten op
+backfill en verschijnen als WARNING tot ze dat doen.
+
 ## 5. Woordkeuze: welk Engels blijft
 
 Engels vakjargon blijft, want het is de naam van het ding. Engelse werkwoorden
