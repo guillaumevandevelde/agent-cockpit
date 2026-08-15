@@ -254,15 +254,23 @@ def test_fresh_upgrade_matches_model_metadata(tmp_path, name, metadata_path):
 Run: `bash scripts/run-single-test.sh tests/test_migrations_roundtrip.py`
 Expected: FAIL — `alembic` is nog geen commando, of `returncode != 0` met "No config file 'alembic.ini' found".
 
-- [ ] **Step 3: Voeg de dependency toe**
+- [ ] **Step 3: Voeg de dependency toe — op twee plekken**
 
-In `backend/pyproject.toml`, binnen de `dependencies`-lijst, direct onder `"sqlalchemy[asyncio]>=2.0.25",`:
+`backend/pyproject.toml` is niet de bron waaruit CI installeert. Alle drie de jobs in `quality.yml` draaien `pip install -r requirements-dev.txt`, en dat bestand trekt `requirements.txt` binnen. Zet je alembic alleen in `pyproject.toml`, dan werkt alles lokaal en faalt CI met `ModuleNotFoundError: No module named 'alembic'` bij het verzamelen van de tests.
+
+In `backend/requirements.txt`, onder `sqlalchemy[asyncio]>=2.0.25`:
+
+```
+alembic>=1.13.0
+```
+
+En in `backend/pyproject.toml`, binnen de `dependencies`-lijst op dezelfde plek:
 
 ```toml
     "alembic>=1.13.0",
 ```
 
-Installeer: `cd backend && source venv/bin/activate && pip install -e ".[dev]"`
+Installeer: `cd backend && source venv/bin/activate && pip install -r requirements-dev.txt`
 
 - [ ] **Step 4: Maak `backend/alembic.ini`**
 
