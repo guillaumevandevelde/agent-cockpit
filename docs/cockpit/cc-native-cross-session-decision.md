@@ -62,7 +62,7 @@ live.
 | Inspectable mailbox UI | Alleen via CC's eigen UI (lijst per sessie) | Eigen `frontend/src/features/agent-mail/` (Team/Requests/Install-tabs + inbox/messages REST API) |
 | Durable per-repo identity | Niet — CC native is identity-loos, sessions ontdekken elkaar via `name` | `mail_team_members` met `repo_id` (sha1 van git-common-dir), één per repo |
 | Kanban-audit Koppeling | Geen | `kanban_ops` activity-feed entries; berichtenpaar traceerbaar per dispatched run |
-| External-tool orchestratie | Niet — alleen CC↔CC | `/api/v1/external-agent-mail/*` + `MailExternalActor` token-model (loopback-registratie, SHA-256 bearer, 30/60s rate-limit) |
+| External-tool orchestratie | Niet — alleen CC↔CC | ~~`/api/v1/external-agent-mail/*` + `MailExternalActor` token-model (loopback-registratie, SHA-256 bearer, 30/60s rate-limit)~~ ✅ Geïmplementeerd (kaart `5fca30d0…`): verwijderd — geen externe actor ooit geregistreerd, premisse onder keep-beslissing stond niet in de code |
 | Cross-machine | Ja — "any of your machines" | Codex CLI nudge als de pane op een andere machine draait; geen canonieke cross-machine-message-bus |
 
 ## Drie posities (+ onderbouwing per as)

@@ -57,22 +57,6 @@ class MailAgentSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
-class MailExternalActor(Base):
-    """Durable identity for a local, bearer-token-authenticated external tool
-    (e.g. OpenClaw) that talks to the external orchestration API."""
-
-    __tablename__ = "mail_external_actors"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    actor_key: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
-    display_name: Mapped[str] = mapped_column(String(256), nullable=False)
-    kind: Mapped[str] = mapped_column(String(80), default="external_tool", nullable=False)
-    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class MailMessage(Base):
     __tablename__ = "mail_messages"
 
@@ -83,9 +67,6 @@ class MailMessage(Base):
     kind: Mapped[str] = mapped_column(String(24), index=True, nullable=False)
     sender_member_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("mail_team_members.id", ondelete="SET NULL"), nullable=True
-    )
-    sender_actor_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("mail_external_actors.id", ondelete="SET NULL"), nullable=True
     )
     recipient_member_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("mail_team_members.id", ondelete="CASCADE"), index=True, nullable=True

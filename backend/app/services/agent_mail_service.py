@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_mail import (
     MailAgentSession,
-    MailExternalActor,
     MailMessage,
     MailReceipt,
     MailTeamMember,
@@ -357,12 +356,9 @@ class AgentMailService:
         request: MailMessageCreate,
         *,
         auto_nudge: bool = True,
-        sender_actor_id: int | None = None,
     ) -> MailMessageResponse:
         if request.kind not in MAIL_MESSAGE_KINDS:
             raise ValueError(f"Invalid message kind: {request.kind}")
-        if request.sender_member_id is not None and sender_actor_id is not None:
-            raise ValueError("messages cannot have both sender_member_id and sender_actor_id")
         if request.kind == "answer" and request.thread_root_id is None:
             raise ValueError("answer messages require thread_root_id")
         if request.kind == "answer":
@@ -380,7 +376,6 @@ class AgentMailService:
             thread_root_id=request.thread_root_id,
             kind=request.kind,
             sender_member_id=request.sender_member_id,
-            sender_actor_id=sender_actor_id,
             recipient_member_id=request.recipient_member_id,
             subject=request.subject,
             body_markdown=request.body_markdown,
@@ -418,17 +413,12 @@ class AgentMailService:
         return await self._message_response(db, message, for_member_id=None)
 
     async def _sender_identity(
-        self, db: AsyncSession, sender_member_id: int | None, sender_actor_id: int | None,
-    ) -> tuple[str, str, str | None]:
-        if sender_actor_id is not None:
-            actor = await db.get(MailExternalActor, sender_actor_id)
-            if actor is not None:
-                return actor.display_name, "external_actor", actor.kind
-            return "unknown external actor", "external_actor", None
+        self, db: AsyncSession, sender_member_id: int | None,
+    ) -> tuple[str, str]:
         if sender_member_id is None:
-            return "Director", "director", None
+            return "Director", "director"
         member = await db.get(MailTeamMember, sender_member_id)
-        return (member.display_name if member else "unknown", "member", None)
+        return (member.display_name if member else "unknown", "member")
 
     async def _message_response(
         self, db: AsyncSession, message: MailMessage, for_member_id: int | None
@@ -448,13 +438,13 @@ class AgentMailService:
             and message.request_status == "pending"
             and message.created_at < datetime.utcnow() - timedelta(minutes=STALE_REQUEST_MINUTES)
         )
-        sender_name, sender_type, sender_actor_kind = await self._sender_identity(
-            db, message.sender_member_id, message.sender_actor_id,
+        sender_name, sender_type = await self._sender_identity(
+            db, message.sender_member_id,
         )
         return MailMessageResponse(
             id=message.id, thread_root_id=message.thread_root_id, kind=message.kind,
-            sender_member_id=message.sender_member_id, sender_actor_id=message.sender_actor_id,
-            sender_type=sender_type, sender_actor_kind=sender_actor_kind, sender_name=sender_name,
+            sender_member_id=message.sender_member_id,
+            sender_type=sender_type, sender_name=sender_name,
             recipient_member_id=message.recipient_member_id, subject=message.subject,
             body_markdown=message.body_markdown, payload=message.payload,
             request_status=message.request_status, is_stale=is_stale,

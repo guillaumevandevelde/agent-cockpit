@@ -5,7 +5,6 @@ import pytest
 from app.database import AsyncSessionLocal
 from app.models.agent_mail import (
     MailAgentSession,
-    MailExternalActor,
     MailMessage,
     MailReceipt,
     MailTeamMember,
@@ -41,16 +40,6 @@ async def test_create_member_session_message_receipt():
         await s.commit()
         await s.refresh(session)
         assert session.mailbox_status == "connected"
-
-        actor = MailExternalActor(
-            actor_key=f"openclaw-{unique}",
-            display_name="OpenClaw",
-            token_hash="hash",
-        )
-        s.add(actor)
-        await s.commit()
-        await s.refresh(actor)
-        assert actor.kind == "external_tool"
 
         message = MailMessage(
             kind="message",

@@ -112,7 +112,6 @@ def _reset_singleton_state():
     Sibling to ``_reset_app_database_tables``: the DB reset makes
     auto-increment ids restart at 1 every test, which collides with
     singletons that key per-id state on the instance (e.g.
-    ``external_agent_mail_service._send_windows`` keyed by ``actor.id``,
     ``agent_mail_service._last_auto_nudge_at`` keyed by ``member_id``).
 
     Self-improve kanban card 42f44a05: keeps the list in one place
