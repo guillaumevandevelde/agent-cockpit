@@ -8,8 +8,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy.engine import make_url
-
 # Importing the bases is not enough: a table only lands on a DeclarativeBase's
 # metadata when its module is imported. Without these three the metadata is
 # empty and the post-upgrade drift check reports every existing table as
@@ -19,20 +17,10 @@ import app.models  # noqa: F401
 import app.models.database  # noqa: F401
 from app.config import settings
 from app.database import Base
-from app.db_bootstrap import SchemaDriftError, ensure_versioned
+from app.db_bootstrap import SchemaDriftError, ensure_versioned, sqlite_path
 from app.kanban.db import KanbanBase
 from app.services.backup_service import kanban_db_path
 from app.sqlite_snapshot import snapshot_sqlite_db
-
-
-def _sqlite_path(url: str) -> Path | None:
-    """Filesystem path behind a sqlite URL, or None for non-file stores."""
-    if not isinstance(url, str) or not url.startswith("sqlite"):
-        return None
-    database = make_url(url).database
-    if not database or database == ":memory:":
-        return None
-    return Path(database)
 
 
 def main() -> int:
@@ -43,7 +31,7 @@ def main() -> int:
         snapshot_sqlite_db(board, destination)
         print(f"snapshot: {destination}")
 
-    registry = _sqlite_path(settings.database_url)
+    registry = sqlite_path(settings.database_url)
 
     try:
         if registry is not None:

@@ -24,6 +24,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy.engine import make_url
 from sqlalchemy.schema import MetaData
 
 from app.db_schema_drift import schema_differences
@@ -51,13 +52,36 @@ def _run_alembic(name: str, db_path: Path, *args: str) -> None:
         raise RuntimeError(f"alembic --name {name} {' '.join(args)} failed:\n{result.stderr}")
 
 
+def sqlite_path(url: str) -> Path | None:
+    """Filesystem path behind a sqlite URL, or None for a non-file store."""
+    if not isinstance(url, str) or not url.startswith("sqlite"):
+        return None
+    database = make_url(url).database
+    if not database or database == ":memory:":
+        return None
+    return Path(database)
+
+
+def _script_directory(name: str) -> ScriptDirectory:
+    return ScriptDirectory.from_config(
+        Config(str(BACKEND_ROOT / "alembic.ini"), ini_section=name)
+    )
+
+
 def _base_revision(name: str) -> str:
     """Revision id of the first migration in ``name``'s history."""
-    config = Config(str(BACKEND_ROOT / "alembic.ini"), ini_section=name)
-    bases = ScriptDirectory.from_config(config).get_bases()
+    bases = _script_directory(name).get_bases()
     if len(bases) != 1:
         raise RuntimeError(f"expected exactly one base revision for {name}, got {bases}")
     return bases[0]
+
+
+def _head_revision(name: str) -> str:
+    """Revision id of the newest migration in ``name``'s history."""
+    heads = _script_directory(name).get_heads()
+    if len(heads) != 1:
+        raise RuntimeError(f"expected exactly one head revision for {name}, got {heads}")
+    return heads[0]
 
 
 def ensure_versioned(name: str, db_path: Path, metadata: MetaData) -> str:
@@ -108,6 +132,37 @@ def ensure_versioned(name: str, db_path: Path, metadata: MetaData) -> str:
     return "adopted"
 
 
+def lifespan_schema_check(name: str, db_path: Path) -> str:
+    """Refuse to serve on a versioned database that is behind the migrations.
+
+    Deliberately narrower than ``assert_at_head``: a database with no
+    ``alembic_version`` table at all is skipped instead of refused. That shape
+    is not a mistake -- the test suite builds its schema with
+    ``drop_all``/``create_all`` on purpose (87 test files start the app through
+    TestClient, and migrating per test would only make the suite slower), so a
+    hard refusal here would fail the whole suite rather than catch a bug.
+
+    The failure this guards against only exists for a database that *is* under
+    alembic: the code moved forward and the database did not. That case is
+    caught, loudly.
+
+    Returns "skipped" or "current"; raises RuntimeError when behind.
+    """
+    if not db_path.exists():
+        return "skipped"
+
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.connect() as conn:
+            if "alembic_version" not in set(sa.inspect(conn).get_table_names()):
+                return "skipped"
+    finally:
+        engine.dispose()
+
+    assert_at_head(name, db_path)
+    return "current"
+
+
 def assert_at_head(name: str, db_path: Path) -> None:
     """Raise when the database is behind the migrations.
 
@@ -124,17 +179,15 @@ def assert_at_head(name: str, db_path: Path) -> None:
             )
         current = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
 
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "--name", name, "heads", "--verbose"],
-        cwd=BACKEND_ROOT,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "ALEMBIC_DATABASE_URL": f"sqlite:///{db_path}"},
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"could not read alembic heads for {name}:\n{result.stderr}")
-    if current not in result.stdout:
+    # Compare against the head revision id exactly, read through alembic's own
+    # script API. Parsing `alembic heads --verbose` and asking whether the
+    # current id appears in that text is too loose: the output also carries a
+    # "Revises: <parent>" line, so a database sitting at the *parent* revision
+    # matched its own id in the head's description and the check passed while
+    # the database was a full revision behind.
+    head = _head_revision(name)
+    if current != head:
         raise RuntimeError(
-            f"{db_path} is at revision {current}, which is not head. "
+            f"{db_path} is at revision {current}, which is not head ({head}). "
             "Run: cd backend && python -m app.migrate_cli"
         )

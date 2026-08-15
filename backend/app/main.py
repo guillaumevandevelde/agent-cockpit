@@ -158,6 +158,19 @@ async def _recover_and_start_dispatch() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
+    # Refuse to serve on a database that is behind the migrations. Skips a
+    # store that is not under alembic at all -- that is the create_all shape
+    # the test suite builds on purpose. See app/db_bootstrap.py.
+    from app.config import settings as _settings
+    from app.db_bootstrap import lifespan_schema_check, sqlite_path
+    for _name, _url in (
+        ("registry", _settings.database_url),
+        ("kanban", _settings.kanban_database_url),
+    ):
+        _path = sqlite_path(_url)
+        if _path is not None:
+            lifespan_schema_check(_name, _path)
+
     # Startup: Initialize database
     await init_db()
     from app.database import AsyncSessionLocal

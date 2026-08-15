@@ -9,7 +9,14 @@ import sqlalchemy as sa
 import app.models  # noqa: F401  (register every table on Base)
 import app.models.database  # noqa: F401
 from app.database import Base
-from app.db_bootstrap import SchemaDriftError, assert_at_head, ensure_versioned
+from app.db_bootstrap import (
+    SchemaDriftError,
+    _base_revision,
+    _run_alembic,
+    assert_at_head,
+    ensure_versioned,
+    lifespan_schema_check,
+)
 from app.db_schema_drift import schema_differences
 
 
@@ -94,3 +101,35 @@ def test_assert_at_head_accepts_a_migrated_database(tmp_path):
     ensure_versioned("registry", db, Base.metadata)
 
     assert_at_head("registry", db)  # must not raise
+
+
+def test_lifespan_check_skips_a_create_all_database(tmp_path):
+    """The shape the test suite itself runs on must not fail the check."""
+    db = tmp_path / "create_all.db"
+    engine = sa.create_engine(f"sqlite:///{db}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    assert lifespan_schema_check("registry", db) == "skipped"
+
+
+def test_lifespan_check_skips_a_missing_database(tmp_path):
+    assert lifespan_schema_check("registry", tmp_path / "not-there.db") == "skipped"
+
+
+def test_lifespan_check_accepts_a_migrated_database(tmp_path):
+    db = tmp_path / "current.db"
+    ensure_versioned("registry", db, Base.metadata)
+
+    assert lifespan_schema_check("registry", db) == "current"
+
+
+def test_lifespan_check_refuses_a_versioned_database_that_is_behind(tmp_path):
+    """Code moved forward, database did not -- the case this guard exists for."""
+    db = tmp_path / "behind.db"
+    ensure_versioned("registry", db, Base.metadata)
+    # Rewind the recorded revision to the baseline without touching the schema.
+    _run_alembic("registry", db, "stamp", _base_revision("registry"))
+
+    with pytest.raises(RuntimeError, match="not head"):
+        lifespan_schema_check("registry", db)
