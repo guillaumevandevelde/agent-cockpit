@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 131 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 132 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -97,13 +97,14 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [`docs/cockpit/` — de canonieke spec-boom (index)](./README.md) | 🟢 active |
 | [Beslis-register — alle genomen productbeslissingen (index)](./decisions.md) | 🟢 active |
 
-### Reference (29)
+### Reference (30)
 
 | Document | Status |
 |---|---|
 | [Agent Cockpit — oriëntatie (lees dit eerst)](./00-orientation.md) | 🟢 active |
 | [Trigger-poort: ACP-adaptertransport (§6 kaart 5) — status bij premature dispatch](./acp-transport-trigger-gate.md) | 🟡 proposed |
 | [Agent Bridge — spawn, terminal-relay & per-sessie configuratie](./agent-bridge.md) | 🟢 active |
+| [Architectuur — de vier lagen, wat wat mag weten, en hoe dat wordt afgedwongen](./architectuur.md) | 🟢 active |
 | [Blueprints — taxonomie van `project_blueprint`-archetypes](./blueprints-typology.md) | 🟢 active |
 | [ProjectBootstrapPolicy — de \"cockpit-defaults\" van repo-bootstrap](./bootstrap-policy.md) | 🟢 active |
 | [Brainstorm-to-impediment-bridge — van real-time dialogue naar `report_impediment`-flows](./brainstorm-to-impediment-bridge.md) | 🟢 active |

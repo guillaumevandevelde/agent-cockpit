@@ -17,7 +17,9 @@ from app.kanban.mcp_health import check_mcp_health
 
 
 def test_mcp_health_is_ok_for_the_real_app():
-    result = asyncio.run(check_mcp_health())
+    from app.main import app as real_app
+
+    result = asyncio.run(check_mcp_health(app=real_app))
     assert result["ok"] is True, result
     assert result["advertised_endpoint"] == "/kanban-mcp/messages/", result
     assert result["routes_to_mount"] is True, result

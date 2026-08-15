@@ -12,6 +12,7 @@
 - [Agent Cockpit — oriëntatie (lees dit eerst)](./00-orientation.md): type=reference status=active
 - [Trigger-poort: ACP-adaptertransport (§6 kaart 5) — status bij premature dispatch](./acp-transport-trigger-gate.md): type=reference status=proposed
 - [Agent Bridge — spawn, terminal-relay & per-sessie configuratie](./agent-bridge.md): type=reference status=active
+- [Architectuur — de vier lagen, wat wat mag weten, en hoe dat wordt afgedwongen](./architectuur.md): type=reference status=active
 - [Blueprints — taxonomie van `project_blueprint`-archetypes](./blueprints-typology.md): type=reference status=active
 - [ProjectBootstrapPolicy — de \"cockpit-defaults\" van repo-bootstrap](./bootstrap-policy.md): type=reference status=active
 - [Brainstorm-to-impediment-bridge — van real-time dialogue naar `report_impediment`-flows](./brainstorm-to-impediment-bridge.md): type=reference status=active

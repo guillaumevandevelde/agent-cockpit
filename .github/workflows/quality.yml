@@ -80,6 +80,13 @@ jobs:
       - run: python scripts/check_migrations_current.py
         working-directory: backend
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: Architectuurgrenzen (import-linter)
+        run: lint-imports
+        working-directory: backend
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: Omvangsratel (bestanden boven 800 regels mogen niet groeien)
+        run: bash scripts/check-file-size-ratchet.sh
+        if: ${{ !cancelled() }}
       - name: Superpowers promotion ledger (advisory)
         run: bash scripts/check-superpowers-promotions.sh
         continue-on-error: true
