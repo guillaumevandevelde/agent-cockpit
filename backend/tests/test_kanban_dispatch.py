@@ -394,7 +394,16 @@ def test_card_prompt_callout_interpolates_dispatched_project_path():
     # worktree, with the real branch substituted in for the <branch>
     # placeholder that the legacy hardcode used.
     assert worktree_path in prompt
-    assert "<branch>" not in prompt
+    # Scope the placeholder check to the callout itself. The rest of the
+    # prompt legitimately spells `.claude/worktrees/<branch>/` as *prose*
+    # (the ship recipe's browser-count worktree warning, added in
+    # a06618bc) — a whole-prompt substring check reads that illustrative
+    # path as a fabricated callout claim and fails for the wrong reason.
+    callout = dispatch._build_worktree_safety_callout(
+        project_path=project_path, worktree_path=worktree_path,
+    )
+    assert callout in prompt
+    assert "<branch>" not in callout
 
     # The forbidden canonical path inside the callout must match the
     # dispatched project's main checkout, *not* /home/vdvgu/claude-cockpit
@@ -613,7 +622,13 @@ def test_card_prompt_callout_omits_worktree_path_for_resume_session():
     # appear when worktree_path is unknown — that's a fabricated
     # claim about a directory that doesn't exist for resume/sandcastle
     # /headless transports.
-    assert "<branch>" not in prompt, (
+    # Scoped to the callout for the same reason as the sibling test above:
+    # the ship recipe's prose spells the placeholder path legitimately.
+    callout = dispatch._build_worktree_safety_callout(
+        project_path="/scratch/somewhere", worktree_path=None,
+    )
+    assert callout in prompt
+    assert "<branch>" not in callout, (
         "When worktree_path is not passed, the callout must NOT "
         "fabricate a `<project>/.claude/worktrees/<branch>` path — "
         "that's a lie to the agent about its real cwd."

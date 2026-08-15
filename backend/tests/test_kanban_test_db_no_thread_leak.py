@@ -52,7 +52,6 @@ from app.kanban.operations import apply_operation
 from tests.app_database_test_db import TestSessionLocal as AppTestSessionLocal
 from tests.kanban_test_db import TestSessionLocal
 
-
 PK = "git:example.com/me/repo"
 
 
@@ -73,6 +72,14 @@ async def test_dispose_test_engine_reclaims_leaked_aiosqlite_workers():
     surfaces as ``PytestUnhandledThreadExceptionWarning`` on whichever
     test happens to run next (kanban-kaart 5554de60…).
     """
+    # Baseline the worker threads that already exist. ``threading.enumerate()``
+    # is process-wide, so in a full-suite run it also sees workers belonging to
+    # engines this test never created and never disposes — an earlier test's
+    # live connection then fails the post-dispose assertion below for work this
+    # test is not responsible for. Only the threads *this* test leaks are in
+    # scope for the regression (kanban-kaart 5554de60…).
+    pre_existing = set(_aiosqlite_worker_threads())
+
     # Deliberately orphan a session on the kanban engine and one on the
     # app-database engine — the same cyclic-AsyncSession leak pattern that
     # back-to-back dispatch tests can leave behind in real life. Run a
@@ -102,7 +109,7 @@ async def test_dispose_test_engine_reclaims_leaked_aiosqlite_workers():
     # assertion below would be vacuous. If this assertion starts failing
     # in some future SQLAlchemy / aiosqlite version, the dispose path
     # needs revisiting — the leak contract has shifted underneath us.
-    assert _aiosqlite_worker_threads(), (
+    assert set(_aiosqlite_worker_threads()) - pre_existing, (
         "test setup invariant violated: leaked sessions did not produce "
         "an orphan worker thread; the regression assertion below would "
         "be vacuous."
@@ -122,11 +129,11 @@ async def test_dispose_test_engine_reclaims_leaked_aiosqlite_workers():
     # is gated on ``call_soon_threadsafe`` succeeding, which costs one
     # event-loop tick. 100 ms × 20 is generous without slowing the suite.
     for _ in range(20):
-        if not _aiosqlite_worker_threads():
+        if not set(_aiosqlite_worker_threads()) - pre_existing:
             break
         await asyncio.sleep(0.005)
 
-    survivors = _aiosqlite_worker_threads()
+    survivors = sorted(set(_aiosqlite_worker_threads()) - pre_existing)
     assert not survivors, (
         f"aiosqlite worker threads leaked past dispose_test_engine: "
         f"{survivors}. The kanban test DB's dispose path is supposed to "
@@ -161,7 +168,6 @@ async def test_dispatch_flow_no_aiosqlite_thread_leaks(tmp_path):
     dispatch path end-to-end to confirm no obvious leak surfaces from
     a single dispatch in isolation.
     """
-    from app.kanban import dispatch
 
     class _RecordingTransport:
         def __init__(self):

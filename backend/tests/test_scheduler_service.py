@@ -4,7 +4,6 @@ scheduled-message jobs were retired with the scheduled-messages feature
 (see docs/cockpit/scheduled-trigger-consolidatie-decision.md §5.2) — they
 lived here too.
 """
-import pytest
 
 from app.services.scheduling.scheduler import SchedulerService
 

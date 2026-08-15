@@ -19,7 +19,6 @@ covered because the public resolver coerces with ``bool(...)``.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 

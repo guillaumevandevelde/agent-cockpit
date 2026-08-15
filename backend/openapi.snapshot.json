@@ -2806,6 +2806,17 @@
             ],
             "title": "Parent Card Id"
           },
+          "pending_spawn_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Spawn Session"
+          },
           "priority": {
             "anyOf": [
               {
@@ -4253,6 +4264,17 @@
             ],
             "title": "Parent Card Id"
           },
+          "pending_spawn_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Spawn Session"
+          },
           "priority": {
             "anyOf": [
               {
@@ -4549,6 +4571,17 @@
               }
             ],
             "title": "Parent Card Id"
+          },
+          "pending_spawn_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Spawn Session"
           },
           "priority": {
             "anyOf": [
@@ -24073,7 +24106,7 @@
     },
     "/api/v1/config/validate-settings": {
       "post": {
-        "description": "Validate permission patterns in settings without saving.\n\nChecks permissions.allow, permissions.ask, and permissions.deny arrays\nfor patterns that Claude Code would reject.",
+        "description": "Validate permission patterns in settings without saving.\n\nChecks permissions.allow, permissions.ask, and permissions.deny arrays\nfor patterns that Claude Code would reject, plus the CC-2.1.224\ntop-level surface Cockpit surfaces (``crossSessionInbound`` /\n``dialogExpiry`` \u2014 kanban card 9f90964e\u2026).",
         "operationId": "validate_settings_api_v1_config_validate_settings_post",
         "requestBody": {
           "content": {

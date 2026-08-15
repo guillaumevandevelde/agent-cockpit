@@ -26,10 +26,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.kanban.models import KanbanCard, KanbanDeliverable
+from app.kanban.models import KanbanCard
 from app.main import app
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
-
 
 KanbanSessionLocal = TestSessionLocal()
 
