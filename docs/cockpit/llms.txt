@@ -52,6 +52,7 @@
 
 ## Plan
 
+- [Alembic-migraties voor beide stores — implementatieplan (subsysteem 1 van de kernharding)](./alembic-migraties-plan.md): type=plan status=proposed
 - [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md): type=plan status=superseded
 - [Kanban Implementation Plan](./kanban-plan.md): type=plan status=active
 - [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md): type=plan status=active

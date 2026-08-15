@@ -22,7 +22,7 @@ Er zijn al migraties, met de hand geschreven en over drie bestanden verspreid:
 | Bestand | Regels | Handgeschreven migratielogica |
 |---|---|---|
 | `app/database.py` | 219 | `_migrate_subscription_prefs_shape`, `_migrate_project_columns`, `_migrate_terminology_columns` |
-| `app/kanban/db.py` | 355 | `_migrate_legacy_sqlite`, `_ensure_card_columns`, `_ensure_column_table`, `_ensure_work_type_mapping_table` |
+| `app/kanban/db.py` | 355 | `_ensure_card_columns`, `_ensure_column_table`, `_ensure_work_type_mapping_table` |
 | `app/services/scheduling/schema_guard.py` | 68 | volledig — vangt ontbrekende kolommen op tijdens bedrijf |
 
 Ruwweg 460 van die 642 regels zijn zelfgebouwde schemamigratie zonder versiebegrip. Het bewijs dat dit niet houdt staat in de code zelf: `schema_guard.py` bestaat om tijdens bedrijf op te vangen dat een kolom ontbreekt.
@@ -54,6 +54,8 @@ Vóór elke upgrade komt er een momentopname van de kanban-database. Dat is best
 ### 1.5 Wat verdwijnt
 
 Elke handgeschreven migratie wordt één revisie, waarna de functie weg mag. `schema_guard.py` verdwijnt in zijn geheel, want zijn bestaansreden vervalt zodra het schema versiebegrip heeft.
+
+Eén uitzondering blijft staan: `_migrate_legacy_sqlite` verplaatst het bord van een oude bestandslocatie naar de huidige. Ondanks de naam is dat geen schemamigratie, dus alembic vervangt hem niet.
 
 ### 1.6 Testen
 

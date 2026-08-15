@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 130 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 131 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -144,10 +144,11 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md) | 🟢 active |
 | [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md) | 🟢 active |
 
-### Plan (5)
+### Plan (6)
 
 | Document | Status |
 |---|---|
+| [Alembic-migraties voor beide stores — implementatieplan (subsysteem 1 van de kernharding)](./alembic-migraties-plan.md) | 🟡 proposed |
 | [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md) | ⚪ superseded |
 | [Kanban Implementation Plan](./kanban-plan.md) | 🟢 active |
 | [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md) | 🟢 active |
