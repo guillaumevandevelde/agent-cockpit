@@ -72,3 +72,35 @@ def ensure_versioned(name: str, db_path: Path, metadata: MetaData) -> str:
 
     _run_alembic(name, db_path, "stamp", "head")
     return "stamped"
+
+
+def assert_at_head(name: str, db_path: Path) -> None:
+    """Raise when the database is behind the migrations.
+
+    Called from the app's lifespan. cockpit.sh already migrates before start,
+    but a bare `uvicorn app.main:app` or a container start bypasses that, and
+    serving on an unknown schema corrupts rather than errors.
+    """
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    with engine.connect() as conn:
+        if "alembic_version" not in set(sa.inspect(conn).get_table_names()):
+            raise RuntimeError(
+                f"{db_path} is not under alembic control. "
+                "Run: cd backend && python -m app.migrate_cli"
+            )
+        current = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "--name", name, "heads", "--verbose"],
+        cwd=BACKEND_ROOT,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "ALEMBIC_DATABASE_URL": f"sqlite:///{db_path}"},
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"could not read alembic heads for {name}:\n{result.stderr}")
+    if current not in result.stdout:
+        raise RuntimeError(
+            f"{db_path} is at revision {current}, which is not head. "
+            "Run: cd backend && python -m app.migrate_cli"
+        )

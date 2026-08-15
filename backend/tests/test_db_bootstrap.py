@@ -57,3 +57,27 @@ def test_drifted_unversioned_database_is_refused(tmp_path):
         ensure_versioned("registry", db, _metadata())
 
     assert "missing-column: person.name" in str(excinfo.value)
+
+
+def test_assert_at_head_refuses_unversioned_database(tmp_path):
+    from app.db_bootstrap import assert_at_head
+
+    db = tmp_path / "bare.db"
+    engine = sa.create_engine(f"sqlite:///{db}")
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE t (v TEXT)"))
+
+    with pytest.raises(RuntimeError, match="not under alembic control"):
+        assert_at_head("registry", db)
+
+
+def test_assert_at_head_accepts_a_stamped_database(tmp_path):
+    db = tmp_path / "stamped.db"
+    md = _metadata()
+    engine = sa.create_engine(f"sqlite:///{db}")
+    md.create_all(engine)
+    ensure_versioned("registry", db, md)
+
+    from app.db_bootstrap import assert_at_head
+
+    assert_at_head("registry", db)  # must not raise
