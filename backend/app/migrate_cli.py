@@ -10,6 +10,13 @@ from pathlib import Path
 
 from sqlalchemy.engine import make_url
 
+# Importing the bases is not enough: a table only lands on a DeclarativeBase's
+# metadata when its module is imported. Without these three the metadata is
+# empty and the post-upgrade drift check reports every existing table as
+# "extra" -- which is exactly what happened on the first live run.
+import app.kanban.models  # noqa: F401
+import app.models  # noqa: F401
+import app.models.database  # noqa: F401
 from app.config import settings
 from app.database import Base
 from app.db_bootstrap import SchemaDriftError, ensure_versioned
