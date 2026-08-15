@@ -29,6 +29,7 @@
 - [Portfolio-cap policy: waarde, scope, failure-mode](./portfolio-policy.md): type=reference status=active
 - [Product-inceptie: van gesprek naar spec + plan die een project seedt](./product-inceptie-pipeline.md): type=reference status=active
 - [Recipe-writing conventions — auto-recovery hoort in dezelfde if-tak](./recipe-writing-conventions.md): type=reference status=active
+- [Refactor-frontend-orphan-sweep — backend-Pydantic-rename of -veldverwijdering](./refactor-frontend-orphan-sweep.md): type=reference status=active
 - [Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo](./repo-provisioning-bootstrap.md): type=reference status=active
 - [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md): type=reference status=active
 - [Sandcastle Integration](./sandcastle.md): type=reference status=active
@@ -42,7 +43,7 @@
 
 ## Spec
 
-- [Agent Mail — upstream sync (adapted port)](./agent-mail-spec.md): type=spec status=active
+- [Agent Mail — roster + discovery](./agent-mail-spec.md): type=spec status=active
 - [Fase 2 — Spec: Scheduled messages](./fase-2-spec.md): type=spec status=superseded
 - [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md): type=spec status=active
 - [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md): type=spec status=active
