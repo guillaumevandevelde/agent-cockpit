@@ -942,28 +942,34 @@ async def move_card(cid: str, payload: MoveRequest):
                     project_key=card.project_key, entity_id=cid,
                     payload={"agent": default_agent})
 
+        # Parent-parking (mirror of ``mcp_server.move_card:518-522``,
+        # kaart ``eb75b599…``): a Done move for a card with ≥1 child
+        # doesn't actually leave the board — it parks in
+        # ``Awaiting Subtasks`` until every child reaches Done.
+        # Parent-generic (``analyse-levenscyclus-decision.md`` §3.1:
+        # "heeft kinderen", not ``work_type=='analysis'``).
+        final_column = payload.column
+        if (payload.column == "Done"
+                and await service.card_has_children(s, cid)):
+            final_column = "Awaiting Subtasks"
+            if card.project_key:
+                await service.ensure_awaiting_subtasks_column(s, card.project_key)
+
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=cid,
-            payload={"column": payload.column,
+            payload={"column": final_column,
                      "rank": payload.rank})
         # Post the side-effects the gate guaranteed would land —
         # otherwise the gate fires but the board still shows an empty
         # Done card. Same helpers the MCP move_card uses; no logic
-        # duplicated. ``payload.column`` is the *intended* column.
+        # duplicated. ``payload.column`` is the *intended* column;
+        # ``final_column`` is where the card actually lands (may be
+        # ``Awaiting Subtasks`` after the parking redirect above).
         #
         # Deliberate REST divergence (kaart 85a06bc7…, AC #4):
-        # the REST handler does NOT mirror two MCP redirects:
+        # the REST handler does NOT mirror one MCP redirect:
         #
-        # 1. Parent-parking — MCP redirects Done → Awaiting Subtasks for
-        #    a card that has ≥1 child (docs/cockpit/
-        #    analyse-levenscyclus-decision.md §3). REST lands the card
-        #    in Done directly. A parent-with-pending-children can
-        #    therefore show up as Done on the board via REST; the
-        #    children never auto-close it. Real gap, kept divergent
-        #    pending its own card (the UI affordance — what the user
-        #    sees when they drag a parent to Done — needs its own
-        #    design decision before the redirect lands here).
-        # 2. Reviewer-routing — MCP routes engineer→Done through a
+        # 1. Reviewer-routing — MCP routes engineer→Done through a
         #    project-level reviewer column when one exists (board-
         #    enforced feature-compliance gate, kaart
         #    ``docs/cockpit/reviewer-agent-decision.md``). REST lands
@@ -990,18 +996,18 @@ async def move_card(cid: str, payload: MoveRequest):
                 s, card, cleaned_outcome, cleaned_summary
             )
 
-        # Auto-close walk (kaart 85a06bc7…): the REST mirror was missing
-        # the parent-chain walk the MCP path runs via
-        # ``service.try_close_ancestors``. The MCP path redirects Done to
-        # Awaiting Subtasks for cards with children (parking), so the
-        # walk only fires after a *genuine* Done. The REST handler
-        # doesn't redirect — a child dragged to Done in the UI reaches
-        # Done directly — so the walk condition is simply
-        # ``column == "Done" and card.parent_card_id``. Same helper, same
-        # parked-only invariant inside ``close_parent_if_all_children_done``,
-        # so a parent still in an agent column is left alone. Mirrors the
-        # MCP check at ``mcp_server.py:599-600``.
-        if payload.column == "Done" and card.parent_card_id:
+        # Auto-close walk (kaart 85a06bc7…, REST mirror added): the MCP
+        # path runs ``service.try_close_ancestors`` after a *genuine*
+        # Done to close a parked parent whose children all reached Done.
+        # Now that REST also redirects Done → Awaiting Subtasks when this
+        # card has ≥1 child (kaart eb75b599…, see parking block above),
+        # the walk fires on ``final_column == "Done"`` — only a card
+        # that actually reached Done cascades up; a parked card does
+        # not (it has no parent to walk into, the parking itself was
+        # the redirect). Same helper, same parked-only invariant inside
+        # ``close_parent_if_all_children_done`` — a parent still in an
+        # agent column is left alone. Mirrors ``mcp_server.py:604-605``.
+        if final_column == "Done" and card.parent_card_id:
             await service.try_close_ancestors(s, card.parent_card_id)
 
         await s.commit()
