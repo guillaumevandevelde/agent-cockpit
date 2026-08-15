@@ -7,6 +7,7 @@ canonical spawn path for anything dispatched through the board.
 """
 import json
 import logging
+import re
 import shlex
 import subprocess
 import uuid
@@ -24,6 +25,159 @@ _spawned_sessions: dict[str, dict] = {}
 # kwargs. See kanban card
 # `[security][D] Per-project env-injectie in spawn_session`.
 _DEFAULT_RUNTIME = "worktree"
+
+# Where merged MCP configs are cached on disk. Persistent (not /tmp) so a
+# dispatch followed by a follow-up shell call can still read what we wrote.
+# See kanban card ``[self-improve] context-mode-plugin blokkeert WebFetch en
+# curl naar een MCP-server die niet verbonden is`` — the merge exists so the
+# plugin's hooks (which always load, regardless of --strict-mcp-config) can
+# actually call the ctx_* tools they redirect to.
+_MERGED_MCP_CACHE_DIR = Path.home() / ".cache" / "cockpit-ship" / "merged-mcp"
+
+# Plugin whose MCP server we transparently merge when installed. Detected via
+# ``installed_plugins.json``. Add more names here only when the plugin's hooks
+# are known to redirect to an MCP tool that would otherwise be missing — i.e.
+# the same failure class the merge is built to prevent. Other plugins' MCP
+# servers stay outside the dispatch sandbox by design (``--strict-mcp-config``).
+_MERGED_PLUGIN_KEYS = ("context-mode@context-mode",)
+
+
+def _read_plugin_mcp_server(plugin_install_path: Path, server_name: str) -> dict | None:
+    """Return the plugin's ``server_name`` MCP server dict, with plugin-root
+    vars resolved, or ``None`` if not declared / unreadable.
+
+    Reads ``<install>/.mcp.json`` first (legacy format), then
+    ``<install>/.claude-plugin/plugin.json`` under ``mcpServers`` (newer format;
+    may be a dict or a relative-path string pointing at another JSON file —
+    see ``MCPConfigService._read_plugin_mcp_servers`` for the canonical reader).
+    """
+    from app.utils.file_utils import read_json_file  # local import: keeps top of module light
+
+    mcp_servers: dict = {}
+
+    plugin_mcp_path = plugin_install_path / ".mcp.json"
+    cfg = read_json_file(plugin_mcp_path)
+    if isinstance(cfg, dict):
+        if isinstance(cfg.get("mcpServers"), dict):
+            mcp_servers.update(cfg["mcpServers"])
+        else:
+            # Flat dict of server_name → server-config
+            mcp_servers.update(cfg)
+
+    plugin_json_path = plugin_install_path / ".claude-plugin" / "plugin.json"
+    plugin_json = read_json_file(plugin_json_path)
+    if isinstance(plugin_json, dict):
+        value = plugin_json.get("mcpServers")
+        if isinstance(value, dict):
+            mcp_servers.update(value)
+        elif isinstance(value, str):
+            ref_path = (plugin_json_path.parent / value).resolve()
+            # Ref must stay inside the plugin install dir — guard against
+            # a malicious plugin.json pointing at /etc/passwd or similar.
+            if str(ref_path).startswith(str(plugin_install_path.resolve()) + "/") or ref_path == plugin_install_path.resolve():
+                ref_data = read_json_file(ref_path)
+                if isinstance(ref_data, dict) and isinstance(ref_data.get("mcpServers"), dict):
+                    mcp_servers.update(ref_data["mcpServers"])
+
+    server_cfg = mcp_servers.get(server_name)
+    if not isinstance(server_cfg, dict):
+        return None
+
+    # Substitute ${CLAUDE_PLUGIN_ROOT} recursively so args / env / headers
+    # all see the resolved install path.
+    install_path_str = str(plugin_install_path)
+    resolved = json.loads(
+        json.dumps(server_cfg, default=str).replace(
+            "${CLAUDE_PLUGIN_ROOT}", install_path_str
+        )
+    )
+    return resolved
+
+
+def _resolve_merged_mcp_path(project_mcp_path: Path) -> Path | None:
+    """If a known hook-only plugin is installed and its MCP server isn't
+    already in ``project_mcp_path``, write a merged copy under
+    ``_MERGED_MCP_CACHE_DIR`` and return its path.
+
+    Returns ``None`` when no merge is needed (plugin absent, project already
+    declares it, or the plugin's MCP can't be read). The dispatch then falls
+    back to passing ``project_mcp_path`` unchanged.
+
+    Kanban card: ``[self-improve] context-mode-plugin blokkeert WebFetch en
+    curl naar een MCP-server die niet verbonden is``. The plugin's
+    ``hooks.json`` registers ``PreToolUse`` matchers for ``WebFetch`` and
+    ``Bash|curl``; the hook denies those calls and tells the session to call
+    ``mcp__plugin_context-mode_context-mode__ctx_fetch_and_index`` (and friends).
+    ``--strict-mcp-config`` (kaart ``00fa8325``) excludes plugin-discovered
+    MCPs from the dispatched session, so the redirect target does not exist
+    and the session is broken. Merging the plugin's MCP into the dispatch's
+    ``--mcp-config`` keeps the rest of the strict-isolation guarantee while
+    making the redirect actually reachable.
+    """
+    from app.utils.file_utils import read_json_file  # local import: cc_spawn is hot
+    from app.utils.path_utils import get_installed_plugins_file
+
+    registry_path = get_installed_plugins_file()
+    if not registry_path.is_file():
+        return None
+
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        # Corrupt registry must not break dispatch — fall through to None.
+        return None
+
+    plugins = registry.get("plugins", {}) if isinstance(registry, dict) else {}
+    if not isinstance(plugins, dict):
+        return None
+
+    project_cfg = read_json_file(project_mcp_path)
+    project_servers = (
+        project_cfg.get("mcpServers", {}) if isinstance(project_cfg, dict) else {}
+    )
+    if not isinstance(project_servers, dict):
+        project_servers = {}
+
+    for plugin_key in _MERGED_PLUGIN_KEYS:
+        installations = plugins.get(plugin_key)
+        if not installations or not isinstance(installations, list):
+            continue
+        first = installations[0]
+        if not isinstance(first, dict):
+            continue
+        # Use the first installation (registry lists at most one per scope
+        # pair in practice; entries may differ by scope=project/user, but the
+        # plugin root is the same regardless).
+        install_path_raw = first.get("installPath")
+        install_path = Path(install_path_raw) if install_path_raw else None
+        if install_path is None or not install_path.is_dir():
+            continue
+        # The plugin's MCP server name is the LAST segment of the key
+        # (``context-mode`` from ``context-mode@context-mode``). Hard-coded
+        # below for now — extend the registry shape if more names join the
+        # merge list.
+        server_name = plugin_key.split("@", 1)[0]
+        if server_name in project_servers:
+            # Project already declares it — nothing to merge.
+            continue
+        plugin_server = _read_plugin_mcp_server(install_path, server_name)
+        if plugin_server is None:
+            continue
+        project_servers[server_name] = plugin_server
+        # One merge per dispatch is enough; don't pile multiple plugin servers
+        # into one file when only one is in the registry.
+        merged = {"mcpServers": project_servers}
+        cache_dir = _MERGED_MCP_CACHE_DIR
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        # Stable cache key: hash the project path so different repos don't
+        # collide and the same repo reuses the same merged file across
+        # dispatches (idempotent).
+        cache_key = re.sub(r"[^A-Za-z0-9._-]", "_", str(project_mcp_path.parent))[:80]
+        merged_path = cache_dir / f"{cache_key}.mcp.json"
+        merged_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+        return merged_path
+
+    return None
 
 
 def _project_mcp_config_args(directory: str, repo_path: str | None = None) -> list[str]:
@@ -59,6 +213,15 @@ def _project_mcp_config_args(directory: str, repo_path: str | None = None) -> li
     When no file is found, ``--strict-mcp-config`` alone means zero MCPs are
     loaded — the safest possible default for a brand-new project.
 
+    If a plugin whose hooks always redirect to a plugin-only MCP is installed
+    (currently: context-mode — see kanban card ``[self-improve]
+    context-mode-plugin blokkeert WebFetch en curl``), and that plugin's MCP
+    server is NOT already declared in the project's ``.mcp.json``, the helper
+    writes a merged copy under ``~/.cache/cockpit-ship/merged-mcp/`` and
+    passes that to ``--mcp-config`` instead. This keeps the strict-isolation
+    contract (no global ``~/.claude.json`` MCPs, no other plugin MCPs) while
+    letting the plugin's own hooks reach their redirect target.
+
     Single source of truth: both this legacy bridge and the newer
     ``agentic_cli/claude_code.build_spawn_command`` import the same helper so a
     security fix can't drift between paths.
@@ -70,7 +233,13 @@ def _project_mcp_config_args(directory: str, repo_path: str | None = None) -> li
         if repo_mcp.is_file():
             mcp_path = repo_mcp
     if mcp_path.is_file():
-        args += ["--mcp-config", str(mcp_path)]
+        # ``mcp_path`` here is the resolved project MCP config (worktree or
+        # repo-root copy). If a hook-only plugin needs its MCP merged in, the
+        # resolved path is replaced with a freshly-written merged file.
+        # The project file itself is never mutated.
+        merged_path = _resolve_merged_mcp_path(mcp_path)
+        effective_path = merged_path if merged_path is not None else mcp_path
+        args += ["--mcp-config", str(effective_path)]
     return args
 
 

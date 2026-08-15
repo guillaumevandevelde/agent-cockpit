@@ -2,6 +2,29 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _empty_plugin_registry(tmp_path, monkeypatch):
+    """Pin ``installed_plugins.json`` to an empty registry so the
+    context-mode merge path (kanban card ``[self-improve] context-mode-plugin
+    blokkeert WebFetch en curl``) does NOT fire in these tests.
+
+    These tests pin the strict-isolation contract — the project ``.mcp.json``
+    is what lands in ``--mcp-config``, no merged copy. The merge itself has
+    its own tests in ``test_runs_cc_spawn_context_mode.py`` with explicit
+    plugin fixtures. Keeping this file's fixture empty by default means a
+    stray host plugin (e.g. context-mode installed on the test machine)
+    can't silently turn the helper's ``--mcp-config`` argument into a
+    merged copy and trip an exact-path assertion.
+    """
+    from app.utils import path_utils
+
+    registry = tmp_path / "installed_plugins.json"
+    registry.write_text('{"version": 2, "plugins": {}}', encoding="utf-8")
+    monkeypatch.setattr(path_utils, "get_installed_plugins_file", lambda: registry)
+
 
 def test_provider_registry_contains_initial_providers():
     from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
