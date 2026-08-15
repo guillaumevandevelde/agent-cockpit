@@ -45,24 +45,35 @@ Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur 
 
 ## Doel & oriëntatie
 
-**Claude Cockpit is een agentic software factory — een beheerapplicatie voor die factory.**
-Het is de controlekamer waarin autonome agents een *software factory* aansturen.
-Op die lopende band doen agents twee dingen: (1) externe applicaties bouwen en
-beheren — de primaire bestaansreden — en (2) deze codebase continu verbeteren. De cockpit levert de
-factory-vloer (kanban-dispatch, multi-agent-decompositie, worktrees, agent mail,
-dependency-DAG, session-lifecycle) én het beheer-/observatiepaneel eromheen. De
-orchestratie-kern is agent- en repo-onafhankelijk ontworpen, zodat dezelfde software
-factory elke agent-runtime en elk doel-repo kan aandrijven. Volledige missietekst,
-kernprincipes en zelfverbeteringsdoelen: `docs/cockpit/00-orientation.md`.
+**Agent Cockpit is een persoonlijke agent-cockpit: één toegangspoort tot een divers
+team agents.** De eigenaar dient werk in, de agents voeren het uit, en de cockpit meldt
+terug wat aandacht vraagt. Dat werk is niet alleen software bouwen — ook onderzoek en
+kenniswerk lopen door dezelfde machinerie, met een lichter ceremonieprofiel. De cockpit
+levert de uitvoeringsvloer (kanban-dispatch, multi-agent-decompositie, worktrees, agent
+mail, dependency-DAG, session-lifecycle). De orchestratie-kern is agent- en
+repo-onafhankelijk ontworpen, zodat elke agent-runtime en elk doel-repo eronder past.
+
+De toepassing draait op de eigen machine en is van overal bereikbaar via een tunnel of
+tailnet; uitvoering verhuist niet naar een server. Meldingen vuren alleen bij een
+blokkade die de eigenaar nodig heeft of bij iets dat stuk is.
+
+> **Herzien op 2026-08-15.** Dit was eerder "een agentic software factory". Die framing is
+> vervangen; het geërfde Claude Code-beheerpaneel is nu een kostenpost die krimpt, geen
+> product. Beslissing en onderbouwing: [`docs/cockpit/cockpit-richting-decision.md`](./docs/cockpit/cockpit-richting-decision.md).
+
+Volledige missietekst, kernprincipes en zelfverbeteringsdoelen:
+`docs/cockpit/00-orientation.md`.
 
 ---
 
 # Agent Cockpit
 
-Beheerapplicatie voor een **agentic software factory**: autonome agents bouwen en
-onderhouden externe applicaties én deze codebase, aangestuurd vanuit één cockpit.
-Bovenop die factory beheert de web-app ook de Claude Code-omgeving zelf —
-configuraties, MCP servers, commands, plugins, hooks en permissions.
+**Persoonlijke cockpit voor een divers team agents**: werk indienen, autonoom laten
+uitvoeren — software én kenniswerk — en gedoseerd terugkoppeling krijgen. De web-app
+beheert daarnaast nog de Claude Code-omgeving zelf (configuraties, MCP servers,
+commands, plugins, hooks, permissions). Dat deel is geërfd van claude-deck en krimpt
+volgens de snoeiregels in
+[`docs/cockpit/cockpit-richting-decision.md`](./docs/cockpit/cockpit-richting-decision.md) §6.
 
 ## Commands
 
