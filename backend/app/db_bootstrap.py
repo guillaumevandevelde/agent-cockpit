@@ -2,14 +2,19 @@
 
 Both stores predate alembic: their schema was produced by ``create_all`` plus a
 set of hand-written ``_ensure_*`` / ``_migrate_*`` functions. They hold live
-data (855 cards and 18.834 ops on the board at the time of writing), so the
-first alembic run must stamp them as current rather than create anything.
+data (59 cards and 18.834 ops on the board at the time of writing), so the
+first alembic run must adopt them rather than create anything.
 
-Stamping is only safe when the real schema already matches the models. A
-database whose shape drifted -- which is a live possibility given four
-hand-written migration functions -- would have that drift frozen in place
-permanently by a stamp, and no later revision would ever correct it. So drift
-is a hard refusal, not a warning.
+Adoption stamps the database at the *baseline* revision and then upgrades it,
+so every revision written since baseline still runs. Stamping straight at head
+would skip them silently -- and on both live stores that mattered: they drifted
+from the models (six columns missing from ``sandcastle_configs``, five tables
+outliving their features), and the reconcile revisions are what closes that.
+
+Afterwards the schema is compared to the models and a remaining difference is a
+hard error. That check is deliberately on the end state: drift must never
+become invisible, and asserting it is gone after the upgrade proves exactly
+that, while still letting reconcile revisions do their job.
 """
 import os
 import subprocess
@@ -17,6 +22,8 @@ import sys
 from pathlib import Path
 
 import sqlalchemy as sa
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.schema import MetaData
 
 from app.db_schema_drift import schema_differences
@@ -44,8 +51,22 @@ def _run_alembic(name: str, db_path: Path, *args: str) -> None:
         raise RuntimeError(f"alembic --name {name} {' '.join(args)} failed:\n{result.stderr}")
 
 
+def _base_revision(name: str) -> str:
+    """Revision id of the first migration in ``name``'s history."""
+    config = Config(str(BACKEND_ROOT / "alembic.ini"), ini_section=name)
+    bases = ScriptDirectory.from_config(config).get_bases()
+    if len(bases) != 1:
+        raise RuntimeError(f"expected exactly one base revision for {name}, got {bases}")
+    return bases[0]
+
+
 def ensure_versioned(name: str, db_path: Path, metadata: MetaData) -> str:
-    """Return "created", "stamped" or "upgraded" for the database at db_path."""
+    """Bring the database at ``db_path`` to head.
+
+    Returns "created" (was empty), "upgraded" (already under alembic) or
+    "adopted" (existed but predated alembic). Raises ``SchemaDriftError`` when
+    the schema still differs from ``metadata`` after the upgrade.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = sa.create_engine(f"sqlite:///{db_path}")
 
@@ -61,17 +82,30 @@ def ensure_versioned(name: str, db_path: Path, metadata: MetaData) -> str:
         _run_alembic(name, db_path, "upgrade", "head")
         return "upgraded"
 
+    # A pre-alembic database sits at the *baseline* revision's shape, not at
+    # head: every revision written since baseline still has to run against it.
+    # Stamping straight at head would skip them silently -- and the reconcile
+    # revision is exactly such a revision, so on the live stores that would
+    # have frozen the measured drift in place forever.
+    _run_alembic(name, db_path, "stamp", _base_revision(name))
+    _run_alembic(name, db_path, "upgrade", "head")
+
+    # Verify the end state rather than the starting state. The point of the
+    # check is that drift must never become invisible; asserting it is gone
+    # after the upgrade proves that directly, and it lets reconcile revisions
+    # do their job instead of being pre-empted by a refusal.
     with engine.connect() as conn:
         differences = schema_differences(conn, metadata)
     if differences:
         raise SchemaDriftError(
-            f"{db_path} predates alembic and its schema does not match the models, "
-            "so it cannot be stamped as up to date. Differences:\n  "
+            f"{db_path} was adopted into alembic, but its schema still does not "
+            "match the models afterwards. A reconcile revision is missing for:\n  "
             + "\n  ".join(differences)
+            + "\n\nThe pre-migration snapshot taken by app/migrate_cli.py is your "
+            "way back."
         )
 
-    _run_alembic(name, db_path, "stamp", "head")
-    return "stamped"
+    return "adopted"
 
 
 def assert_at_head(name: str, db_path: Path) -> None:
