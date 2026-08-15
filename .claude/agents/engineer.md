@@ -103,6 +103,17 @@ altijd door.
    met 2 latent-red tests). Het script zoekt in `backend/app/` én
    `backend/tests/` op resterende verwijzingen.
 
+   **Frontend-orphan-sweep na Pydantic-veldverwijdering:** raakt je diff
+   een `backend/app/models/*_schemas.py`-veld dat wordt hernoemd of
+   verwijderd, draai dan óók `grep -rn "<verwijderde_of_oude_naam>"
+   frontend/src/` per aangeraakt veld. De backend-coverage-check hierboven
+   dekt alléén `backend/app/`+`backend/tests/`; frontend-TS-references
+   blijven anders ongezien tot `npm run build` dagen later faalt
+   (kaart `39778adba3e74d2b8fd6f786344f4a8d` — voorbeeld-orphan
+   `MailMessageResponse.sender_actor_kind` → `senderTypeLabel` in
+   `frontend/src/features/agent-mail/utils.ts`, gefixt in `6ac13b84`).
+   Volledige recept + wanneer-verplicht: `docs/cockpit/refactor-frontend-orphan-sweep.md`.
+
    **Bron-analysedoc bijwerken (na een gefilede follow-up):** rondt je kaart een
    follow-up af die in zijn beschrijving of `metadata.facet`/`metadata.parent_card`
    naar een `docs/cockpit/*.md`-analyse-/designdoc verwijst, voeg dan **vóór de
