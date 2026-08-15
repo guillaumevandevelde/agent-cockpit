@@ -12,7 +12,6 @@ behaviour (helper, kill-switch, activity-feed comments) lives in
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
 
 from app.kanban.models import KanbanColumn
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
@@ -79,31 +78,7 @@ async def test_token_saver_enabled_round_trips_through_orm():
     assert loaded.token_saver_enabled == 1
 
 
-@pytest.mark.asyncio
-async def test_migration_is_additive_when_column_already_exists():
-    """Calling ``_ensure_column_table`` twice does not raise on the second call.
-
-    Mirrors the existing additive-migration contract for ``default_provider``,
-    ``max_sessions``, etc. (see ``db.py``). A second invocation must hit
-    the early-return path that the ``if "token_saver_enabled" not in cols``
-    guard installs.
-    """
-    from app.kanban.db import _ensure_column_table
-
-    # Reset (clean baseline) then run twice.
-    async with KanbanSessionLocal():
-        # The engine used by TestSessionLocal is shared; calling begin()
-        # through the session-binding that fixtures establish requires us
-        # to use the underlying connection. We pull it from the test engine
-        # by name; kanban_test_db exposes it as ``test_engine``.
-        from tests.kanban_test_db import test_engine
-        async with test_engine.begin() as conn:
-            await _ensure_column_table(conn)
-            # The second call must not raise. If the migration is not
-            # properly idempotent this is where an OperationalError appears.
-            try:
-                await _ensure_column_table(conn)
-            except OperationalError as e:
-                pytest.fail(
-                    f"_ensure_column_table is not idempotent: {e}"
-                )
+# De idempotentie-test voor `_ensure_column_table` is op 2026-08-15 verwijderd
+# samen met die functie. Een oudere database naar de huidige vorm brengen is nu
+# alembic's werk; gedekt door
+# tests/test_db_bootstrap.py::test_pre_alembic_database_is_adopted.
