@@ -77,6 +77,9 @@ jobs:
       - run: python scripts/check_openapi_snapshot.py
         working-directory: backend
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - run: python scripts/check_migrations_current.py
+        working-directory: backend
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
       - name: Superpowers promotion ledger (advisory)
         run: bash scripts/check-superpowers-promotions.sh
         continue-on-error: true

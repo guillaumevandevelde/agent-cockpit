@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.v1 import projects as projects_api
-from app.database import Base, _migrate_project_columns
+from app.database import Base
 from app.main import app
 from app.models.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services.project_service import ProjectService
@@ -115,36 +115,10 @@ async def test_update_project_missing_returns_none(db_session):
 # ---------------------------------------------------------------- migration
 
 
-@pytest.mark.asyncio
-async def test_migration_adds_columns_to_legacy_table():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        # legacy projects table without kind/priority
-        await conn.exec_driver_sql(
-            "CREATE TABLE projects ("
-            "id INTEGER PRIMARY KEY, name TEXT, path TEXT, is_active BOOLEAN, "
-            "last_accessed DATETIME, created_at DATETIME, updated_at DATETIME)"
-        )
-        await conn.exec_driver_sql(
-            "INSERT INTO projects (name, path, is_active, last_accessed, created_at, updated_at) "
-            "VALUES ('legacy', '/tmp/legacy', 0, '2026-01-01', '2026-01-01', '2026-01-01')"
-        )
-
-    async with engine.begin() as conn:
-        await _migrate_project_columns(conn)
-        # idempotent — a second run must not raise
-        await _migrate_project_columns(conn)
-        rows = (await conn.exec_driver_sql("PRAGMA table_info(projects)")).fetchall()
-        cols = {r[1] for r in rows}
-        assert "kind" in cols
-        assert "priority" in cols
-        row = (
-            await conn.exec_driver_sql("SELECT kind, priority FROM projects")
-        ).fetchone()
-        assert row[0] == "product"  # server default applied to the legacy row
-        assert row[1] is None
-    await engine.dispose()
-
+# The legacy-table migration test that used to sit here was removed on
+# 2026-08-15 together with `_migrate_project_columns`. Bringing an older
+# database up to the current shape is alembic's job now; see
+# tests/test_db_bootstrap.py::test_pre_alembic_database_is_adopted.
 
 # ---------------------------------------------------------------- API route
 

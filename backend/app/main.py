@@ -195,13 +195,6 @@ async def lifespan(app: FastAPI):
             await sync_anthropic_provider_registration(_db)
     except Exception:
         logger.exception("failed to sync Anthropic provider registration from prefs")
-    from app.database import engine
-    from app.services.scheduling.schema_guard import (
-        ensure_backup_columns,
-        ensure_model_columns,
-    )
-    await ensure_backup_columns(engine)
-    await ensure_model_columns(engine)
     # Clean up any orphaned relay processes from previous runs
     from app.services.runs.pty_relay import cleanup_orphaned_relays, close_all_relays
     cleanup_orphaned_relays()
