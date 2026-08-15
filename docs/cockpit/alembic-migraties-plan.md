@@ -30,11 +30,14 @@ status: proposed
 > schrappen in plaats van omzetten, omdat de basisrevisie het volledige
 > modelschema al beschrijft.
 >
-> **Eén onderdeel is bewust niet gebouwd:** de `assert_at_head`-haak in de
-> lifespan uit spec-§1.4. 87 testbestanden starten de app via `TestClient` met
-> een `create_all`-schema en staan dus niet onder alembic. Een harde controle
-> daar laat de hele suite vallen. §1.4 en de bewuste `create_all`-uitzondering
-> in §1.6 spreken elkaar tegen. Dat vraagt een keuze en staat open.
+> **Ook §1.4 is inmiddels gesloten (2026-08-15).** De lifespan-controle stond
+> eerst open omdat een harde variant de suite liet vallen: 87 testbestanden
+> starten de app via `TestClient` met een `create_all`-schema. Opgelost door de
+> controle smaller te maken — overslaan bij een database zonder
+> `alembic_version`, weigeren bij een database die er wél onder staat maar
+> achterloopt. **Effect:** een backend die start op een achterlopend schema
+> stopt nu met een melding die de revisie noemt, terwijl de testsuite
+> ongemoeid blijft.
 
 ## Global Constraints
 

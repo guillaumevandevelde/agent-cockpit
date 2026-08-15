@@ -49,6 +49,8 @@ Stap 3 is niet optioneel. Het huidige schema komt voort uit `create_all` plus vi
 
 `scripts/cockpit.sh start` voert `upgrade head` uit voor beide stores. De applicatie weigert te starten bij een versieverschil in plaats van stil door te draaien. Geen automatische migratie vanuit de app zelf — luid falen is hier veiliger dan behulpzaam zijn.
 
+> **Verduidelijkt bij de uitvoering (2026-08-15).** Deze eis botste met §1.6, dat de testsuite bewust op `create_all` laat draaien: 87 testbestanden starten de app via `TestClient`, en een harde controle liet die allemaal vallen. Opgelost door de controle smaller te maken. Een database zonder `alembic_version` wordt overgeslagen — dat is de `create_all`-vorm. Een database die er wél onder staat maar achterloopt wordt geweigerd. Dat is de enige vorm waarin de faalmodus bestaat.
+
 Vóór elke upgrade komt er een momentopname van de kanban-database. Dat is bestaande code: `backup_service._snapshot_kanban_db` maakt al een WAL-veilige kopie.
 
 ### 1.5 Wat verdwijnt
