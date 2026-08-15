@@ -111,6 +111,7 @@ ls scripts/test_*.sh     # family-level reference — check-test-harness-coverag
 bash scripts/test_po_digest_source.sh                  # PO-digest collector (mechanische helft)
 bash scripts/test_check_file_size_ratchet.sh           # Omvangsratel: bestanden boven 800 regels mogen niet groeien (architectuur.md regel 3)
 bash scripts/test_check_doc_readability.sh             # Leesbaarheidsnorm-meter (zie de Taalgebruik-regel hieronder)
+bash scripts/test_check_decision_doc_anchors.sh        # file:line-anker-check op beslisdocs (zie taalgebruik-conventies.md §4, kaart `1bf9b52d…`)
 bash scripts/test_sweep_unchecked_implemented_markers.sh   # ✅-marker-sweep (kaart 21a349bc… — recipe-writing-conventions §2)
 bash scripts/test_sweep_stale_interviews.sh            # Stale-interview-sweeper (interviews/<slug>/ vangnet; zie kaartloze-app-inceptie-decision.md §5)
 bash scripts/test_sweep_orphaned_parents_awaiting_subtasks.sh   # Vangnet voor parents die in `Awaiting Subtasks` stranden zonder kinderen (kaart 400d6a77…)
