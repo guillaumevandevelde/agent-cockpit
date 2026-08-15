@@ -51,37 +51,24 @@ function recipientLabel(member: MailMemberResponse): string {
 }
 
 function deliveryLabel(member: MailMemberResponse): string {
-  if (member.status === 'offline' || member.wake_state === 'offline') return 'offline, stored only'
-  if (member.wake_state === 'wakeable') {
-    const methodText = member.wake_methods?.length ? ` via ${member.wake_methods.join(', ')}` : ''
-    return `wakeable${methodText}`
-  }
-  if (member.wake_state === 'delivered_waiting') return 'not wakeable'
+  if (member.status === 'offline') return 'offline, stored only'
   if (member.status === 'observed') return 'observed only'
   return member.status
 }
 
 function deliveryRank(member: MailMemberResponse): number {
-  if (member.status === 'offline' || member.wake_state === 'offline') return 4
-  if (member.wake_state === 'wakeable') return 0
+  if (member.status === 'offline') return 4
   if (member.status === 'connected') return 1
   if (member.status === 'observed') return 2
   return 3
 }
 
 function deliveryWarning(member: MailMemberResponse, kind: Exclude<MailMessageKind, 'answer'>): string | null {
+  if (member.status !== 'offline') return null
   const expectsAction = kind === 'context_request' || kind === 'handoff'
-  if (member.status === 'offline' || member.wake_state === 'offline') {
-    return expectsAction
-      ? `${member.display_name} is offline. This ${kind === 'handoff' ? 'handoff' : 'request'} will be stored, but no live run can be woken to respond until that participant checks in again.`
-      : `${member.display_name} is offline. This message will be stored for later; Agent Cockpit cannot wake a live run.`
-  }
-  if (member.wake_state === 'delivered_waiting') {
-    return expectsAction
-      ? `${member.display_name} is not wakeable. The ${kind === 'handoff' ? 'handoff' : 'request'} will be stored, but the run may not see it until it checks Agent Mail or reaches a hook boundary.`
-      : `${member.display_name} is not wakeable. The message will be stored, but Agent Cockpit cannot nudge this run.`
-  }
-  return null
+  return expectsAction
+    ? `${member.display_name} is offline. This ${kind === 'handoff' ? 'handoff' : 'request'} will be stored until that participant checks in again.`
+    : `${member.display_name} is offline. This message will be stored for later.`
 }
 
 export function ComposeDialog({ open, members, preset, onOpenChange, onSend }: ComposeDialogProps) {

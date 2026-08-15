@@ -24,7 +24,6 @@ import {
   recipientName,
   requestBadgeClass,
   senderName,
-  senderTypeLabel,
 } from './utils'
 
 export type RequestKindFilter = 'all' | Exclude<MailMessageKind, 'answer'>
@@ -175,11 +174,6 @@ export function RequestsTab({
                       <span>
                         {senderName(message, members)} to {recipientName(message, members)}
                       </span>
-                      {senderTypeLabel(message) && (
-                        <Badge variant="outline" className="text-xs">
-                          {senderTypeLabel(message)}
-                        </Badge>
-                      )}
                     </div>
                   </div>
                   <p className="text-sm leading-6 text-muted-foreground">{messageSummary(message)}</p>

@@ -58,7 +58,7 @@ live.
 | Permission-gating inbound | `crossSessionInbound` setting | Geen auth op interne API (bewust, lokaal trust-model); externe API heeft bearer-token + rate-limit |
 | Auto-expire | `dialogExpiry` setting | `mail_receipts.read_at`/`acked_at`; geen TTL — blijft tot expliciete cleanup |
 | Structured requests (context/handoff/answer) | Geen — platte messages | Eersteklas: `mail_messages.kind` ∈ `message`/`broadcast`/`context_request`/`handoff`/`answer`, met `request_status` lifecycle |
-| Wakeability (tmux-pane nudge) | Niet expliciet — context die in een runway-Claude-Code-sessie binnenkomt wordt door dezelfde sessie opgepakt | `auto_nudge_members` (30s cooldown per member) + `queue_inbox_check` (handmatig); hergebruikt `tmux_inject.send_text` |
+| Wakeability (tmux-pane nudge) | Niet expliciet — context die in een runway-Claude-Code-sessie binnenkomt wordt door dezelfde sessie opgepakt | Geen wake-lus meer; bezorging via `mail_messages` + `mail_receipts`, sessies checken via `SessionStart`/`UserPromptSubmit`-hooks of MCP-tool `agent_mail_check_inbox`. Verwijderd 2026-08-15 (kaart `64b259f6…`, geen actieve caller). |
 | Inspectable mailbox UI | Alleen via CC's eigen UI (lijst per sessie) | Eigen `frontend/src/features/agent-mail/` (Team/Requests/Install-tabs + inbox/messages REST API) |
 | Durable per-repo identity | Niet — CC native is identity-loos, sessions ontdekken elkaar via `name` | `mail_team_members` met `repo_id` (sha1 van git-common-dir), één per repo |
 | Kanban-audit Koppeling | Geen | `kanban_ops` activity-feed entries; berichtenpaar traceerbaar per dispatched run |

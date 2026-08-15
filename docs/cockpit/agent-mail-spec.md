@@ -7,9 +7,10 @@ status: active
 # Agent Mail — upstream sync (adapted port)
 
 > Cross-session berichten tussen willekeurige, losstaande Claude Code/Codex CLI-sessies
-> (verschillende terminals/repo's) — durable per-repo identiteit, structured messages,
-> een inspectable mailbox-UI, wakeability via tmux, en een externe REST-orchestratie-API
-> voor lokale tools zoals OpenClaw.
+> (verschillende terminals/repo's) — durable per-repo identiteit, structured messages
+> en een inspectable mailbox-UI. Wakeability via tmux was onderdeel van eerdere
+> revisies (verwijderd 2026-08-15, kaart `64b259f6…`); cross-session nudgen loopt nu
+> via Claude Code's eigen `SendMessage` of Codex' pane-nudge, buiten Agent Mail.
 
 ## Herkomst en scope-beslissing
 
@@ -61,13 +62,9 @@ duurzaamheid, zichtbaarheid, externe toegang) draaide de eerdere
 keep-beslissing om. Nul berichten in 36 dagen, en de native laag
 adresseert onze gedispatchte sessies fijner dan wij — per sessie in
 plaats van per repo, met tmux-doel erbij. De roster- en install-laag
-blijft, de berichten-, wake- en externe-actor-laag verdwijnt via drie
-vervolgkaarten. Meting, `file:line`-onderbouwing en de af te breken
-onderdelen staan in
+blijft; de externe-actor-laag (commit `14472c35`) en wake-lus (commit
+`6a03dc83`, deze kaart) zijn weg. Meting en onderbouwing staan in
 [`cc-native-cross-session-decision.md` § Herziening 2026-08-13](cc-native-cross-session-decision.md).
-
-Zolang die vervolgkaarten nog niet gedraaid zijn, beschrijft de rest van
-dit document de gebouwde staat.
 
 ## Wat hergebruikt wordt (i.p.v. herbouwd)
 
@@ -78,17 +75,13 @@ infra-lagen aan bestaande Cockpit-primitieven hangen:
 | Upstream bouwde | Cockpit heeft al | Actie |
 |---|---|---|
 | Eigen stdio MCP-shim (`mcp_shim/agent_mail_server.py`) + `codex mcp add`-installer per provider | Generieke, bearer-token-authed MCP-server (`app/mcp_server`, Streamable-HTTP op `/api/v1/mcp-server`, `MCPAccessToken` met `agent_name`) | Mail-tools registreren op de bestaande server (`app/mcp_server/tools/agent_mail.py`). Geen apart transport, geen Codex `mcp add`-installer nodig. |
-| Eigen tmux `send-keys`-nudge (`_send_tmux_inbox_check`) | `app/services/scheduling/tmux_inject.py::send_text()` — zelfde literal+Enter-tweestap | Hergebruiken i.p.v. dupliceren. |
+| Eigen tmux `send-keys`-nudge | Geen wake-lus meer in Agent Mail — cross-session nudgen loopt buiten deze module (Claude Code `SendMessage`, Codex pane-nudge) | Verwijderd 2026-08-15 (kaart `64b259f6…`). |
 | Eigen tmux-pane-scanner voor "observed sessions" | `app/services/runs/discovery.py::discover_agent_sessions()` — scant al panes + matcht `claude-code`/`codex-cli`-processen | Hergebruiken in `sync_observed_sessions()`. |
 | Repo-identiteit (`repo_utils.py`, git-common-dir-gebaseerd) | Geen equivalent | Nieuw, bijna 1-op-1 geport (~40 regels). |
 | Claude Code hook-installer (curl-based, additive merge in `settings.json`) | Vergelijkbaar patroon in `scheduling/hook_installer.py`, maar andere events/URL | Nieuwe kleine module, zelfde idempotente-merge-vorm. |
 | Codex CLI hook-installer (`~/.codex/hooks.json` editen) + `codex mcp add` | Codex is al eersteklas provider (`providers/codex_cli.py`, `get_codex_home()`) maar geen bestaande hook-installer | Hooks.json-editing geport; MCP-registratie **niet** (zie boven — geen aparte shim nodig). |
 | ~~`MailExternalActor` token/rate-limit-model voor externe tools~~ ✅ Geïmplementeerd (kaart `5fca30d0…`): verwijderd — geen externe actor ooit geregistreerd | Geen equivalent (MCPAccessToken is voor MCP-toolcalls, niet voor een generieke bearer-authed REST-facade per actor) | ~~Nieuw, zoals upstream~~ — verwijderd. |
 | Frontend `agent-mail`-feature (11 bestanden, ~2.260 regels) | `CLICKABLE_CARD`, `MODAL_SIZES`, `MarkdownRenderer`, `MarkdownPreviewToggle`, `sonner` (al aanwezig) | Geport, met 2 gerichte fixes: body/charter-velden door `MarkdownPreviewToggle` (upstream gebruikt inconsistent plain `Textarea` terwijl de read-kant wél `MarkdownRenderer` gebruikt); Requests-tab message-cards door `CLICKABLE_CARD` (upstream gebruikt losse knoppen). |
-
-Wakeability-gedrag: upstream's uiteindelijke, gecorrigeerde staat (na `5d83b1d`) wordt
-direct geïmplementeerd — nudge-eligibility = `provider in {"claude-code", "codex-cli"}`,
-niet Codex-only (dat was een tussentijdse bug, meteen goed geport).
 
 ## Datamodel (`backend/app/models/agent_mail.py`, hoofd-DB via `Base`)
 
@@ -114,9 +107,9 @@ Nieuwe tabellen, `create_all` volstaat (geen migratie-framework, alleen nieuwe t
 
 ## Service-laag (`backend/app/services/agent_mail_service.py`)
 
-Directe SQLAlchemy, singleton `agent_mail_service = AgentMailService()` (in-process
-throttle-state voor auto-nudge-cooldown, net als upstream — reset bij restart,
-acceptabel voor single-instance lokale deployment).
+Directe SQLAlchemy, singleton `agent_mail_service = AgentMailService()`.
+Geen in-process throttle-state meer sinds de wake-lus verwijderd is
+(commit `6a03dc83`); single-instance lokale deployment is geen beperking.
 
 Kernfuncties (zie upstream-analyse voor volledige signatures, 1-op-1 geport minus
 team-slot-integratie):
@@ -133,12 +126,13 @@ team-slot-integratie):
 - **Messaging**: `send_message` (valideert kind, sender-exclusiviteit member/actor,
   `answer` vereist pending `context_request`-root gericht aan sender), `get_inbox`,
   `mark_read`, `ack_message` (sluit request-lifecycle), `get_thread`, `list_root_messages`.
-- **Wakeability**: `_session_can_nudge` (`source=="observed"`, provider in
-  `{claude-code, codex-cli}`, heeft `tmux_target`, status nog `observed`),
-  `_nudge_session_for_member`, `_wake_member` (hergebruikt `tmux_inject.send_text`),
-  `auto_nudge_members` (best-effort, 30s cooldown per member, ná `db.commit()` van het
-  bericht — delivery en wake zijn ontkoppeld), `queue_inbox_check` (handmatige wake, geen
-  cooldown), `wake_members_with_results` (synchrone wake-rapportage voor de externe API).
+- **Wakeability**: bewust géén wake-lus. Berichten worden bezorgd via
+  `mail_messages` + `mail_receipts`; levende sessies checken hun inbox via de
+  `SessionStart`-/`UserPromptSubmit`-hooks of via de MCP-tool
+  `agent_mail_check_inbox`. Een apart tmux-nudge-pad leverde nul verzonden
+  berichten en geen actieve caller — verwijderd 2026-08-15 (kaart
+  `64b259f6…`). Cross-session nudgen blijft mogelijk via Claude Code's
+  `SendMessage` of Codex' eigen pane-nudge; die paden lopen buiten Agent Mail.
 - **Prompt-context**: `build_session_start_context` (identiteit + roster + inbox-
   samenvatting voor de `SessionStart`-hook), `build_prompt_submit_context` (one-liner
   reminder voor `UserPromptSubmit`, alleen als er unread/pending is).
@@ -148,7 +142,7 @@ team-slot-integratie):
 Geen auth — matcht de bestaande unauthenticated-local posture (zelfde als kanban,
 scheduled-messages). Endpoints: `GET /team`, `PATCH /members/{id}`, `POST/GET /messages`,
 `GET /messages/{id}/thread`, `POST /messages/{id}/read`, `POST /messages/{id}/ack`,
-`POST /members/{id}/queue-inbox-check`, `POST /agent/register`, `GET /agent/inbox`,
+`POST /agent/register`, `GET /agent/inbox`,
 `POST /hooks/{session-start,user-prompt-submit,session-end,post-tool-use}`,
 `GET /install/status`, `POST/DELETE /install/claude-code/*`, `POST/DELETE
 /install/codex/*`, `GET /install/snippets`.
@@ -235,9 +229,10 @@ features in dit fork behalve `*.test.tsx` waar aanwezig — volg dat waar zinvol
   not a general network authentication system" (letterlijk zoals upstream documenteert).
 - MCP-identiteit is een spoofbaar expliciet argument (zelfde trade-off als overal elders
   in dit fork's lokale MCP-tools).
-- Wakeability werkt alleen voor `source=="observed"` tmux-sessies van `claude-code`/
-  `codex-cli`; niet-tmux-sessies (bv. Sandcastle-containers) blijven pull-only
-  (`check_inbox`).
+- Wakeability is geen Agent-Mail-verantwoordelijkheid meer (commit `6a03dc83`).
+  Sessies checken hun inbox via de `SessionStart`-/`UserPromptSubmit`-hooks of via
+  de MCP-tool `agent_mail_check_inbox`; cross-session nudgen loopt via Claude
+  Code's `SendMessage` of Codex' pane-nudge.
 
 ## Implementatienotities (na de bouw)
 

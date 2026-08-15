@@ -1,4 +1,4 @@
-import { BellRing, Edit3, Handshake, HelpCircle, Mail, Search } from 'lucide-react'
+import { Edit3, Handshake, HelpCircle, Mail, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -25,10 +25,6 @@ import {
   statusBadgeClass,
   statusLabel,
   statusTitle,
-  wakeMethodLabel,
-  wakeStateBadgeClass,
-  wakeStateLabel,
-  wakeStateTitle,
 } from './utils'
 
 export type TeamStatusFilter = 'all' | MailMemberStatus
@@ -46,8 +42,6 @@ interface TeamTabProps {
   onStatusFilterChange: (value: TeamStatusFilter) => void
   onEdit: (member: MailMemberResponse) => void
   onCompose: (kind: Exclude<MailMessageKind, 'answer' | 'broadcast'>, member: MailMemberResponse) => void
-  onQueueInboxCheck: (member: MailMemberResponse) => void
-  nudgingMemberId?: number | null
 }
 
 function sameRuntime(session: MailSessionResponse, observation: MailSessionResponse): boolean {
@@ -109,8 +103,6 @@ export function TeamTab({
   onStatusFilterChange,
   onEdit,
   onCompose,
-  onQueueInboxCheck,
-  nudgingMemberId,
 }: TeamTabProps) {
   const normalizedSearch = repoSearch.trim().toLowerCase()
   const filtered = members.filter((member) => {
@@ -154,8 +146,6 @@ export function TeamTab({
         <div className="grid gap-4 xl:grid-cols-2">
           {filtered.map((member) => {
             const visibleSessions = displaySessions(member.sessions)
-            const wakeState = member.wake_state ?? (member.status === 'offline' ? 'offline' : 'delivered_waiting')
-            const wakeMethods = member.wake_methods ?? []
             const deliveryWarnings = [
               member.unseen_pending_count > 0
                 ? `${member.unseen_pending_count} pending request(s) have not been read by this run.`
@@ -163,12 +153,7 @@ export function TeamTab({
               member.stale_pending_count > 0
                 ? `${member.stale_pending_count} pending request(s) are stale.`
                 : null,
-              !member.can_nudge && (member.unread_count > 0 || member.pending_count > 0)
-                ? 'No wake path is available; the visible run must check its inbox.'
-                : null,
             ].filter(Boolean)
-            const showQueueInboxCheck = member.can_nudge && (member.unread_count > 0 || member.pending_count > 0)
-            const wakeMethodText = wakeMethods.map(wakeMethodLabel).join(', ')
 
             return (
               <Card key={member.id} className="rounded-lg">
@@ -188,16 +173,6 @@ export function TeamTab({
                       >
                         {statusLabel(member.status)}
                       </Badge>
-                      {wakeState !== 'offline' && (
-                        <Badge
-                          variant="outline"
-                          className={wakeStateBadgeClass(wakeState)}
-                          title={wakeStateTitle(wakeState)}
-                        >
-                          {wakeStateLabel(wakeState)}
-                          {wakeMethodText ? `: ${wakeMethodText}` : ''}
-                        </Badge>
-                      )}
                       {member.pending_count > 0 && (
                         <Badge variant="outline" className="border-amber-300 text-amber-700">
                           {member.pending_count} pending
@@ -310,17 +285,6 @@ export function TeamTab({
                       <Handshake className="mr-2 h-4 w-4" />
                       Handoff
                     </Button>
-                    {showQueueInboxCheck && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onQueueInboxCheck(member)}
-                        disabled={nudgingMemberId === member.id}
-                      >
-                        <BellRing className="mr-2 h-4 w-4" />
-                        {nudgingMemberId === member.id ? 'Queueing...' : 'Queue inbox check'}
-                      </Button>
-                    )}
                   </div>
                 </CardContent>
               </Card>
