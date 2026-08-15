@@ -41,8 +41,25 @@ class BaseSpecUnavailable(RuntimeError):
     """Raised when the merge-base spec needed for a targeted update can't be built."""
 
 
+# Paths whose presence depends on the environment rather than on the API.
+# `app/main.py` mounts the built SPA at "/" when `frontend/dist` exists, and
+# registers a plain `@app.get("/")` when it does not. So "/" shows up in the
+# live spec purely based on whether a frontend build happens to be on disk: a
+# dev checkout with a build writes a snapshot that a CI runner without one
+# rejects, and the other way round. That is what turned quality.yml red on
+# master (2026-08-13 .. 2026-08-15) while the same check passed locally.
+# Every real API path lives under /api/v1, so dropping "/" from the compared
+# shape makes the gate deterministic in both environments.
+_ENV_DEPENDENT_PATHS = ("/",)
+
+
 def contract_shape(schema: dict) -> dict:
-    return {"paths": schema["paths"], "components": schema.get("components", {})}
+    paths = {
+        path: item
+        for path, item in schema["paths"].items()
+        if path not in _ENV_DEPENDENT_PATHS
+    }
+    return {"paths": paths, "components": schema.get("components", {})}
 
 
 def current_shape(app_root: Path = BACKEND_ROOT) -> dict:
@@ -213,7 +230,9 @@ def run_check() -> int:
         print(f"Created {SNAPSHOT_PATH}")
         return 0
 
-    snapshot = json.loads(SNAPSHOT_PATH.read_text())
+    # Normalise the committed snapshot through the same filter, so a snapshot
+    # written before _ENV_DEPENDENT_PATHS existed still compares cleanly.
+    snapshot = contract_shape(json.loads(SNAPSHOT_PATH.read_text()))
     if current != snapshot:
         print(
             "API surface changed but backend/openapi.snapshot.json was not "
