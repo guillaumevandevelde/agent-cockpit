@@ -439,6 +439,19 @@ run_worktree_gc() {
 
 # Doctor: surface remaining dangerous repo states (clobbered tree, stale
 # checkout, hook drift) at startup. Never blocks the dev stack.
+# Schema first: the backend must never serve on a schema it does not
+# understand. A failed migration stops the start rather than producing a crash
+# loop later, so this is one of the few steps here that is allowed to fail hard.
+# app/migrate_cli.py snapshots the board to ~/.claude-registry/backups/ before
+# it touches anything.
+run_migrations() {
+    echo "==> databases migreren"
+    ( cd "$PROJECT_ROOT/backend" && source venv/bin/activate && python -m app.migrate_cli ) || {
+        echo "migratie mislukt — backend niet gestart." >&2
+        return 1
+    }
+}
+
 run_doctor() {
     [ -x "$SCRIPT_DIR/cockpit-doctor.sh" ] || return 0
     "$SCRIPT_DIR/cockpit-doctor.sh" || true
@@ -526,6 +539,7 @@ cmd_start() {
         run_merged_branches_sweeper
         run_stale_interviews_sweeper
         run_doctor
+        run_migrations || return 1
     fi
     # Preflight: don't crash-loop fighting another stack for the ports. Skipped
     # when commands are injected (tests use fake services on no ports).

@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import sys
 import zipfile
 from datetime import UTC, datetime
@@ -39,6 +38,7 @@ from app.services.backup_shared import (
 )
 from app.services.cli_executor import AgenticCliExecutor
 from app.services.restore_service import RestoreService
+from app.sqlite_snapshot import snapshot_sqlite_db
 from app.utils.path_utils import (
     get_claude_user_agents_dir,
     get_claude_user_commands_dir,
@@ -253,24 +253,17 @@ class BackupService:
         expects. The ``-wal`` / ``-shm`` sidecars from the snapshot
         itself are not part of the backup — the snapshot is a fresh,
         non-WAL-mode file.
+
+        The copy itself lives in ``app.sqlite_snapshot.snapshot_sqlite_db`` so
+        the migration runner can take a pre-upgrade snapshot without building a
+        BackupService (which needs an AsyncSession). The read-not-read-only
+        constraint documented above travels with that helper.
         """
         # Generate a unique sibling path so concurrent backups don't
         # race on the same file.
         suffix = f".snap-{datetime.now().timestamp():.0f}-{id(self)}.db"
         tmp = src.with_name(src.name + suffix)
-        # The source connection must be opened in the default mode (NOT
-        # read-only) so it sees the WAL frames. The backup API only
-        # reads.
-        src_conn = sqlite3.connect(str(src))
-        try:
-            dst_conn = sqlite3.connect(str(tmp))
-            try:
-                src_conn.backup(dst_conn)
-            finally:
-                dst_conn.close()
-        finally:
-            src_conn.close()
-        return tmp
+        return snapshot_sqlite_db(src, tmp)
 
     def _get_codex_config_paths(self) -> list[Path]:
         """Get safe Codex configuration files for export-only backups."""
