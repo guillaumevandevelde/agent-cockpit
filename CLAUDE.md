@@ -136,6 +136,7 @@ cd backend && python scripts/check_migrations_current.py    # CI-poort: verse DB
 
 # Architectuurgrenzen (docs/cockpit/architectuur.md)
 cd backend && lint-imports                     # Twee importcontracten: transport is een blad; het domein importeert geen subprocess (ratel met alleen-krimpende uitzonderingslijst in pyproject.toml)
+./scripts/check-add-job-callers.sh             # Geen belofte zonder rij: `_sched.add_job` alleen in scheduler.py + twee geratelde plekken
 ./scripts/check-file-size-ratchet.sh           # Een bestand boven 800 regels mag niet groeien; krimp schuift de baseline mee omlaag
 ./scripts/check-file-size-ratchet.sh --update  # Baseline bijwerken ná krimp (weigert groei vast te leggen)
 

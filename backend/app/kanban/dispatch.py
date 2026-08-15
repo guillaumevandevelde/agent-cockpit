@@ -5840,10 +5840,10 @@ async def try_pane_resume(
         if card is None:
             return False
         meta = dict(card.meta or {})
-        meta["pane_resume_pending"] = True
-        meta["pane_resume_attempts"] = attempts
-        meta["pane_resume_reset_at"] = reset_time.isoformat()
-        meta["pane_resume_fired"] = False
+        meta.update({"pane_resume_pending": True, "pane_resume_attempts": attempts,
+                     "pane_resume_reset_at": reset_time.isoformat(), "pane_resume_fired": False,
+                     "pane_resume_cwd": cwd,  # cwd+message: reconciler.py herbouwt de job hieruit
+                     "pane_resume_message": message})
         await apply_operation(
             ks, op_type="update", entity_type="card", project_key=project_key,
             entity_id=card.id, payload={"metadata": meta},
