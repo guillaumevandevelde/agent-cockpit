@@ -1,0 +1,23 @@
+# Omvangsratel-baseline — zie scripts/check-file-size-ratchet.sh
+# Regels: '<regels> <pad>'. Alleen omlaag; groei wordt hier nooit vastgelegd.
+2368 backend/app/api/v1/kanban/router.py
+804 backend/app/api/v1/providers.py
+1000 backend/app/api/v1/runs/router.py
+1202 backend/app/kanban/acp_transport.py
+10110 backend/app/kanban/dispatch.py
+1637 backend/app/kanban/headless_runner.py
+1455 backend/app/kanban/mcp_server.py
+1104 backend/app/kanban/schemas.py
+2620 backend/app/kanban/service.py
+2260 backend/app/models/schemas.py
+805 backend/app/services/agent_service.py
+919 backend/app/services/backup_service.py
+1230 backend/app/services/sandcastle_service.py
+918 backend/app/services/usage_service.py
+1084 frontend/src/features/cc-bridge/NewSessionDialog.tsx
+872 frontend/src/features/kanban/KanbanPage.test.tsx
+2074 frontend/src/features/kanban/components/CardDrawer.test.tsx
+1707 frontend/src/features/kanban/components/CardDrawer.tsx
+1042 frontend/src/features/kanban/components/CardEditDialog.tsx
+972 frontend/src/features/kanban/components/CardItem.test.tsx
+917 frontend/src/features/kanban/components/SubscriptionPoolDialog.tsx

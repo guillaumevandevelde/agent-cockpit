@@ -71,3 +71,44 @@ asyncio_mode = "auto"
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+# --- Architectuurgrenzen (import-linter) -----------------------------------
+# De lagen en de regels staan in docs/cockpit/architectuur.md. Twee contracten
+# stonden bij invoering groen; het derde draait als ratel met een expliciete,
+# alleen-krimpende uitzonderingslijst. Een poort die vanaf dag een rood staat
+# wordt uitgezet, dus de bestaande overtredingen zijn benoemd in plaats van
+# genegeerd.
+[tool.importlinter]
+root_package = "app"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Transport is een blad: domein en persistentie importeren nooit api/mcp_server"
+type = "forbidden"
+source_modules = ["app.services", "app.kanban", "app.models", "app.utils", "app.middleware"]
+forbidden_modules = ["app.api", "app.mcp_server"]
+
+[[tool.importlinter.contracts]]
+name = "Het domein raakt geen mechanisme: app.kanban importeert geen subprocess"
+type = "forbidden"
+source_modules = ["app.kanban"]
+forbidden_modules = ["subprocess"]
+# Alleen DIRECTE imports. Een indirecte keten (domein -> service -> subprocess)
+# is juist de gelaagdheid die we willen: het mechanisme zit dan al achter een
+# service. Zonder deze vlag rapporteert de poort tientallen zulke ketens en
+# meet hij iets anders dan de regel bedoelt.
+allow_indirect_imports = true
+# Ratel, vastgesteld 2026-08-15. Deze lijst mag alleen korter worden. Elke
+# regel is mechanisme dat in de domeinmap woont; het hoort achter een poort in
+# de infrastructuurlaag (zie architectuur.md "Wat hier nog moet gebeuren").
+ignore_imports = [
+    "app.kanban.dispatch -> subprocess",
+    "app.kanban.headless_runner -> subprocess",
+    "app.kanban.session_cleanup -> subprocess",
+    "app.kanban.session_recovery -> subprocess",
+    "app.kanban.project_key -> subprocess",
+    # token_saver importeert subprocess binnen een functie (l.493, l.527),
+    # niet op modulehoogte — een grep op regelbegin ziet die niet.
+    "app.kanban.token_saver -> subprocess",
+    "app.kanban.acp_transport -> subprocess",
+]

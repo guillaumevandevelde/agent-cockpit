@@ -1494,13 +1494,13 @@ async def mcp_status(project_path: str = Query(...)):
 
 
 @router.get("/mcp-health")
-async def mcp_health():
+async def mcp_health(request: Request):
     """End-to-end self-check of the kanban MCP wiring (advertised endpoint routes
     to the mount, tools registered, store reachable). Surfaced in the UI so a
     silent mis-mount is visible instead of only manifesting as agents that never
     touch their cards."""
     from app.kanban.mcp_health import check_mcp_health
-    return await check_mcp_health()
+    return await check_mcp_health(app=request.app)
 
 
 @router.get("/project-key")

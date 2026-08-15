@@ -42,7 +42,7 @@ _MOUNT_PREFIX = "/kanban-mcp"
 _PROTOCOL_VERSION = "2025-06-18"
 
 
-async def check_mcp_health(*, app=None, mcp=None, mount_prefix: str = _MOUNT_PREFIX) -> dict:
+async def check_mcp_health(*, app, mcp=None, mount_prefix: str = _MOUNT_PREFIX) -> dict:
     """Probe the mounted kanban MCP server. Never raises; returns a dict:
 
         ok: bool                      -- every check passed
@@ -55,9 +55,10 @@ async def check_mcp_health(*, app=None, mcp=None, mount_prefix: str = _MOUNT_PRE
         db_ok: bool                   -- the kanban store answered SELECT 1
         error: str|None               -- first failure reason, for the UI
     """
-    if app is None:
-        from app.main import app as _app
-        app = _app
+    # ``app`` is verplicht: dit is de domeinlaag, en een fallback naar
+    # ``app.main`` trok de hele transportlaag hier naar binnen (de enige
+    # overtreding van het "transport is een blad"-contract). De route geeft
+    # ``request.app`` mee; een test geeft de app die hij wil meten.
     if mcp is None:
         from app.kanban.mcp_server import mcp as _mcp
         mcp = _mcp

@@ -109,6 +109,7 @@ cd frontend && npm run build     # Same as above
 bash backend/test_commands_api.sh                         # Curl-based API tests
 ls scripts/test_*.sh     # family-level reference — check-test-harness-coverage.sh (kaart 5e988e4e, glob-form uit 8c7cfc14) dekt het hele scripts/test_*.sh spectrum
 bash scripts/test_po_digest_source.sh                  # PO-digest collector (mechanische helft)
+bash scripts/test_check_file_size_ratchet.sh           # Omvangsratel: bestanden boven 800 regels mogen niet groeien (architectuur.md regel 3)
 bash scripts/test_check_doc_readability.sh             # Leesbaarheidsnorm-meter (zie de Taalgebruik-regel hieronder)
 bash scripts/test_sweep_unchecked_implemented_markers.sh   # ✅-marker-sweep (kaart 21a349bc… — recipe-writing-conventions §2)
 bash scripts/test_sweep_stale_interviews.sh            # Stale-interview-sweeper (interviews/<slug>/ vangnet; zie kaartloze-app-inceptie-decision.md §5)
@@ -132,6 +133,11 @@ cd backend && python -m app.migrate_cli          # Beide stores naar head; maakt
 cd backend && python -m alembic --name kanban revision --autogenerate -m "<wat er wijzigde>"   # Revisie na een modelwijziging (of --name registry)
 cd backend && python -m alembic --name kanban history                                          # Wat is er al gedraaid
 cd backend && python scripts/check_migrations_current.py    # CI-poort: verse DB naar head en vergelijken met de modellen
+
+# Architectuurgrenzen (docs/cockpit/architectuur.md)
+cd backend && lint-imports                     # Twee importcontracten: transport is een blad; het domein importeert geen subprocess (ratel met alleen-krimpende uitzonderingslijst in pyproject.toml)
+./scripts/check-file-size-ratchet.sh           # Een bestand boven 800 regels mag niet groeien; krimp schuift de baseline mee omlaag
+./scripts/check-file-size-ratchet.sh --update  # Baseline bijwerken ná krimp (weigert groei vast te leggen)
 
 # Docs / decision register
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
