@@ -25,17 +25,16 @@ status: proposed
 > Die kolommen zijn toegevoegd en de select slaagt nu.
 >
 > Drie dingen wijken af van de tekst hieronder, elk gecorrigeerd in de stappen
-> zelf: alembic wordt aangeroepen als `sys.executable -m alembic`, de dependency
-> moet ook in `requirements.txt` (CI installeert daaruit), en taak 5 bleek
-> schrappen in plaats van omzetten omdat de basisrevisie het volledige
+> zelf. Alembic wordt aangeroepen als `sys.executable -m alembic`. De dependency
+> moet ook in `requirements.txt`, want CI installeert daaruit. En taak 5 bleek
+> schrappen in plaats van omzetten, omdat de basisrevisie het volledige
 > modelschema al beschrijft.
 >
 > **Eén onderdeel is bewust niet gebouwd:** de `assert_at_head`-haak in de
 > lifespan uit spec-§1.4. 87 testbestanden starten de app via `TestClient` met
-> een `create_all`-schema en staan dus per definitie niet onder alembic; een
-> harde controle daar laat de hele suite vallen. §1.4 en de bewuste
-> `create_all`-uitzondering in §1.6 spreken elkaar tegen. Dat vraagt een keuze
-> en staat open.
+> een `create_all`-schema en staan dus niet onder alembic. Een harde controle
+> daar laat de hele suite vallen. §1.4 en de bewuste `create_all`-uitzondering
+> in §1.6 spreken elkaar tegen. Dat vraagt een keuze en staat open.
 
 ## Global Constraints
 
