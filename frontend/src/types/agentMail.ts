@@ -63,9 +63,7 @@ export interface MailMessageResponse {
   thread_root_id?: number | null
   kind: MailMessageKind
   sender_member_id?: number | null
-  sender_actor_id?: number | null
-  sender_type?: 'director' | 'member' | 'external_actor' | string
-  sender_actor_kind?: string | null
+  sender_type?: 'director' | 'member' | string
   sender_name: string
   recipient_member_id?: number | null
   subject?: string | null

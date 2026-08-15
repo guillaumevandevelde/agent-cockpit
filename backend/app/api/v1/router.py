@@ -15,7 +15,6 @@ from .commands import router as commands_router
 from .config import router as config_router
 from .context import router as context_router
 from .deploy import router as deploy_router
-from .external_agent_mail import router as external_agent_mail_router
 from .files import router as files_router
 from .hooks import router as hooks_router
 from .hosts.router import router as hosts_router
@@ -71,7 +70,6 @@ router.include_router(hooks_router, tags=["Hooks"])
 router.include_router(permissions_router, tags=["Permissions"])
 router.include_router(agents_router, tags=["Agents"])
 router.include_router(agent_mail_router, prefix="/agent-mail", tags=["Agent Mail"])
-router.include_router(external_agent_mail_router, prefix="/external/agent-mail", tags=["External Agent Mail"])
 router.include_router(backup_router, tags=["Backup"])
 router.include_router(output_styles_router, tags=["Output Styles"])
 router.include_router(blueprints_router, tags=["Blueprints"])

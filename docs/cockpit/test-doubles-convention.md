@@ -58,7 +58,6 @@ bv.:
 
 | Singleton                              | Veld                     | Key-type          |
 | -------------------------------------- | ------------------------ | ----------------- |
-| `external_agent_mail_service`          | `_send_windows`          | `actor.id: int`   |
 | `agent_mail_service`                   | `_last_auto_nudge_at`    | `member_id: int`  |
 
 Als die state niet tussen tests wordt geleegd, lekt een eerdere test z'n

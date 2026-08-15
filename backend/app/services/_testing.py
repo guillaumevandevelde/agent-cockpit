@@ -11,11 +11,9 @@ across the codebase and easy to miss when a new service gains per-id state.
 Centralise the reset here so the conftest's per-test fixture calls one place.
 
 When adding a new service with per-id state, import the singleton below and
-clear its per-id dict here — same shape as ``external_agent_mail_service`` and
-``agent_mail_service``.
+clear its per-id dict here — same shape as ``agent_mail_service``.
 """
 from app.services.agent_mail_service import agent_mail_service
-from app.services.external_agent_mail_service import external_agent_mail_service
 
 
 def reset_all_singleton_test_state() -> None:
@@ -24,5 +22,4 @@ def reset_all_singleton_test_state() -> None:
     Called by ``backend/tests/conftest.py:_reset_singleton_state`` between
     tests so each test sees a clean singleton state matching its clean DB.
     """
-    external_agent_mail_service._send_windows.clear()
     agent_mail_service._last_auto_nudge_at.clear()

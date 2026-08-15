@@ -83,7 +83,7 @@ infra-lagen aan bestaande Cockpit-primitieven hangen:
 | Repo-identiteit (`repo_utils.py`, git-common-dir-gebaseerd) | Geen equivalent | Nieuw, bijna 1-op-1 geport (~40 regels). |
 | Claude Code hook-installer (curl-based, additive merge in `settings.json`) | Vergelijkbaar patroon in `scheduling/hook_installer.py`, maar andere events/URL | Nieuwe kleine module, zelfde idempotente-merge-vorm. |
 | Codex CLI hook-installer (`~/.codex/hooks.json` editen) + `codex mcp add` | Codex is al eersteklas provider (`providers/codex_cli.py`, `get_codex_home()`) maar geen bestaande hook-installer | Hooks.json-editing geport; MCP-registratie **niet** (zie boven — geen aparte shim nodig). |
-| `MailExternalActor` token/rate-limit-model voor externe tools | Geen equivalent (MCPAccessToken is voor MCP-toolcalls, niet voor een generieke bearer-authed REST-facade per actor) | Nieuw, zoals upstream. |
+| ~~`MailExternalActor` token/rate-limit-model voor externe tools~~ ✅ Geïmplementeerd (kaart `5fca30d0…`): verwijderd — geen externe actor ooit geregistreerd | Geen equivalent (MCPAccessToken is voor MCP-toolcalls, niet voor een generieke bearer-authed REST-facade per actor) | ~~Nieuw, zoals upstream~~ — verwijderd. |
 | Frontend `agent-mail`-feature (11 bestanden, ~2.260 regels) | `CLICKABLE_CARD`, `MODAL_SIZES`, `MarkdownRenderer`, `MarkdownPreviewToggle`, `sonner` (al aanwezig) | Geport, met 2 gerichte fixes: body/charter-velden door `MarkdownPreviewToggle` (upstream gebruikt inconsistent plain `Textarea` terwijl de read-kant wél `MarkdownRenderer` gebruikt); Requests-tab message-cards door `CLICKABLE_CARD` (upstream gebruikt losse knoppen). |
 
 Wakeability-gedrag: upstream's uiteindelijke, gecorrigeerde staat (na `5d83b1d`) wordt
@@ -103,13 +103,9 @@ Nieuwe tabellen, `create_all` volstaat (geen migratie-framework, alleen nieuwe t
   (`hook`/`mcp`/`observed`), `session_key` (uniek), `cwd`, `tmux_target`, `pane_id`,
   `pid`, `mailbox_status` (`connected`/`observed`/`offline`), `activity`, `last_seen_at`
   (indexed), `created_at`.
-- **`mail_external_actors`** — durable identiteit voor externe orchestratie-tools.
-  `id` PK, `actor_key` (uniek), `display_name`, `kind` (default `external_tool`),
-  `description`, `token_hash` (SHA-256), `created_at`, `last_used_at`.
 - **`mail_messages`** — `id` PK, `thread_root_id` FK zelf-referentieel, `kind`
   (`message`/`broadcast`/`context_request`/`handoff`/`answer`), `sender_member_id` FK
-  SET NULL, `sender_actor_id` FK SET NULL (exclusief met `sender_member_id`),
-  `recipient_member_id` FK CASCADE (null = broadcast), `subject`, `body_markdown`,
+  SET NULL, `recipient_member_id` FK CASCADE (null = broadcast), `subject`, `body_markdown`,
   `payload` (JSON), `request_status` (`pending`/`answered`/`acknowledged`, alleen
   voor `context_request`/`handoff`), `created_at` (indexed).
 - **`mail_receipts`** — per-ontvanger read/ack-state. `id` PK, `message_id` FK CASCADE,
@@ -156,26 +152,6 @@ scheduled-messages). Endpoints: `GET /team`, `PATCH /members/{id}`, `POST/GET /m
 `POST /hooks/{session-start,user-prompt-submit,session-end,post-tool-use}`,
 `GET /install/status`, `POST/DELETE /install/claude-code/*`, `POST/DELETE
 /install/codex/*`, `GET /install/snippets`.
-
-## Externe orchestratie-API (`backend/app/api/v1/external_agent_mail.py`, prefix
-`/external/agent-mail`)
-
-Voor lokale tools (bv. OpenClaw) die niet via MCP draaien. Twee-laags trust: actor-
-*registratie* (`POST /actors`) alleen via loopback, geen credential; alle andere routes
-vereisen `Authorization: Bearer <token>` (SHA-256-hash, `hmac.compare_digest`). Per-actor
-rate limit 30 berichten/60s (in-memory, 429 + `Retry-After`). Ownership-isolatie: een
-actor ziet alleen threads die hij zelf startte. Synchrone wake-rapportage in de response
-(`delivery_state`, per-ontvanger `wake_attempted/wake_succeeded/wake_method`).
-
-Routes: `POST /actors`, `GET /actors/me`, `GET /members`, `POST /messages`,
-`POST /broadcasts`, `POST /context-requests`, `POST /handoffs`,
-`POST /threads/{id}/replies`, `GET /threads/{id}`, `GET /requests/{id}/status`,
-`GET /requests/{id}/wait?timeout_seconds=` (bounded long-poll, max 30s),
-`POST /requests/{id}/ack`.
-
-De interne `/agent-mail/messages`-route kan `sender_actor_id` niet spoofen (schema
-accepteert het veld niet) — berichten via de interne route worden altijd toegeschreven
-aan de mailbox-eigenaar zelf, nooit aan een external actor.
 
 ## MCP-tools (`backend/app/mcp_server/tools/agent_mail.py`, geregistreerd op de
 bestaande gedeelde MCP-server)
@@ -245,7 +221,7 @@ features in dit fork behalve `*.test.tsx` waar aanwezig — volg dat waar zinvol
 4. **MCP-tools** op de bestaande gedeelde server — **backend-restart nodig** voordat
    nieuwe tools zichtbaar zijn (bekend patroon in dit fork).
 5. **Hooks + install** (Claude Code additive-merge-installer; Codex hooks.json + shim).
-6. **Externe orchestratie-API** (`external_agent_mail.py` + actor-model).
+6. ~~**Externe orchestratie-API** (`external_agent_mail.py` + actor-model)~~ ✅ Geïmplementeerd (kaart `5fca30d0…`): verwijderd.
 7. **Frontend** (`features/agent-mail/*`, route, sidebar) — `npm run build` na afloop.
 8. **Tests + docs + ship** (direct-mode merge naar master).
 

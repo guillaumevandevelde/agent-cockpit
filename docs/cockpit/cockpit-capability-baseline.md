@@ -69,8 +69,10 @@ status: active
 ## 4. Agent mail
 
 - Cross-session berichten met durable repo-identiteit: `MailTeamMember`,
-  `MailAgentSession`, `MailExternalActor`, `MailMessage`, `MailReceipt`
-  (`backend/app/models/agent_mail.py:17-100`). Een repo-member wordt on-demand
+  `MailAgentSession`, `MailMessage`, `MailReceipt`
+  (`backend/app/models/agent_mail.py:17-100`; ~~`MailExternalActor`~~ verwijderd per
+  kaart `5fca30d0…`, externe orchestratie-API + actor-model gesloopt — geen
+  externe actor ooit geregistreerd). Een repo-member wordt on-demand
   aangemaakt uit de cwd (`agent_mail_service.get_or_create_repo_member:95`).
 - Sessies registreren zich, heartbeaten en verlopen naar offline
   (`register_session:98`, `heartbeat_session:122`, `_effective_status:173`,
