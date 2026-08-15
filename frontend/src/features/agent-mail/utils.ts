@@ -25,13 +25,6 @@ export function senderName(message: MailMessageResponse, members: MailMemberResp
   return message.sender_name || 'Director'
 }
 
-export function senderTypeLabel(message: MailMessageResponse): string | null {
-  if (message.sender_type === 'external_actor') {
-    if (message.sender_actor_kind === 'external_tool') return 'External'
-    return message.sender_actor_kind || 'External'
-  }
-  return null
-}
 
 export function recipientName(message: MailMessageResponse, members: MailMemberResponse[]): string {
   if (message.kind === 'broadcast' || !message.recipient_member_id) return 'All members'
@@ -56,31 +49,6 @@ export function statusTitle(status: MailMemberStatus | string): string {
   if (status === 'observed') return 'Agent Bridge sees a tmux session, but Agent Mail has not received an MCP or hook check-in.'
   if (status === 'offline') return 'No recent Agent Mail check-in or live Agent Bridge observation.'
   return status
-}
-
-export function wakeStateLabel(state: string): string {
-  if (state === 'wakeable') return 'Wakeable'
-  if (state === 'delivered_waiting') return 'Not wakeable'
-  if (state === 'offline') return 'Offline'
-  return state
-}
-
-export function wakeStateTitle(state: string): string {
-  if (state === 'wakeable') return 'Agent Cockpit has a wake path for this member.'
-  if (state === 'delivered_waiting') return 'Messages are delivered, but Agent Cockpit cannot wake this visible run.'
-  if (state === 'offline') return 'No live run is available for this member.'
-  return state
-}
-
-export function wakeStateBadgeClass(state: string): string {
-  if (state === 'wakeable') return 'border-emerald-300 text-emerald-700 dark:text-emerald-300'
-  if (state === 'delivered_waiting') return 'border-amber-300 text-amber-700 dark:text-amber-300'
-  return 'border-muted-foreground/30 text-muted-foreground'
-}
-
-export function wakeMethodLabel(method: string): string {
-  if (method === 'tmux') return 'tmux'
-  return method
 }
 
 export function sessionSourceLabel(source: string): string {

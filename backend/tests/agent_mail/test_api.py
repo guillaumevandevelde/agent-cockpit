@@ -61,13 +61,3 @@ async def test_update_member_role_and_charter(tmp_path):
         assert r2.json()["role"] == "reviewer"
 
 
-@pytest.mark.asyncio
-async def test_queue_inbox_check_400_when_not_wakeable(tmp_path):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r1 = await client.post("/api/v1/agent-mail/agent/register", json={
-            "source": "hook", "cwd": str(tmp_path), "session_key": "cc:z",
-        })
-        member_id = r1.json()["member"]["id"]
-        r2 = await client.post(f"/api/v1/agent-mail/members/{member_id}/queue-inbox-check")
-        assert r2.status_code == 400

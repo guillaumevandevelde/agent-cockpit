@@ -23,7 +23,6 @@ async def test_send_direct_message_creates_receipt_for_recipient(tmp_path):
         m1, m2 = await _two_members(s, tmp_path)
         msg = await agent_mail_service.send_message(
             s, MailMessageCreate(sender_member_id=m1.id, recipient_member_id=m2.id, body_markdown="hi"),
-            auto_nudge=False,
         )
         assert msg.sender_name == m1.display_name
         inbox = await agent_mail_service.get_inbox(s, m2.id)
@@ -37,7 +36,6 @@ async def test_broadcast_reaches_all_other_members(tmp_path):
         m1, m2 = await _two_members(s, tmp_path)
         await agent_mail_service.send_message(
             s, MailMessageCreate(kind="broadcast", sender_member_id=m1.id, body_markdown="hello team"),
-            auto_nudge=False,
         )
         inbox = await agent_mail_service.get_inbox(s, m2.id)
         assert inbox.unread_count >= 1
@@ -51,14 +49,14 @@ async def test_answer_marks_context_request_answered(tmp_path):
         req = await agent_mail_service.send_message(
             s, MailMessageCreate(
                 kind="context_request", sender_member_id=m1.id, recipient_member_id=m2.id, body_markdown="?",
-            ), auto_nudge=False,
+            ),
         )
         assert req.request_status == "pending"
 
         await agent_mail_service.send_message(
             s, MailMessageCreate(
                 kind="answer", sender_member_id=m2.id, thread_root_id=req.id, body_markdown="answer",
-            ), auto_nudge=False,
+            ),
         )
         thread = await agent_mail_service.get_thread(s, req.id)
         assert thread.root.request_status == "answered"
@@ -72,7 +70,7 @@ async def test_mark_read_and_ack_message(tmp_path):
         msg = await agent_mail_service.send_message(
             s, MailMessageCreate(
                 kind="handoff", sender_member_id=m1.id, recipient_member_id=m2.id, body_markdown="take over",
-            ), auto_nudge=False,
+            ),
         )
         await agent_mail_service.mark_read(s, msg.id, m2.id)
         await agent_mail_service.ack_message(s, msg.id, m2.id)
@@ -89,11 +87,10 @@ async def test_answer_requires_pending_context_request_addressed_to_sender(tmp_p
         m1, m2 = await _two_members(s, tmp_path)
         note = await agent_mail_service.send_message(
             s, MailMessageCreate(sender_member_id=m1.id, recipient_member_id=m2.id, body_markdown="note"),
-            auto_nudge=False,
         )
         with pytest.raises(ValueError, match="answer messages can only resolve context requests"):
             await agent_mail_service.send_message(
                 s, MailMessageCreate(
                     kind="answer", sender_member_id=m2.id, thread_root_id=note.id, body_markdown="x",
-                ), auto_nudge=False,
+                ),
             )

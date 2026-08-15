@@ -34,7 +34,6 @@ from app.models.agent_mail_schemas import (
     MailThreadResponse,
 )
 from app.services.runs.discovery import discover_agent_sessions
-from app.services.scheduling.tmux_inject import send_text
 from app.utils.repo_utils import derive_repo_identity
 
 logger = logging.getLogger(__name__)
@@ -43,19 +42,10 @@ HEARTBEAT_TTL_SECONDS = 180
 MCP_HEARTBEAT_TTL_SECONDS = 3600
 OBSERVED_TTL_SECONDS = 300
 STALE_REQUEST_MINUTES = 15
-AUTO_NUDGE_COOLDOWN_SECONDS = 30
-TMUX_WAKE_CLIS = {"claude-code", "codex-cli"}
-INBOX_CHECK_PROMPT = (
-    "Agent Cockpit Agent Mail: please call `agent_mail_check_inbox(unread_only=False)` now, "
-    "then answer any pending context requests or handoffs before continuing."
-)
 
 
 class AgentMailService:
     """Registry, messaging, and delivery-context behavior for Agent Mail."""
-
-    def __init__(self) -> None:
-        self._last_auto_nudge_at: dict[int, datetime] = {}
 
     def _repo_member_values(self, cwd: str) -> dict[str, str]:
         ident = derive_repo_identity(cwd)
@@ -342,20 +332,10 @@ class AgentMailService:
             return
         await db.delete(member)
 
-    def _session_can_nudge(self, session: MailAgentSession, now: datetime) -> bool:
-        return bool(
-            session.source == "observed"
-            and session.cli in TMUX_WAKE_CLIS
-            and session.tmux_target
-            and self._effective_status(session, now) == "observed"
-        )
-
     async def send_message(
         self,
         db: AsyncSession,
         request: MailMessageCreate,
-        *,
-        auto_nudge: bool = True,
     ) -> MailMessageResponse:
         if request.kind not in MAIL_MESSAGE_KINDS:
             raise ValueError(f"Invalid message kind: {request.kind}")
@@ -408,8 +388,6 @@ class AgentMailService:
 
         await db.commit()
         await db.refresh(message)
-        if auto_nudge:
-            await self.auto_nudge_members(db, recipients)
         return await self._message_response(db, message, for_member_id=None)
 
     async def _sender_identity(
@@ -576,88 +554,6 @@ class AgentMailService:
         )).scalars().all()
         return [await self._message_response(db, root, for_member_id=None) for root in roots]
 
-    async def _nudge_session_for_member(
-        self, db: AsyncSession, member_id: int, now: datetime,
-    ) -> MailAgentSession | None:
-        result = await db.execute(
-            select(MailAgentSession).where(
-                MailAgentSession.member_id == member_id,
-                MailAgentSession.source == "observed",
-                MailAgentSession.cli.in_(sorted(TMUX_WAKE_CLIS)),
-                MailAgentSession.tmux_target.is_not(None),
-            ).order_by(MailAgentSession.last_seen_at.desc())
-        )
-        return next(
-            (c for c in result.scalars().all() if self._session_can_nudge(c, now)), None,
-        )
-
-    def _send_tmux_inbox_check(self, session: MailAgentSession) -> dict[str, str]:
-        if not session.tmux_target:
-            raise ValueError("No live tmux session is available for this member")
-        if not send_text(session.tmux_target, INBOX_CHECK_PROMPT):
-            raise ValueError("tmux send-keys failed")
-        return {"target": session.tmux_target, "prompt": INBOX_CHECK_PROMPT}
-
-    async def _wake_member(self, db: AsyncSession, member_id: int, now: datetime) -> dict[str, str] | None:
-        session = await self._nudge_session_for_member(db, member_id, now)
-        if session is not None:
-            result = self._send_tmux_inbox_check(session)
-            return {"method": "tmux", **result}
-        return None
-
-    async def auto_nudge_members(self, db: AsyncSession, member_ids: set[int]) -> list[dict[str, str | int]]:
-        """Best-effort delivery wakeup for visible tmux-observed recipients."""
-        if not member_ids:
-            return []
-        await self.sync_observed_sessions(db)
-        now = datetime.utcnow()
-        nudged: list[dict[str, str | int]] = []
-        cooldown_cutoff = now - timedelta(seconds=AUTO_NUDGE_COOLDOWN_SECONDS)
-        for member_id in sorted(member_ids):
-            last_nudge_at = self._last_auto_nudge_at.get(member_id)
-            if last_nudge_at is not None and last_nudge_at > cooldown_cutoff:
-                continue
-            try:
-                result = await self._wake_member(db, member_id, now)
-            except ValueError as exc:
-                logger.debug("agent mail auto-nudge failed for member %s: %s", member_id, exc)
-                continue
-            if result is None:
-                continue
-            self._last_auto_nudge_at[member_id] = now
-            nudged.append({"member_id": member_id, **result})
-        return nudged
-
-    async def wake_members_with_results(
-        self, db: AsyncSession, member_ids: set[int],
-    ) -> dict[int, dict[str, str | bool]]:
-        if not member_ids:
-            return {}
-        await self.sync_observed_sessions(db)
-        now = datetime.utcnow()
-        results: dict[int, dict[str, str | bool]] = {}
-        for member_id in sorted(member_ids):
-            try:
-                result = await self._wake_member(db, member_id, now)
-            except ValueError as exc:
-                results[member_id] = {"wake_attempted": True, "wake_succeeded": False, "wake_error": str(exc)}
-                continue
-            if result is None:
-                results[member_id] = {"wake_attempted": False, "wake_succeeded": False}
-                continue
-            results[member_id] = {
-                "wake_attempted": True, "wake_succeeded": True, "wake_method": str(result.get("method") or ""),
-            }
-        return results
-
-    async def queue_inbox_check(self, db: AsyncSession, member_id: int) -> dict[str, str]:
-        await self.sync_observed_sessions(db)
-        now = datetime.utcnow()
-        result = await self._wake_member(db, member_id, now)
-        if result is None:
-            raise ValueError("No Agent Mail wake path is available for this member")
-        return result
-
     def _session_response(self, session: MailAgentSession, now: datetime) -> MailSessionResponse:
         return MailSessionResponse(
             id=session.id, cli=session.cli, source=session.source,
@@ -704,20 +600,12 @@ class AgentMailService:
             else:
                 status = "offline"
             unread, pending, unseen_pending, stale_pending = await self.delivery_counts_for_member(db, member.id)
-            wake_methods = ["tmux"] if any(self._session_can_nudge(s, now) for s in member_sessions) else []
-            if status == "offline":
-                wake_state = "offline"
-            elif wake_methods:
-                wake_state = "wakeable"
-            else:
-                wake_state = "delivered_waiting"
             responses.append(MailMemberResponse(
                 id=member.id, identity_key=member.identity_key, repo_id=member.repo_id,
                 repo_path=member.repo_path, repo_name=member.repo_name, display_name=member.display_name,
                 role=member.role, charter=member.charter, status=status,
                 unread_count=unread, pending_count=pending, unseen_pending_count=unseen_pending,
-                stale_pending_count=stale_pending, can_nudge=bool(wake_methods), wake_methods=wake_methods,
-                wake_state=wake_state, last_inbox_checked_at=member.last_inbox_checked_at,
+                stale_pending_count=stale_pending, last_inbox_checked_at=member.last_inbox_checked_at,
                 sessions=session_responses,
             ))
         responses.sort(key=lambda m: (m.status != "connected", m.display_name.lower()))

@@ -21,7 +21,6 @@ async def test_list_team_reports_status_and_counts(tmp_path):
             team = await agent_mail_service.list_team(s)
             found = next(m for m in team if m.id == member.id)
             assert found.status == "connected"
-            assert found.wake_state == "delivered_waiting"
 
 
 @pytest.mark.asyncio
@@ -64,7 +63,6 @@ async def test_build_session_start_context_includes_identity_and_inbox(tmp_path)
             )
             await agent_mail_service.send_message(
                 s, MailMessageCreate(sender_member_id=m1.id, recipient_member_id=m2.id, body_markdown="hi"),
-                auto_nudge=False,
             )
             context = await agent_mail_service.build_session_start_context(s, m2.id)
             assert m2.display_name in context

@@ -23,7 +23,6 @@ import {
   fetchAgentMailMessages,
   fetchAgentMailSnippets,
   fetchAgentMailTeam,
-  queueAgentMailInboxCheck,
   sendAgentMailMessage,
   uninstallClaudeCodeAgentMail,
   uninstallCodexAgentMail,
@@ -57,7 +56,6 @@ export function AgentMailPage() {
   const [composePreset, setComposePreset] = useState<ComposePreset | null>(null)
   const [threadMessage, setThreadMessage] = useState<MailMessageResponse | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
-  const [nudgingMemberId, setNudgingMemberId] = useState<number | null>(null)
 
   const loadOperationalData = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true)
@@ -143,20 +141,6 @@ export function AgentMailPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to send message')
       throw error
-    }
-  }
-
-  const handleQueueInboxCheck = async (member: MailMemberResponse) => {
-    setNudgingMemberId(member.id)
-    try {
-      const result = await queueAgentMailInboxCheck(member.id)
-      await loadOperationalData(false)
-      const method = result.method ? `via ${result.method}` : 'via tmux'
-      toast.success(`Queued inbox check for ${member.display_name} ${method}`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to queue inbox check')
-    } finally {
-      setNudgingMemberId(null)
     }
   }
 
@@ -277,8 +261,7 @@ export function AgentMailPage() {
           <TeamTab
             members={members} loading={loading} repoSearch={teamSearch} statusFilter={teamStatus}
             onRepoSearchChange={setTeamSearch} onStatusFilterChange={setTeamStatus}
-            onEdit={setEditingMember} onCompose={openCompose} onQueueInboxCheck={handleQueueInboxCheck}
-            nudgingMemberId={nudgingMemberId}
+            onEdit={setEditingMember} onCompose={openCompose}
           />
         </TabsContent>
         <TabsContent value="requests" className="mt-4">

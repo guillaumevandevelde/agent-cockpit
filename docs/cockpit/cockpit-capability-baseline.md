@@ -80,8 +80,11 @@ status: active
   `get_inbox:499`, `mark_read:536`, `ack_message:545`.
 - Agents benaderen het via MCP-tools (`backend/app/mcp_server/tools/agent_mail.py:18`),
   mensen via de REST-API (`backend/app/api/v1/agent_mail.py`) en de
-  `frontend/src/features/agent-mail`-mailbox. Een nieuw bericht kan een levende sessie
-  nudgen (`_nudge_session_for_member:589`). Spec: `docs/cockpit/agent-mail-spec.md`.
+  `frontend/src/features/agent-mail`-mailbox. Berichten worden bezorgd via
+  `mail_messages` + `mail_receipts`; levende sessies checken hun inbox via
+  de `SessionStart`-/`UserPromptSubmit`-hooks of via de MCP-tool
+  `agent_mail_check_inbox`. Geen wake-lus meer in Agent Mail sinds
+  2026-08-15 (kaart `64b259f6…`). Spec: `docs/cockpit/agent-mail-spec.md`.
 
 ## 5. Providers / abonnementen / pool
 

@@ -54,23 +54,20 @@ De conftest (``backend/tests/conftest.py``) doet per-test `drop_all` + `create_a
 op `app.database.Base` (zie kanban-kaart 02e80e79). Daardoor resetten
 auto-increment id's naar 1 *iedere test*. Module-level singletons in
 `app/services/*.py` houden regelmatig per-id in-memory state op de instance
-bv.:
+bv. — op 2026-08-15 heeft géén singleton per-id in-memory state meer
+(de `_last_auto_nudge_at` ging weg met de wake-lus, kaart `64b259f6…`):
 
 | Singleton                              | Veld                     | Key-type          |
-| -------------------------------------- | ------------------------ | ----------------- |
-| `agent_mail_service`                   | `_last_auto_nudge_at`    | `member_id: int`  |
 
 Als die state niet tussen tests wordt geleegd, lekt een eerdere test z'n
 cooldown/rate-limit counters het volgende test_id=1 record in — en de
 volgende test faalt met een *spurious* "rate limit exceeded" of "cooldown
 not expired" error die in isolatie niet reproduceert.
 
-**Reset gebeurt centraal** in
-[`app.services._testing.reset_all_singleton_test_state()`](../../backend/app/services/_testing.py),
-aangeroepen door `conftest._reset_singleton_state`. **Voeg daar je singleton
-aan toe** wanneer je een nieuwe service met per-id in-memory state introduceert
-— niet via een per-file autouse fixture, want die vergeet de volgende
-persoon die een conftest-reset aanpast.
+**Voeg je singleton toe** aan dezelfde centrale reset-helper zodra
+er weer per-id in-memory state bij komt — niet via een per-file autouse
+fixture, want die vergeet de volgende persoon die een conftest-reset
+aanpast.
 
 Audit-recept (self-improve kaart 42f44a05):
 
@@ -80,6 +77,7 @@ grep -rEn '^[A-Za-z_][A-Za-z0-9_]*\s*=\s*[A-Z][A-Za-z]+\(\)' backend/app/service
 
 # 2. Per singleton: check of de __init__ een dict[int, ...] / deque / set aanmaakt
 #    OF dat methodes die schrijven naar self._<iets>[<row_id>] bestaan.
-# 3. Voeg toe aan reset_all_singleton_test_state als de key een row-id is
-#    (geen string-keys zoals session_name / cwd / path).
+# 3. Voeg toe aan de centrale reset-helper (de naam kan veranderen — zoek in
+#    `backend/tests/conftest.py` naar de `_reset_*` autouse fixtures) als de
+#    key een row-id is (geen string-keys zoals session_name / cwd / path).
 ```

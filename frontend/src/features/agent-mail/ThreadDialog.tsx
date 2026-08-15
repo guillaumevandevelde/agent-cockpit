@@ -37,7 +37,6 @@ import {
   recipientName,
   requestBadgeClass,
   senderName,
-  senderTypeLabel,
 } from './utils'
 
 interface ThreadDialogProps {
@@ -72,11 +71,6 @@ function MessageBlock({ message, members }: {
         <span>
           From {senderName(message, members)} to {recipientName(message, members)}
         </span>
-        {senderTypeLabel(message) && (
-          <Badge variant="outline" className="text-xs">
-            {senderTypeLabel(message)}
-          </Badge>
-        )}
       </div>
       {message.subject && <h4 className="mb-2 text-sm font-semibold">{message.subject}</h4>}
       <MarkdownRenderer content={message.body_markdown} />

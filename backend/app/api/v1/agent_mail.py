@@ -90,15 +90,6 @@ async def ack_message(message_id: int, body: dict[str, Any] = Body(...), db: Asy
     return {"ok": True}
 
 
-@router.post("/members/{member_id}/queue-inbox-check")
-async def queue_inbox_check(member_id: int, db: AsyncSession = Depends(get_db)):
-    try:
-        result = await agent_mail_service.queue_inbox_check(db, member_id)
-        return {"ok": True, **result}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.post("/agent/register", response_model=MailAgentRegisterResponse)
 async def register_agent(request: MailAgentRegisterRequest, db: AsyncSession = Depends(get_db)):
     member, session = await agent_mail_service.register_session(db, request)
