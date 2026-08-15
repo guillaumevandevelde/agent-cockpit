@@ -16,8 +16,8 @@ interface MarkdownPreviewToggleProps {
    * scrolling and the preview grows to fit its content. Edit textarea
    * keeps its `minHeight` so editing stays usable. Default `false` keeps
    * the original standalone behaviour for the 8 other consumers
-   * (MemoryEditor, AgentEditor, HookEditor, CardEditDialog, ComposeDialog,
-   * ThreadDialog, MemberEditDialog, MarkdownEditor).
+   * (MemoryEditor, AgentEditor, HookEditor, CardEditDialog,
+   * MemberEditDialog, MarkdownEditor).
    */
   flexibleHeight?: boolean
 }

@@ -391,7 +391,7 @@ volledige caller-sweep door frontend én backend in de acceptance criteria:
 |---|---|---|
 | Externe orchestratie-API + actor-model | `backend/app/api/v1/external_agent_mail.py`, `backend/app/services/external_agent_mail_service.py`, `MailExternalActor` | kind 1 |
 | Wake-/nudge-lus | `agent_mail_service.py:346-353`, `:589-678`, route `:93` in `api/v1/agent_mail.py` | kind 2 |
-| Berichten-kern + mailbox-UI | `MailMessage`, `MailReceipt`, zes MCP-tools, `ComposeDialog`/`RequestsTab`/`ThreadDialog` | kind 3 |
+| Berichten-kern + mailbox-UI | `MailMessage`, `MailReceipt`, zes MCP-tools, `ComposeDialog`/`RequestsTab`/`ThreadDialog` | kind 3 — ✅ Geïmplementeerd (kaart `46930d26…`, 2026-08-15): modellen, service-functies, REST-routes, zes MCP-tools, drie frontend-bestanden en de bericht-helft van de hook-context weg. `mail_messages`/`mail_receipts` blijven als dode tabellen in de live DB tot een expliciete alembic-`drop_table`; nieuwe code raakt ze niet. |
 
 De drie hangen aan elkaar via echte consumptie, niet via volgorde: de externe
 service roept `wake_members_with_results` aan

@@ -3,18 +3,13 @@ import uuid
 import pytest
 
 from app.database import AsyncSessionLocal
-from app.models.agent_mail import (
-    MailAgentSession,
-    MailMessage,
-    MailReceipt,
-    MailTeamMember,
-)
+from app.models.agent_mail import MailAgentSession, MailTeamMember
 
 # Schema is created by ``_reset_app_database_tables`` in conftest.
 
 
 @pytest.mark.asyncio
-async def test_create_member_session_message_receipt():
+async def test_create_member_and_session():
     unique = uuid.uuid4().hex[:12]
     async with AsyncSessionLocal() as s:
         member = MailTeamMember(
@@ -40,20 +35,3 @@ async def test_create_member_session_message_receipt():
         await s.commit()
         await s.refresh(session)
         assert session.mailbox_status == "connected"
-
-        message = MailMessage(
-            kind="message",
-            sender_member_id=member.id,
-            recipient_member_id=member.id,
-            body_markdown="hi",
-        )
-        s.add(message)
-        await s.commit()
-        await s.refresh(message)
-        assert message.request_status is None
-
-        receipt = MailReceipt(message_id=message.id, member_id=member.id)
-        s.add(receipt)
-        await s.commit()
-        await s.refresh(receipt)
-        assert receipt.read_at is None

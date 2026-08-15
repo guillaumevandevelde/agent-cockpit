@@ -13,7 +13,7 @@ from app.main import app
 
 
 @pytest.mark.asyncio
-async def test_register_then_send_and_read_message(tmp_path):
+async def test_register_two_members_then_list_team(tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         r1 = await client.post("/api/v1/agent-mail/agent/register", json={
@@ -29,20 +29,8 @@ async def test_register_then_send_and_read_message(tmp_path):
         })
         member_b = r2.json()["member"]["id"]
 
-        r3 = await client.post("/api/v1/agent-mail/messages", json={
-            "sender_member_id": member_a, "recipient_member_id": member_b, "body_markdown": "hi",
-        })
-        assert r3.status_code == 200
-        message_id = r3.json()["id"]
-
-        r4 = await client.get("/api/v1/agent-mail/agent/inbox", params={"member_id": member_b})
-        assert r4.json()["unread_count"] == 1
-
-        r5 = await client.post(f"/api/v1/agent-mail/messages/{message_id}/read", json={"member_id": member_b})
-        assert r5.status_code == 200
-
-        r6 = await client.get("/api/v1/agent-mail/team")
-        member_ids = {m["id"] for m in r6.json()["members"]}
+        r3 = await client.get("/api/v1/agent-mail/team")
+        member_ids = {m["id"] for m in r3.json()["members"]}
         assert {member_a, member_b}.issubset(member_ids)
 
 

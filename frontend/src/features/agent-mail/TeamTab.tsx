@@ -1,4 +1,4 @@
-import { Edit3, Handshake, HelpCircle, Mail, Search } from 'lucide-react'
+import { Edit3, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,7 +13,6 @@ import {
 import type {
   MailMemberResponse,
   MailMemberStatus,
-  MailMessageKind,
   MailSessionResponse,
 } from '@/types/agentMail'
 import {
@@ -41,7 +40,6 @@ interface TeamTabProps {
   onRepoSearchChange: (value: string) => void
   onStatusFilterChange: (value: TeamStatusFilter) => void
   onEdit: (member: MailMemberResponse) => void
-  onCompose: (kind: Exclude<MailMessageKind, 'answer' | 'broadcast'>, member: MailMemberResponse) => void
 }
 
 function sameRuntime(session: MailSessionResponse, observation: MailSessionResponse): boolean {
@@ -102,7 +100,6 @@ export function TeamTab({
   onRepoSearchChange,
   onStatusFilterChange,
   onEdit,
-  onCompose,
 }: TeamTabProps) {
   const normalizedSearch = repoSearch.trim().toLowerCase()
   const filtered = members.filter((member) => {
@@ -146,15 +143,6 @@ export function TeamTab({
         <div className="grid gap-4 xl:grid-cols-2">
           {filtered.map((member) => {
             const visibleSessions = displaySessions(member.sessions)
-            const deliveryWarnings = [
-              member.unseen_pending_count > 0
-                ? `${member.unseen_pending_count} pending request(s) have not been read by this run.`
-                : null,
-              member.stale_pending_count > 0
-                ? `${member.stale_pending_count} pending request(s) are stale.`
-                : null,
-            ].filter(Boolean)
-
             return (
               <Card key={member.id} className="rounded-lg">
                 <CardHeader className="pb-3">
@@ -173,24 +161,6 @@ export function TeamTab({
                       >
                         {statusLabel(member.status)}
                       </Badge>
-                      {member.pending_count > 0 && (
-                        <Badge variant="outline" className="border-amber-300 text-amber-700">
-                          {member.pending_count} pending
-                        </Badge>
-                      )}
-                      {member.unseen_pending_count > 0 && (
-                        <Badge variant="outline" className="border-blue-300 text-blue-700">
-                          {member.unseen_pending_count} unseen
-                        </Badge>
-                      )}
-                      {member.stale_pending_count > 0 && (
-                        <Badge variant="outline" className="border-amber-300 text-amber-700">
-                          {member.stale_pending_count} stale
-                        </Badge>
-                      )}
-                      {member.unread_count > 0 && (
-                        <Badge variant="secondary">{member.unread_count} unread</Badge>
-                      )}
                     </div>
                   </div>
                 </CardHeader>
@@ -205,15 +175,10 @@ export function TeamTab({
                       <p className="mt-1 text-sm">{member.repo_name}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Inbox check</p>
+                      <p className="text-xs font-medium uppercase text-muted-foreground">Last inbox</p>
                       <p className="mt-1 text-sm">{formatDateTime(member.last_inbox_checked_at)}</p>
                     </div>
                   </div>
-                  {deliveryWarnings.length > 0 && (
-                    <div className="rounded-lg border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
-                      {deliveryWarnings.join(' ')}
-                    </div>
-                  )}
                   {member.charter && (
                     <p className="rounded-lg bg-muted/50 p-3 text-sm leading-6">{member.charter}</p>
                   )}
@@ -272,18 +237,6 @@ export function TeamTab({
                     <Button size="sm" variant="outline" onClick={() => onEdit(member)}>
                       <Edit3 className="mr-2 h-4 w-4" />
                       Edit
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => onCompose('message', member)}>
-                      <Mail className="mr-2 h-4 w-4" />
-                      Message
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => onCompose('context_request', member)}>
-                      <HelpCircle className="mr-2 h-4 w-4" />
-                      Request context
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => onCompose('handoff', member)}>
-                      <Handshake className="mr-2 h-4 w-4" />
-                      Handoff
                     </Button>
                   </div>
                 </CardContent>

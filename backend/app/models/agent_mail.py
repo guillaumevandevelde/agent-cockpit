@@ -1,10 +1,13 @@
-"""ORM models for Agent Mail — cross-session messaging between arbitrary
-Claude Code / Codex CLI processes. Identity is one durable MailTeamMember
-per repo (no team-preset/slot integration — see docs/cockpit/agent-mail-spec.md
-for why that upstream extension is out of scope)."""
+"""ORM models for Agent Mail — roster + ephemeral session discovery for
+arbitrary Claude Code / Codex CLI processes. Messaging, mailbox state, and
+receipts were removed in 2026-08-15 (kaart ``46930d26…``): the roster layer
+kept its weight, the message/mailbox layer did not. Identity is one durable
+MailTeamMember per repo (no team-preset/slot integration — see
+docs/cockpit/agent-mail-spec.md for why that upstream extension is out of
+scope)."""
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -54,41 +57,4 @@ class MailAgentSession(Base):
     mailbox_status: Mapped[str] = mapped_column(String(16), default="connected", nullable=False)
     activity: Mapped[str | None] = mapped_column(String(256), nullable=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
-
-
-class MailMessage(Base):
-    __tablename__ = "mail_messages"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    thread_root_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True, nullable=True
-    )
-    kind: Mapped[str] = mapped_column(String(24), index=True, nullable=False)
-    sender_member_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("mail_team_members.id", ondelete="SET NULL"), nullable=True
-    )
-    recipient_member_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("mail_team_members.id", ondelete="CASCADE"), index=True, nullable=True
-    )
-    subject: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    body_markdown: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    request_status: Mapped[str | None] = mapped_column(String(16), index=True, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True, nullable=False)
-
-
-class MailReceipt(Base):
-    __tablename__ = "mail_receipts"
-    __table_args__ = (UniqueConstraint("message_id", "member_id", name="uix_mail_receipt_message_member"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    message_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True, nullable=False
-    )
-    member_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("mail_team_members.id", ondelete="CASCADE"), index=True, nullable=False
-    )
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)

@@ -1,4 +1,4 @@
-"""Agent Mail endpoints: team roster, messages, agent registration, hooks."""
+"""Agent Mail endpoints: team roster, agent registration, hooks, install."""
 import logging
 import os
 from datetime import datetime
@@ -14,12 +14,8 @@ from app.models.agent_mail_schemas import (
     AgentMailSnippets,
     MailAgentRegisterRequest,
     MailAgentRegisterResponse,
-    MailInboxResponse,
     MailMemberResponse,
     MailMemberUpdate,
-    MailMessageCreate,
-    MailMessageResponse,
-    MailThreadResponse,
     TeamListResponse,
 )
 from app.services.agent_mail import install_status
@@ -57,39 +53,6 @@ async def update_member(member_id: int, update: MailMemberUpdate, db: AsyncSessi
     return found
 
 
-@router.post("/messages", response_model=MailMessageResponse)
-async def send_message(request: MailMessageCreate, db: AsyncSession = Depends(get_db)):
-    try:
-        return await agent_mail_service.send_message(db, request)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/messages", response_model=list[MailMessageResponse])
-async def list_messages(db: AsyncSession = Depends(get_db)):
-    return await agent_mail_service.list_root_messages(db)
-
-
-@router.get("/messages/{message_id}/thread", response_model=MailThreadResponse)
-async def get_thread(message_id: int, member_id: int | None = None, db: AsyncSession = Depends(get_db)):
-    try:
-        return await agent_mail_service.get_thread(db, message_id, for_member_id=member_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.post("/messages/{message_id}/read")
-async def mark_read(message_id: int, body: dict[str, Any] = Body(...), db: AsyncSession = Depends(get_db)):
-    await agent_mail_service.mark_read(db, message_id, int(body["member_id"]))
-    return {"ok": True}
-
-
-@router.post("/messages/{message_id}/ack")
-async def ack_message(message_id: int, body: dict[str, Any] = Body(...), db: AsyncSession = Depends(get_db)):
-    await agent_mail_service.ack_message(db, message_id, int(body["member_id"]))
-    return {"ok": True}
-
-
 @router.post("/agent/register", response_model=MailAgentRegisterResponse)
 async def register_agent(request: MailAgentRegisterRequest, db: AsyncSession = Depends(get_db)):
     member, session = await agent_mail_service.register_session(db, request)
@@ -97,16 +60,6 @@ async def register_agent(request: MailAgentRegisterRequest, db: AsyncSession = D
     member_resp = next(c for c in members if c.id == member.id)
     session_resp = next(c for c in member_resp.sessions if c.session_key == session.session_key)
     return MailAgentRegisterResponse(member=member_resp, session=session_resp)
-
-
-@router.get("/agent/inbox", response_model=MailInboxResponse)
-async def agent_inbox(
-    member_id: int, unread_only: bool = False, mark_read: bool = False,
-    limit: int = 50, db: AsyncSession = Depends(get_db),
-):
-    return await agent_mail_service.get_inbox(
-        db, member_id, unread_only=unread_only, mark_read=mark_read, limit=limit, refresh_mcp_session=True,
-    )
 
 
 def _hook_cli(payload: dict) -> str:
@@ -150,26 +103,6 @@ async def hook_session_start(payload: dict[str, Any] = Body(...), db: AsyncSessi
         return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     except Exception as exc:
         logger.warning("session-start hook failed: %s", exc)
-        return {}
-
-
-@router.post("/hooks/user-prompt-submit")
-async def hook_user_prompt_submit(payload: dict[str, Any] = Body(...), db: AsyncSession = Depends(get_db)):
-    try:
-        session_key = _hook_session_key(payload)
-        if session_key is None:
-            return {}
-        session = await agent_mail_service.heartbeat_session(db, session_key)
-        if session is None:
-            _, session = await _register_from_hook(db, payload)
-            if session is None:
-                return {}
-        context = await agent_mail_service.build_prompt_submit_context(db, session.member_id)
-        if context is None:
-            return {}
-        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
-    except Exception as exc:
-        logger.warning("user-prompt-submit hook failed: %s", exc)
         return {}
 
 

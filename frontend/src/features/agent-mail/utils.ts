@@ -1,35 +1,4 @@
-import type {
-  MailMemberResponse,
-  MailMemberStatus,
-  MailMessageKind,
-  MailMessageResponse,
-  MailRequestStatus,
-} from '@/types/agentMail'
-
-export const KIND_LABEL: Record<MailMessageKind, string> = {
-  message: 'Message',
-  broadcast: 'Broadcast',
-  context_request: 'Context request',
-  handoff: 'Handoff',
-  answer: 'Answer',
-}
-
-export function memberName(members: MailMemberResponse[], memberId?: number | null): string {
-  if (!memberId) return 'Director'
-  return members.find((member) => member.id === memberId)?.display_name ?? `Member ${memberId}`
-}
-
-export function senderName(message: MailMessageResponse, members: MailMemberResponse[]): string {
-  if (message.sender_type === 'external_actor') return message.sender_name || 'External actor'
-  if (message.sender_member_id) return memberName(members, message.sender_member_id)
-  return message.sender_name || 'Director'
-}
-
-
-export function recipientName(message: MailMessageResponse, members: MailMemberResponse[]): string {
-  if (message.kind === 'broadcast' || !message.recipient_member_id) return 'All members'
-  return memberName(members, message.recipient_member_id)
-}
+import type { MailMemberStatus } from '@/types/agentMail'
 
 export function statusBadgeClass(status: MailMemberStatus | string): string {
   if (status === 'connected') return 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
@@ -77,13 +46,6 @@ export function sessionStatusTitle(source: string, status: MailMemberStatus | st
   return statusTitle(status)
 }
 
-export function requestBadgeClass(status?: MailRequestStatus | null): string {
-  if (status === 'pending') return 'border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-  if (status === 'answered') return 'border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-  if (status === 'acknowledged') return 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-  return 'border-muted-foreground/30 bg-muted text-muted-foreground'
-}
-
 export function formatDateTime(value?: string | null): string {
   if (!value) return 'Never'
   return new Intl.DateTimeFormat(undefined, {
@@ -92,17 +54,4 @@ export function formatDateTime(value?: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
-}
-
-export function messageSummary(message: MailMessageResponse): string {
-  const compact = message.body_markdown.replace(/\s+/g, ' ').trim()
-  if (compact.length <= 180) return compact
-  return `${compact.slice(0, 177)}...`
-}
-
-export function splitLines(value: string): string[] {
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
 }

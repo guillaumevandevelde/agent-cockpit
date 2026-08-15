@@ -2,12 +2,8 @@ import { apiClient, buildEndpoint } from '@/lib/api'
 import type {
   AgentMailInstallStatus,
   AgentMailSnippets,
-  MailInboxResponse,
   MailMemberResponse,
   MailMemberUpdate,
-  MailMessageCreate,
-  MailMessageResponse,
-  MailThreadResponse,
   TeamListResponse,
 } from '@/types/agentMail'
 
@@ -19,43 +15,6 @@ export function updateAgentMailMember(memberId: number, update: MailMemberUpdate
   return apiClient<MailMemberResponse>(`agent-mail/members/${memberId}`, {
     method: 'PATCH',
     body: JSON.stringify(update),
-  })
-}
-
-export function sendAgentMailMessage(message: MailMessageCreate): Promise<MailMessageResponse> {
-  return apiClient<MailMessageResponse>('agent-mail/messages', {
-    method: 'POST',
-    body: JSON.stringify(message),
-  })
-}
-
-export function fetchAgentMailMessages(): Promise<MailMessageResponse[]> {
-  return apiClient<MailMessageResponse[]>('agent-mail/messages')
-}
-
-export function fetchAgentMailThread(messageId: number, memberId?: number): Promise<MailThreadResponse> {
-  return apiClient<MailThreadResponse>(
-    buildEndpoint(`agent-mail/messages/${messageId}/thread`, { member_id: memberId })
-  )
-}
-
-export function fetchAgentMailInbox(memberId: number, unreadOnly = false): Promise<MailInboxResponse> {
-  return apiClient<MailInboxResponse>(
-    buildEndpoint('agent-mail/agent/inbox', { member_id: memberId, unread_only: unreadOnly })
-  )
-}
-
-export function markAgentMailRead(messageId: number, memberId: number): Promise<{ ok: boolean }> {
-  return apiClient<{ ok: boolean }>(`agent-mail/messages/${messageId}/read`, {
-    method: 'POST',
-    body: JSON.stringify({ member_id: memberId }),
-  })
-}
-
-export function ackAgentMailMessage(messageId: number, memberId: number): Promise<{ ok: boolean }> {
-  return apiClient<{ ok: boolean }>(`agent-mail/messages/${messageId}/ack`, {
-    method: 'POST',
-    body: JSON.stringify({ member_id: memberId }),
   })
 }
 

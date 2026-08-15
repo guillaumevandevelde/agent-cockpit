@@ -91,8 +91,6 @@ def get_snippets() -> AgentMailSnippets:
         "## Agent Cockpit Agent Mail\n"
         "You are part of a local agent team coordinated through Agent Cockpit.\n"
         "- Call `agent_mail_whoami` once when you start working to register and learn your role.\n"
-        "- Call `agent_mail_check_inbox` before starting major tasks and after finishing one.\n"
-        "- Use `agent_mail_request_context` to ask another repo's agent a question, and\n"
-        "  `agent_mail_create_handoff` to hand work over.\n"
+        "- Call `agent_mail_list_team` to see who else is registered locally.\n"
     )
     return AgentMailSnippets(codex_hooks_snippet=hooks_snippet, agents_md_snippet=agents_md)

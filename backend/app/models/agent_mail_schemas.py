@@ -1,12 +1,8 @@
 """Pydantic schemas for Agent Mail. No team_preset_id/team_slot_id fields —
 identity is repo-scoped only, see docs/cockpit/agent-mail-spec.md."""
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, Field
-
-MAIL_MESSAGE_KINDS = ["message", "broadcast", "context_request", "handoff", "answer"]
-MAIL_REQUEST_KINDS = ["context_request", "handoff"]
 
 
 class MailSessionResponse(BaseModel):
@@ -31,10 +27,6 @@ class MailMemberResponse(BaseModel):
     role: str | None = None
     charter: str | None = None
     status: str
-    unread_count: int = 0
-    pending_count: int = 0
-    unseen_pending_count: int = 0
-    stale_pending_count: int = 0
     last_inbox_checked_at: datetime | None = None
     sessions: list[MailSessionResponse] = Field(default_factory=list)
 
@@ -47,48 +39,6 @@ class MailMemberUpdate(BaseModel):
     display_name: str | None = None
     role: str | None = None
     charter: str | None = None
-
-
-class MailMessageCreate(BaseModel):
-    kind: str = "message"
-    sender_member_id: int | None = None
-    recipient_member_id: int | None = None
-    thread_root_id: int | None = None
-    subject: str | None = None
-    body_markdown: str
-    payload: dict[str, Any] | None = None
-
-
-class MailMessageResponse(BaseModel):
-    id: int
-    thread_root_id: int | None = None
-    kind: str
-    sender_member_id: int | None = None
-    sender_type: str = "director"
-    sender_name: str
-    recipient_member_id: int | None = None
-    subject: str | None = None
-    body_markdown: str
-    payload: dict[str, Any] | None = None
-    request_status: str | None = None
-    is_stale: bool = False
-    read_at: datetime | None = None
-    acked_at: datetime | None = None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class MailThreadResponse(BaseModel):
-    root: MailMessageResponse
-    replies: list[MailMessageResponse] = Field(default_factory=list)
-
-
-class MailInboxResponse(BaseModel):
-    member_id: int
-    unread_count: int
-    pending_count: int
-    messages: list[MailMessageResponse] = Field(default_factory=list)
 
 
 class MailAgentRegisterRequest(BaseModel):
