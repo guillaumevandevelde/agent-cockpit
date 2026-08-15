@@ -57,7 +57,15 @@ Bij invoering: 21 bewaakte bestanden. Bijkomend effect: een kaart die `dispatch.
 
 ### 4. Geen belofte zonder rij
 
-Er bestaat geen `scheduler.add_job` zonder een databaserij die de belofte vastlegt. De database is de waarheid, de scheduler is een cache. Zie [`kernharding-design.md`](./kernharding-design.md) §2 — dit onderdeel is nog niet gebouwd.
+Er bestaat geen `scheduler.add_job` zonder een databaserij die de belofte vastlegt. De database is de waarheid, de scheduler is een cache.
+
+De scheduler draait op APScheduler's in-memory jobstore, dus elke job sterft met het proces. Voor een terugkerende job is dat onschuldig: de volgende start installeert hem opnieuw. Voor een **eenmalige** job niet — die vuurt daarna nooit meer. Zo bleef een kaart na een herstart claimed staan met `pane_resume_pending=True` en niemand die hem nog kon nudgen.
+
+`services/scheduling/reconciler.py` leest die rijen bij het opstarten terug en installeert de jobs opnieuw; achterstallige beloften vuren meteen. Dat generaliseert `recurring_triggers.run_boot_inhaal`, dat na een gemiste maandag al precies dit deed.
+
+`scripts/check-add-job-callers.sh` bewaakt de vorm: `_sched.add_job` mag alleen in `scheduler.py` staan, plus twee geratelde plekken (`kanban/dispatch.py`, `scheduling/auto_resume.py`) die alleen korter mag worden.
+
+**Nog niet duurzaam:** `auto_resume_service.set_enabled` schrijft alleen naar een geheugen-dict, en `auto_resume.py` raakt geen database. Zet je auto-resume aan via `POST /api/v1/session-hooks/...`, dan is dat na een herstart stil weer uit. Dat is een echte bug en vraagt een eigen tabel of kolom; hij staat hier opgeschreven in plaats van vergeten.
 
 ## Wat hier nog moet gebeuren
 

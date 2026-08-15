@@ -149,6 +149,16 @@ async def _recover_and_start_dispatch() -> None:
             await ks.commit()
     except Exception:
         logger.exception("autodispatch boot reset failed at startup")
+    # 3b. Rebuild one-shot scheduled work that died with the previous process.
+    # The scheduler's jobstore is in-memory, so a pane resume scheduled at a
+    # rate-limit reset time never fires after a restart and leaves the card
+    # claimed with nobody left to nudge it. Best-effort: a failure here must
+    # not block startup.
+    try:
+        from app.services.scheduling.reconciler import reinstall_pending_pane_resumes
+        await reinstall_pending_pane_resumes()
+    except Exception:
+        logger.exception("pane-resume reconciliation failed at startup")
     # 4. Start kanban auto-dispatch polling.
     scheduler_service.schedule_kanban_dispatch(
         interval_seconds=settings.kanban_dispatch_interval_seconds

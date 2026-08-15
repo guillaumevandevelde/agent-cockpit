@@ -87,6 +87,9 @@ jobs:
       - name: Omvangsratel (bestanden boven 800 regels mogen niet groeien)
         run: bash scripts/check-file-size-ratchet.sh
         if: ${{ !cancelled() }}
+      - name: Geen belofte zonder rij (add_job-aanroepers)
+        run: bash scripts/check-add-job-callers.sh
+        if: ${{ !cancelled() }}
       - name: Superpowers promotion ledger (advisory)
         run: bash scripts/check-superpowers-promotions.sh
         continue-on-error: true
