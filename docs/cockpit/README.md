@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 128 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 130 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -131,7 +131,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Test-doubles convention — patch where the consumer looks](./test-doubles-convention.md) | 🟢 active |
 | [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md) | 🟢 active |
 
-### Spec (7)
+### Spec (8)
 
 | Document | Status |
 |---|---|
@@ -139,6 +139,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Fase 2 — Spec: Scheduled messages](./fase-2-spec.md) | ⚪ superseded |
 | [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md) | 🟢 active |
 | [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md) | 🟢 active |
+| [Kernharding — duurzame toestand, schemamigratie en een afdwingbare architectuurgrens](./kernharding-design.md) | 🟢 active |
 | [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md) | 🟢 active |
 | [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md) | 🟢 active |
 | [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md) | 🟢 active |
@@ -153,7 +154,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (45)
+### Decision (46)
 
 | Document | Status |
 |---|---|
@@ -166,6 +167,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Beslissing — Bordkaart-layout: titel leest volledig, metadata scant op één regel, lege lanes worden rails](./board-card-layout-decision.md) | 🔵 decided |
 | [Telt cache_read mee in het Claude-abonnementsquotum? — gecontroleerde meting](./cache-read-quota-decision.md) | 🔵 decided |
 | [CC 2.1.224 native cross-session SendMessage + ListAgents — adopt, integrate, or position against Agent Mail?](./cc-native-cross-session-decision.md) | 🔵 decided |
+| [Richting van Agent Cockpit — essentie, hosting, meldingen, kenniswerk en de volgorde van werken](./cockpit-richting-decision.md) | 🔵 decided |
 | [Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie](./code-knowledge-graph-navigation-decision.md) | 🔵 decided |
 | [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md) | 🔵 decided |
 | [Harnassen die een agent spawnen — inventarisatie en sandbox-status](./harnas-spawn-inventaris.md) | 🔵 decided |

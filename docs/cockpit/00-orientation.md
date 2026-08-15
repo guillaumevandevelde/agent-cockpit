@@ -10,6 +10,14 @@ Dit is een **fork van [adrirubio/claude-deck](https://github.com/adrirubio/claud
 met een eigen identiteit: **Agent Cockpit**. De `upstream` git-remote wijst naar claude-deck
 (voeg later je eigen `origin` toe als je een GitHub-fork aanmaakt).
 
+> **Richting herzien op 2026-08-15.** De essentie is vastgelegd als *persoonlijke
+> agent-cockpit* — niet als software-fabriek en niet als Claude Code-beheerapp. Daarbij
+> horen vier keuzes: thuis draaien met een venster naar buiten, meldingen alleen bij
+> uitzondering, kenniswerk via hetzelfde bord met een licht ceremonieprofiel, en een
+> kernharding vóór het nieuwe werk. Lees
+> [`cockpit-richting-decision.md`](./cockpit-richting-decision.md) vóór dit hoofdstuk;
+> de beschrijving hieronder klopt nog als mechaniek, maar niet meer als ambitie.
+
 ## Doel
 
 Claude-deck levert al sessie-**monitoring** (Sessions / CC Bridge) — dat dekt "welke CC-sessie

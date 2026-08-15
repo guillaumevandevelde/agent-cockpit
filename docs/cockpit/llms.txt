@@ -45,6 +45,7 @@
 - [Fase 2 — Spec: Scheduled messages](./fase-2-spec.md): type=spec status=superseded
 - [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md): type=spec status=active
 - [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md): type=spec status=active
+- [Kernharding — duurzame toestand, schemamigratie en een afdwingbare architectuurgrens](./kernharding-design.md): type=spec status=active
 - [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md): type=spec status=active
 - [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md): type=spec status=active
 - [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md): type=spec status=active
@@ -68,6 +69,7 @@
 - [Beslissing — Bordkaart-layout: titel leest volledig, metadata scant op één regel, lege lanes worden rails](./board-card-layout-decision.md): type=decision status=decided
 - [Telt cache_read mee in het Claude-abonnementsquotum? — gecontroleerde meting](./cache-read-quota-decision.md): type=decision status=decided
 - [CC 2.1.224 native cross-session SendMessage + ListAgents — adopt, integrate, or position against Agent Mail?](./cc-native-cross-session-decision.md): type=decision status=decided
+- [Richting van Agent Cockpit — essentie, hosting, meldingen, kenniswerk en de volgorde van werken](./cockpit-richting-decision.md): type=decision status=decided
 - [Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie](./code-knowledge-graph-navigation-decision.md): type=decision status=decided
 - [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md): type=decision status=decided
 - [Harnassen die een agent spawnen — inventarisatie en sandbox-status](./harnas-spawn-inventaris.md): type=decision status=decided
