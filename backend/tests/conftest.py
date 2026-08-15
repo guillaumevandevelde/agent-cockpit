@@ -69,7 +69,7 @@ def _isolate_git_env():
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_test_db():
     """Drop and recreate all kanban tables before each test."""
-    from tests.kanban_test_db import reset_test_tables, dispose_test_engine
+    from tests.kanban_test_db import dispose_test_engine, reset_test_tables
     await reset_test_tables()
     yield
     # Engine dispose on teardown. pytest-asyncio closes the test's event loop

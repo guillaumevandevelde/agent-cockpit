@@ -25,9 +25,9 @@ import json
 import logging
 
 from app.services.scheduling.hook_script import (
+    HOOK_EVENT_PATH,
     LEGACY_HOOK_EVENT_MARKER,
     LEGACY_HOOK_EVENT_PATH,
-    HOOK_EVENT_PATH,
     render_hook_command,
     settings_hooks_block,
 )
@@ -100,7 +100,7 @@ def _rewrite_legacy_hooks(settings: dict, port: int) -> bool:
     if not isinstance(hooks_section, dict):
         return False
     changed = False
-    for event, groups in hooks_section.items():
+    for _event, groups in hooks_section.items():
         if not isinstance(groups, list):
             continue
         for group in groups:

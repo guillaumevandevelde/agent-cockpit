@@ -667,7 +667,15 @@ async def test_active_branch_preserves_tracked_settings_json(
         json.dumps(tracked, indent=2),
     )
     for cmd in (
-        ["git", "-C", str(repo), "add", "README.md", ".claude/settings.json"],
+        # ``.gitignore`` must be COMMITTED, not merely written: the worktree
+        # below is checked out from ``main``, so an uncommitted ignore file
+        # never reaches it and ``settings.local.json`` shows up as ``??``
+        # there. On a host whose global excludesFile already carries
+        # ``**/.claude/settings.local.json`` that stays invisible; CI has no
+        # such rule, which is exactly the host dependency the seeding helper
+        # exists to remove (kanban card f760c505…).
+        ["git", "-C", str(repo), "add",
+         ".gitignore", "README.md", ".claude/settings.json"],
         ["git", "-C", str(repo), "commit", "-m", "init"],
         ["git", "-C", str(repo), "worktree", "add",
          "-b", "feature", str(wt), "main"],

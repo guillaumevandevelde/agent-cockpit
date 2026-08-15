@@ -262,9 +262,10 @@ async def lifespan(app: FastAPI):
     # occurrence that passed while the backend was down. The two halves are
     # independent — APScheduler only sees future ticks, the inhaal sweep
     # handles the past. See docs/cockpit/scheduled-trigger-consolidatie-decision.md §3.2.
+    from sqlalchemy import select
+
     from app.models.recurring_trigger import RecurringTrigger
     from app.services.recurring_triggers import run_boot_inhaal
-    from sqlalchemy import select
     async with AsyncSessionLocal() as s:
         triggers = (await s.execute(
             select(RecurringTrigger).where(RecurringTrigger.enabled == True)  # noqa: E712

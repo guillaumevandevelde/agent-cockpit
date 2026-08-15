@@ -22,10 +22,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Mount
 
 
 def _http_scope(method: str, path: str, query: bytes = b"",
@@ -44,7 +44,6 @@ def _http_scope(method: str, path: str, query: bytes = b"",
 
 async def _drive_request(app, scope) -> tuple[int, bytes]:
     """Drive a single request through the ASGI app and return (status, body)."""
-    body = scope["headers"]
     # Body is supplied via receive; pick it up from a side channel instead of
     # scanning headers — too easy to misread content-length vs body.
     sent: dict = {}
@@ -81,8 +80,9 @@ def _bogus_session_handler():
 
     Mirrors the production wiring in ``build_session_aware_sse_app`` but
     skips the FastMCP dependency so the test focuses on the handler."""
-    from app.kanban.mcp_transport import make_session_aware_message_handler
     from mcp.server.sse import SseServerTransport
+
+    from app.kanban.mcp_transport import make_session_aware_message_handler
 
     sse = SseServerTransport("/messages/")
     return make_session_aware_message_handler(sse)
@@ -157,8 +157,9 @@ def test_known_session_id_delegates_to_original_handler():
     """The happy path: a session_id that IS registered must still be routed
     to the original handle_post_message — the wrapper must not break the
     202-Accepted path that every working MCP tool call depends on."""
-    from app.kanban.mcp_transport import make_session_aware_message_handler
     from mcp.server.sse import SseServerTransport
+
+    from app.kanban.mcp_transport import make_session_aware_message_handler
 
     # Register a session by connecting a fake SSE writer to the dict the way
     # SseServerTransport.connect_sse would. We don't drive a real SSE
@@ -212,8 +213,9 @@ def test_session_drops_to_not_found_after_disconnect():
     is overkill for this assertion — the registration path is well-covered
     by the upstream mcp tests; we only need to prove the wrapper reacts
     correctly once the dict no longer knows the session."""
-    from app.kanban.mcp_transport import make_session_aware_message_handler
     from mcp.server.sse import SseServerTransport
+
+    from app.kanban.mcp_transport import make_session_aware_message_handler
 
     sse = SseServerTransport("/messages/")
     handler = make_session_aware_message_handler(sse)

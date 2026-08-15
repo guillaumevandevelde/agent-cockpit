@@ -7,7 +7,6 @@ iterate that tuple directly as if it were the content list, producing two
 "items" -- the list and the dict -- neither of which has `.text`, so the
 str(item) fallback returned a mangled repr instead of the tool's real output.
 """
-import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
