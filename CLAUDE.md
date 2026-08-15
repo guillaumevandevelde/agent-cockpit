@@ -127,6 +127,12 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 ( cd frontend && ./node_modules/.bin/vitest run )                # hele frontend-suite (~10s)
 # `scripts/run-single-test.sh foo.test.tsx` weigert met een pointer naar deze vorm.
 
+# Schemamigraties (alembic — twee gescheiden geschiedenissen)
+cd backend && python -m app.migrate_cli          # Beide stores naar head; maakt eerst een momentopname van het bord. Draait ook vanuit `cockpit.sh start`.
+cd backend && python -m alembic --name kanban revision --autogenerate -m "<wat er wijzigde>"   # Revisie na een modelwijziging (of --name registry)
+cd backend && python -m alembic --name kanban history                                          # Wat is er al gedraaid
+cd backend && python scripts/check_migrations_current.py    # CI-poort: verse DB naar head en vergelijken met de modellen
+
 # Docs / decision register
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
 ./scripts/check-doc-frontmatter.sh            # Flag docs/cockpit/*.md zonder OKF-frontmatter of met onbekende type/status (advisory; --strict = exit 1)
@@ -262,7 +268,8 @@ Done-kaart `d9447e49`).
   ```bash
   python3 -c 'import sqlite3,os,json; db=os.path.expanduser("~/.claude-registry/kanban.db"); con=sqlite3.connect(f"file:{db}?mode=ro", uri=True); cid="<card_id>"; rows=con.execute("SELECT op_type, payload FROM kanban_ops WHERE entity_type=\"card\" AND entity_id=? ORDER BY hlc", (cid,)).fetchall(); print(f"{len(rows)} ops for {cid}"); [print(o, json.dumps(p, ensure_ascii=False)) for o,p in rows]'
   ```
-- No database migration system — schema changes require deleting the db. Omdat er **twee** stores zijn: `rm backend/claude_registry.db` wist de registry-state; `rm ~/.claude-registry/kanban.db` wist het hele bord (kaarten, kolommen, autodispatch-meta, activity). Mix ze niet — de één verwijderen verwijdert de andere niet.
+- **Schemawijzigingen gaan via alembic** (sinds 2026-08-15; daarvóór moest je de database wissen). Elke store heeft een eigen revisiegeschiedenis: `alembic --name registry …` en `alembic --name kanban …`, aangestuurd vanuit `backend/`. Wijzig je een model, genereer dan een revisie — de CI-poort `scripts/check_migrations_current.py` neemt een verse database naar `head` en faalt zodra modellen en migraties uiteenlopen. **Roep alembic altijd aan als `python -m alembic`**, nooit als bare `alembic`: de testrunner draait de venv-interpreter zonder `venv/bin` op `PATH`. SQLite kan geen `ALTER COLUMN`, dus elke kolomwijziging gaat door `op.batch_alter_table` (staat ook in het revisiesjabloon). Een nieuwe dependency hoort in **`requirements.txt` én `pyproject.toml`** — CI installeert uit de eerste. Achtergrond: [`docs/cockpit/kernharding-design.md`](./docs/cockpit/kernharding-design.md) §1.
+- Wil je tóch vanaf nul beginnen: `rm backend/claude_registry.db` wist de registry-state; `rm ~/.claude-registry/kanban.db` wist het hele bord (kaarten, kolommen, autodispatch-meta, activity). Mix ze niet — de één verwijderen verwijdert de andere niet.
 - Backups stored at `~/.claude-registry/backups/` (naast de kanban-DB; bewust portable gehouden)
 - `rm` is blocked via `.claude/settings.json` (`Bash(rm:*)` deny) — use `mv` to move unwanted files outside the repo, or `git clean -f -- <path>` for untracked files, instead
 - **Gebruik `pkill -f`/`pgrep -f` niet in een gedispatchte sessie — je raakt de sessie van een collega-agent.** Sinds Claude Code 2.1.214 weigert `pkill` de eigen CLI (geverifieerd op lokale CLI 2.1.221). Het blijvende risico zit in andermans sessie: de dispatcher zet de hele prompt in de cmdline (`backend/app/services/agentic_cli/claude_code.py:82-83`), dus een `-f`-patroon matcht veel breder dan je denkt.

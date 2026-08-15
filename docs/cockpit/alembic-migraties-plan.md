@@ -16,6 +16,27 @@ status: proposed
 
 **Spec:** [`kernharding-design.md`](./kernharding-design.md) §1
 
+> **✅ Uitgevoerd op 2026-08-15.** Alle zes taken zijn gebouwd en geshipt naar
+> master. **Effect:** beide stores staan onder alembic op `head` met nul drift,
+> en een schemawijziging kost nu een revisie in plaats van het wissen van 59
+> kaarten en 18.834 operaties. De adoptie legde meteen een levende bug bloot:
+> `SandcastleConfig` declareerde zes kolommen die de database niet had, dus elke
+> `select` erop faalde met `no such column: sandcastle_configs.memory_limit_mb`.
+> Die kolommen zijn toegevoegd en de select slaagt nu.
+>
+> Drie dingen wijken af van de tekst hieronder, elk gecorrigeerd in de stappen
+> zelf: alembic wordt aangeroepen als `sys.executable -m alembic`, de dependency
+> moet ook in `requirements.txt` (CI installeert daaruit), en taak 5 bleek
+> schrappen in plaats van omzetten omdat de basisrevisie het volledige
+> modelschema al beschrijft.
+>
+> **Eén onderdeel is bewust niet gebouwd:** de `assert_at_head`-haak in de
+> lifespan uit spec-§1.4. 87 testbestanden starten de app via `TestClient` met
+> een `create_all`-schema en staan dus per definitie niet onder alembic; een
+> harde controle daar laat de hele suite vallen. §1.4 en de bewuste
+> `create_all`-uitzondering in §1.6 spreken elkaar tegen. Dat vraagt een keuze
+> en staat open.
+
 ## Global Constraints
 
 - Python `>=3.11`; ruff `target-version = "py311"`, `line-length = 100`.
