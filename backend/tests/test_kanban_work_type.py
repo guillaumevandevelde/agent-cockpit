@@ -1,83 +1,19 @@
 """Tests for the structured `work_type` field on KanbanCard.
 
-Covers the additive migration in `_ensure_card_columns`, the create/update
-materialization, and the HTTP round-trip. See
+Covers the create/update materialization and the HTTP round-trip. The schema
+half is alembic's job since 2026-08-15. See
 docs/cockpit/work-type-routing-analysis.md §5 (bouwsteen a).
 """
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.kanban.db import _ensure_card_columns
 from app.kanban.schemas import WORK_TYPES
 from app.main import app
-from tests.kanban_test_db import reset_test_tables
 
-
-@pytest_asyncio.fixture(autouse=True)
-async def _tables():
-    await reset_test_tables()
-    yield
-
-
-async def _make_legacy_engine():
-    """Schema as it existed before work_type was added: real, older kanban.db."""
-    engine = create_async_engine("sqlite+aiosqlite://")
-    async with engine.begin() as conn:
-        await conn.exec_driver_sql(
-            """
-            CREATE TABLE kanban_cards (
-                id VARCHAR(64) PRIMARY KEY,
-                project_key VARCHAR(512) NOT NULL,
-                title VARCHAR(512) NOT NULL,
-                description TEXT NOT NULL,
-                "column" VARCHAR(32) NOT NULL,
-                rank VARCHAR(64) NOT NULL,
-                priority VARCHAR(16),
-                labels JSON,
-                agent VARCHAR(64),
-                transport VARCHAR(16),
-                resume_session_id VARCHAR(256),
-                resume_project_folder VARCHAR(512),
-                scheduled_at VARCHAR(40),
-                dispatch_failures INTEGER NOT NULL DEFAULT 0,
-                claimed_by VARCHAR(256),
-                claimed_at DATETIME,
-                created_at DATETIME NOT NULL,
-                updated_at DATETIME NOT NULL
-            )
-            """
-        )
-    return engine
-
-
-async def test_ensure_card_columns_adds_work_type():
-    engine = await _make_legacy_engine()
-    try:
-        async with engine.begin() as conn:
-            rows = (await conn.exec_driver_sql("PRAGMA table_info(kanban_cards)")).fetchall()
-            before = {r[1] for r in rows}
-            assert "work_type" not in before
-
-            await _ensure_card_columns(conn)
-
-            rows = (await conn.exec_driver_sql("PRAGMA table_info(kanban_cards)")).fetchall()
-            after = {r[1] for r in rows}
-        assert "work_type" in after
-    finally:
-        await engine.dispose()
-
-
-async def test_ensure_card_columns_is_idempotent_on_work_type():
-    engine = await _make_legacy_engine()
-    try:
-        async with engine.begin() as conn:
-            await _ensure_card_columns(conn)
-        async with engine.begin() as conn:
-            await _ensure_card_columns(conn)  # must not raise on a second run
-    finally:
-        await engine.dispose()
+# De migratietests die hier stonden zijn op 2026-08-15 verwijderd samen met
+# `_ensure_card_columns`. Een oudere database naar de huidige vorm brengen is nu
+# alembic's werk; gedekt door
+# tests/test_db_bootstrap.py::test_pre_alembic_database_is_adopted.
 
 
 def test_work_types_constant_matches_doc():
