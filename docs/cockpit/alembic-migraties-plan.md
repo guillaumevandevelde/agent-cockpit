@@ -20,6 +20,7 @@ status: proposed
 
 - Python `>=3.11`; ruff `target-version = "py311"`, `line-length = 100`.
 - Beide stores zijn SQLite. SQLite kan nauwelijks `ALTER TABLE`: **elke revisie die een kolom wijzigt of verwijdert gebruikt `op.batch_alter_table`**.
+- **Roep alembic altijd aan als `sys.executable -m alembic`, nooit als bare `alembic`.** De testrunner start de venv-interpreter zonder `venv/bin` op `PATH`, dus het console-script is daar niet vindbaar — een bare aanroep faalt met `FileNotFoundError: 'alembic'`. Via de interpreter draait het subproces bovendien gegarandeerd in dezelfde omgeving. Dit geldt in taak 2, 3 en 6.
 - Twee gescheiden bases: `app.database.Base` (registry) en `app.kanban.db.KanbanBase` (bord). Ze delen géén metadata en krijgen elk een eigen revisiegeschiedenis.
 - De live bord-database staat op `~/.claude-registry/kanban.db` en bevat productiegegevens. **Geen enkele taak mag daartegen schrijven.** Alle tests werken op `tmp_path`-bestanden.
 - Volledige `pytest` draait in CI, niet lokaal. Losse tests lokaal via `bash scripts/run-single-test.sh tests/test_x.py::test_y`.
@@ -218,7 +219,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 def _alembic(name: str, db_path: Path, *args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "ALEMBIC_DATABASE_URL": f"sqlite:///{db_path}"}
     return subprocess.run(
-        ["alembic", "--name", name, *args],
+        [sys.executable, "-m", "alembic", "--name", name, *args],
         cwd=BACKEND_ROOT,
         env=env,
         capture_output=True,
@@ -496,7 +497,19 @@ ALEMBIC_DATABASE_URL="sqlite:///$TMP/registry.db" alembic --name registry revisi
 ALEMBIC_DATABASE_URL="sqlite:///$TMP/kanban.db" alembic --name kanban revision --autogenerate -m "baseline board schema"
 ```
 
-Open beide gegenereerde bestanden in `migrations/*/versions/` en controleer twee dingen: `down_revision = None`, en er staan alleen `op.create_table`-aanroepen in `upgrade()` (geen `alter`/`drop`). Staat er wel een `alter` of `drop`, dan is er tegen een gevulde database gegenereerd — gooi het bestand weg en herhaal met een verse `$TMP`.
+Controleer beide gegenereerde bestanden op twee dingen: `down_revision = None`, en `upgrade()` bevat uitsluitend opbouwende operaties.
+
+Scope die tweede controle expliciet op `upgrade()` — een `downgrade()` hoort vol `drop_table` en `drop_index` te staan, en een grep over het hele bestand leest dat ten onrechte als drift:
+
+```bash
+for f in migrations/registry/versions/*.py migrations/kanban/versions/*.py; do
+  echo "=== $(basename $f) ==="
+  grep -E '^down_revision' "$f"
+  awk '/^def upgrade/,/^def downgrade/' "$f" | grep -oE 'op\.[a-z_]+' | sort | uniq -c
+done
+```
+
+Verwacht in `upgrade()`: alleen `op.create_table`, `op.create_index`, `op.f` en `op.batch_alter_table`. Die laatste is geen wijziging maar de context waarin alembic op SQLite een index aanmaakt — die hoort er dus te staan. Zie je `op.drop_*` of `op.alter_column` in `upgrade()`, dán is er tegen een gevulde database gegenereerd: gooi het bestand weg en herhaal met een verse `$TMP`.
 
 - [ ] **Step 9: Run the test to verify it passes**
 
@@ -642,7 +655,7 @@ class SchemaDriftError(RuntimeError):
 def _run_alembic(name: str, db_path: Path, *args: str) -> None:
     env = {**os.environ, "ALEMBIC_DATABASE_URL": f"sqlite:///{db_path}"}
     result = subprocess.run(
-        ["alembic", "--name", name, *args],
+        [sys.executable, "-m", "alembic", "--name", name, *args],
         cwd=BACKEND_ROOT,
         env=env,
         capture_output=True,
@@ -893,7 +906,7 @@ def assert_at_head(name: str, db_path: Path) -> None:
         current = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
 
     result = subprocess.run(
-        ["alembic", "--name", name, "heads", "--verbose"],
+        [sys.executable, "-m", "alembic", "--name", name, "heads", "--verbose"],
         cwd=BACKEND_ROOT, capture_output=True, text=True,
         env={**os.environ, "ALEMBIC_DATABASE_URL": f"sqlite:///{db_path}"},
     )
@@ -1089,7 +1102,7 @@ def main() -> int:
             db_path = Path(tmp) / f"{name}.db"
             env = {**os.environ, "ALEMBIC_DATABASE_URL": f"sqlite:///{db_path}"}
             result = subprocess.run(
-                ["alembic", "--name", name, "upgrade", "head"],
+                [sys.executable, "-m", "alembic", "--name", name, "upgrade", "head"],
                 cwd=BACKEND_ROOT, env=env, capture_output=True, text=True,
             )
             if result.returncode != 0:
