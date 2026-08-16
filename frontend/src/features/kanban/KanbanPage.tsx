@@ -586,13 +586,13 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-full gap-4 overflow-hidden">
       <DispatchPauseBanner />
-      <div className="flex items-center justify-between flex-shrink-0">
-        <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between flex-shrink-0">
+        <div className="min-w-0">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-semibold">Kanban</h1>
             <McpHealthBadge />
           </div>
-          <div className="text-xs text-muted-foreground">{projectKey || "…"}</div>
+          <div className="text-xs text-muted-foreground truncate">{projectKey || "…"}</div>
         </div>
         <div className="flex flex-wrap gap-2">
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />
