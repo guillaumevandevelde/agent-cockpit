@@ -146,3 +146,36 @@ Buiten de sweep heropenen mag, maar zelden nodig: het dreigingsmodel is een arch
 - **By-design-uitspraken** leven in `.github/codeql/codeql-config.yml`, niet in UI-dismissals. Suppressie-comments zijn versie-specifiek (`# codeql[…]`, niet `# lgtm[…]`) — zie §2.1 voor het concrete voorbeeld bij cli_executor.py:97 waar de legacy-syntax niets doet en de alert open blijft.
 - **Per-regel-dispositie** is een 1-regel-oordeel in een tabel; de lange uitleg hoort in een comment bij de code of in dit beslisdoc.
 - **Een echte fix** komt op een eigen kaart, nooit in een analyse-spike — ook niet als de fix één regel is (zie §4.1).
+
+---
+
+## 7. Bijstelling 2026-08-16 — implementatie-gap, geen nieuwe triage
+
+**Status:** triage-beslissing staat; de uitvoering is niet geland. Geen nieuwe analyse, geen herziening van het dreigingsmodel of de disposities uit §1–§2.
+
+**Stand op 2026-08-16 (gemeten via `gh api --paginate "repos/guillaumevandevelde/agent-cockpit/code-scanning/alerts?state=open&per_page=100"`):** 215 open alerts in 3 regels.
+
+| Regel | # | Sev | Δ t.o.v. 2026-08-06 | Status |
+|---|---|---|---|---|
+| `py/path-injection` | 210 | high | −14 | by-design, geen policy gecommit |
+| `py/command-line-injection` | 4 | critical | +1 | by-design (sandcastle 2×, cli_executor 1×) + 1 REAL (skills_registry) |
+| `py/clear-text-storage-sensitive-data` | 1 | high | 0 | by-design, geen policy gecommit |
+
+**Gap 1 — §4.3 advanced-setup transitie is niet geshipt.** De vervolgkaart die §4.3 beloofde (`d90d168f…`) is niet terug te vinden op het bord — verwijderd of nooit aangemaakt; `kanban_ops` toont geen rijen voor die prefix. Daardoor staat er vandaag **geen** `.github/codeql/codeql-config.yml` in de repo en geen `codeql.yml`-workflow. Alle 210 path-injection-alerts blijven open omdat er letterlijk geen bestand is waar de by-design-policy kan landen (cf. §3.1). Zonder policy is de by-design-uitspraak een mondelinge afspraak, niet een reviewbaar artefact — precies de regressie die §3.2 punt 1 vreesde.
+
+**Gap 2 — §4.1 skills_registry fix is niet (volledig) geshipt.** Geen `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`-validatie op `source` in de huidige tree; `skill_pattern` op regel 161 is een parse-patroon voor registry-output, geen invoervalidatie. De alert vuurt nog steeds. De vervolgkaart die §4.1 beloofde is evenmin terug te vinden op het bord.
+
+**Bevestiging dat de triage-beslissing overeind staat.** Het dreigingsmodel uit §1 is niet veranderd (operator = single user, `127.0.0.1`-only). De disposities per regelgroep uit §2.1 houden: `py/path-injection` is by-design (operator-only paths), `py/clear-text-storage-sensitive-data` is by-design (`~/.claude-registry/...`), de drie command-line-injections van 2026-08-06 (cli_executor, sandcastle 1164, sandcastle 1215) zijn by-design met dezelfde onderbouwing. De +1 in `py/command-line-injection` is geen nieuwe klasse — het is de bestaande REAL uit §2.1 rij 4 die opnieuw vuurt omdat de fix niet landde. De `9a5e9eae…`-fixes (cli_executor lgtm→codeql-conversie zichtbaar op `cli_executor.py:100`, 4 stack-trace, 1 redos, 1 prototype-pollution, 7 workflow-permissions, 1 coverage-noise) zijn in de huidige tree zichtbaar. Algebra: 243 − 18 = 225 alerts verwacht; gemeten 215 = 225 − 10 (ruim binnen de bandbreedte van code-wijzigingen die paden weghaalden of nieuwe regels introduceerden).
+
+**Vervolgkaarten (in deze sessie aangemaakt als kinderen van `beeece50…`):**
+
+1. **`[chore] CodeQL advanced-setup transitie + by-design-policy`** — `.github/codeql/codeql-config.yml` met `paths-ignore` voor de by-design-klassen + per-call-site `# codeql[…]`-suppressies voor de drie by-design command-line-injections (cli_executor.py:99–100, sandcastle_service.py:~1164, sandcastle_service.py:~1215) + een `codeql.yml`-Actions-workflow die de config laadt. Eindpunt: ≥210 alerts gesloten via commitbare policy; de security-tab telt ≤ 5 alerts (residuen zijn de echte REALs uit punt 2).
+2. **`[bug] skills_registry_service: valideer `source` op install_endpoint`** — `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`-check + 400-response van `POST /api/v1/agents/skills/registry/install`. Eindpunt: 1 critical alert gesloten; eenheidstest met `vercel/foo --registry=http://evil` → 400, met `vercel-labs/agent-skills` → 200.
+
+**Wat deze bijstelling NIET verandert:**
+
+- §1 dreigingsmodel blijft.
+- §2.1 regel-tabel blijft (de +1 is geen nieuwe klasse).
+- §3 advanced-setup redenering blijft.
+- §4.3 en §4.1 worden **vervangen** door de nieuwe vervolgkaarten, niet aangevuld — duplicatie zou twee concurrerende waarheden opleveren voor dezelfde disposities.
+- §5 heropen-datum blijft de eerstvolgende security-triage-sweep; deze spike is geen heropening maar een implementatie-push binnen het bestaande besluit.
