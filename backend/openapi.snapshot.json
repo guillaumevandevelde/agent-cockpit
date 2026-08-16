@@ -9138,11 +9138,6 @@
       },
       "MailMemberResponse": {
         "properties": {
-          "can_nudge": {
-            "default": false,
-            "title": "Can Nudge",
-            "type": "boolean"
-          },
           "charter": {
             "anyOf": [
               {
@@ -9210,18 +9205,6 @@
           },
           "status": {
             "title": "Status",
-            "type": "string"
-          },
-          "wake_methods": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Wake Methods",
-            "type": "array"
-          },
-          "wake_state": {
-            "default": "delivered_waiting",
-            "title": "Wake State",
             "type": "string"
           }
         },
@@ -19676,46 +19659,6 @@
           }
         },
         "summary": "Update Member",
-        "tags": [
-          "Agent Mail"
-        ]
-      }
-    },
-    "/api/v1/agent-mail/members/{member_id}/queue-inbox-check": {
-      "post": {
-        "operationId": "queue_inbox_check_api_v1_agent_mail_members__member_id__queue_inbox_check_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "member_id",
-            "required": true,
-            "schema": {
-              "title": "Member Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Queue Inbox Check",
         "tags": [
           "Agent Mail"
         ]
