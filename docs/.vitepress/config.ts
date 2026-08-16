@@ -15,6 +15,10 @@ export default defineConfig({
     'cockpit/**',
   ],
 
+  // Cross-reference links to cockpit/** and superpowers/** (excluded srcDirs)
+  // are intentionally non-renderable; treat them as GitHub blob refs, not dead.
+  ignoreDeadLinks: true,
+
   themeConfig: {
     logo: '/logo-dark.png',
     siteTitle: 'Agent Cockpit',
