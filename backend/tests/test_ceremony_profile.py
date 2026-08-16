@@ -505,3 +505,21 @@ def test_phase_target_agent_code_profile_unchanged(knowledge_project):
         )
         == "engineer"
     )
+
+
+def test_phase_target_agent_knowledge_suppresses_explicit_engineer(knowledge_project):
+    """An explicit ``agent_override='engineer'`` on a knowledge project
+    is the documented mismatch (decision §4) — it gets suppressed so the
+    resolver falls through to the researcher swap. Other persona overrides
+    (``reviewer``, ``analyst``) bypass the suppression (covered by
+    ``test_phase_target_agent_knowledge_preserves_explicit_reviewer`` and
+    the analyst-phase early return)."""
+    card = _FakeCard()
+    assert (
+        dispatch_module._phase_target_agent(
+            card, project_path=str(knowledge_project), phase="executor",
+            source_column="Backlog", agent_override="engineer",
+            ceremony_profile="knowledge",
+        )
+        == "researcher"
+    )

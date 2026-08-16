@@ -330,6 +330,13 @@ DEFAULT_SHIP_MODE = "pull-request"
 TRANSPORT_PREFIX = "transport:"
 TRANSPORTS = ("worktree", "sandcastle", "headless", "acp")
 DEFAULT_TRANSPORT = "worktree"
+# Default ceremony profile. ``cockpit-richting-decision.md`` §4 ships two
+# profiles: ``code`` (full PR/ship workflow, the pre-feature default) and
+# ``knowledge`` (no tests, no PR, lighter persona). Anything we cannot
+# resolve — unregistered project, registry DB unreachable, value missing on
+# the row — falls through to ``code`` so the fleet keeps its current
+# behaviour. Failure-modes default to the most conservative choice (more
+# ceremony, not less).
 CEREMONY_PROFILE_DEFAULT = "code"
 _CEREMONY_PROFILES = {"code", "knowledge"}
 # Per-project marker that records "auto-dispatch was force-disabled here by a
