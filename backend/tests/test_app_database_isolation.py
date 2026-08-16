@@ -139,7 +139,11 @@ async def test_app_database_tables_cover_all_models_after_eager_import():
 
     expected_core_tables = {
         "projects", "backups", "mcp_access_tokens",
-        "mail_team_members", "mail_messages", "mail_agent_sessions",
+        # mail_messages is hier op 2026-08-16 uit verwijderd: commit 97e821fc
+        # (kaart 46930d26) haalde de berichten-, mailbox- en receipt-laag van
+        # Agent Mail weg, inclusief het model. De roster-laag bleef, dus
+        # mail_team_members en mail_agent_sessions horen er nog wel te staan.
+        "mail_team_members", "mail_agent_sessions",
     }
     missing = expected_core_tables - tables
     assert not missing, f"Base.metadata is missing core tables after eager import: {missing}"
