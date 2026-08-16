@@ -2335,7 +2335,8 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       project_path: str | None = None,
                       worktree_path: str | None = None,
                       prompt_injector_caveman: str = "",
-                      prompt_injector_ponytail: str = "") -> str:
+                      prompt_injector_ponytail: str = "",
+                      ceremony_profile: str = "code") -> str:
     # A card dispatched in the executor phase (no `analyst_agent_id`) can
     # still resolve to the analyst persona via `work_type='analysis'` or
     # `card.agent='analyst'` (the "leaf analyst spike" case — see
@@ -2441,6 +2442,13 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         ship_instructions = _build_analyst_session_end_instructions()
     elif getattr(card, "agent", None) == "reviewer":
         ship_instructions = _build_reviewer_session_end_instructions()
+    elif ceremony_profile == "knowledge":
+        # Knowledge profile: same machinery, lighter recipe. The branching
+        # lives here so analysts and reviewers keep their existing shape;
+        # knowledge is the only third lane.
+        ship_instructions = _build_knowledge_ship_instructions(
+            ship_mode, project_path=project_path,
+        )
     else:
         ship_instructions = _build_ship_instructions(
             ship_mode, project_path=project_path,
@@ -2982,7 +2990,72 @@ async def _resolve_plan_for_child(session, card) -> tuple[str, str | None, str |
     return (PLAN_MISSING_ON_PARENT, None, plan_id, parent_id)
 
 
-def _build_ship_instructions(ship_mode: str, project_path: str | None = None) -> str:
+# Default ceremony profile. ``cockpit-richting-decision.md`` §4 ships two
+# profiles: ``code`` (full PR/ship workflow, the pre-feature default) and
+# ``knowledge`` (no tests, no PR, lighter persona). Anything we cannot
+# resolve — unregistered project, registry DB unreachable, value missing on
+# the row — falls through to ``code`` so the fleet keeps its current
+# behaviour. Failure-modes default to the most conservative choice (more
+# ceremony, not less).
+CEREMONY_PROFILE_DEFAULT = "code"
+_CEREMONY_PROFILES = {"code", "knowledge"}
+
+
+async def _load_ceremony_profile(project_path: str | None) -> str:
+    """Read the ``ceremony_profile`` column from the registry ``projects`` row.
+
+    Cross-database lookup: dispatch lives on the kanban DB session, but the
+    ``Project`` model sits in the registry DB (see ``app.database.Base`` vs
+    ``app.kanban.db.Base``). We open a fresh registry session for the read —
+    a single column projection, no joins — so the cost is one short async
+    query per spawn. Acceptable on a per-spawn hot path; not suitable for
+    per-tick. Returns ``CEREMONY_PROFILE_DEFAULT`` when the project is not
+    registered, when the column value is missing/empty (pre-migration row on
+    a registry that hasn't run the revision yet), or on any DB error.
+
+    Defensive: an empty/invalid value is coerced to the default rather than
+    rejecting the spawn, because rejecting would silently strand a card in
+    Doing. The default value ships in the column's ``server_default`` so a
+    well-migrated DB never returns empty.
+    """
+    if not project_path:
+        return CEREMONY_PROFILE_DEFAULT
+    try:
+        from sqlalchemy import select
+
+        from app.database import AsyncSessionLocal
+        from app.models.database import Project
+
+        async with AsyncSessionLocal() as session:
+            row = (
+                await session.execute(
+                    select(Project.ceremony_profile).where(
+                        Project.path == project_path
+                    )
+                )
+            ).scalar_one_or_none()
+        if not row:
+            return CEREMONY_PROFILE_DEFAULT
+        if row not in _CEREMONY_PROFILES:
+            # Unknown value — could be a typo from a manual PATCH, or a future
+            # profile the running code doesn't know yet. Fall back to the
+            # default; the schema layer (``CeremonyProfile`` Literal) is the
+            # guard for new writes, this guard is the safety net for legacy
+            # rows.
+            return CEREMONY_PROFILE_DEFAULT
+        return row
+    except Exception:
+        logger.warning(
+            "Could not load ceremony_profile for %s; defaulting to %r",
+            project_path,
+            CEREMONY_PROFILE_DEFAULT,
+            exc_info=True,
+        )
+        return CEREMONY_PROFILE_DEFAULT
+
+
+def _build_ship_instructions(ship_mode: str, project_path: str | None = None,
+                              ceremony_profile: str = CEREMONY_PROFILE_DEFAULT) -> str:
     """Build the standardised session-end workflow instructions.
 
     These instructions are provider-agnostic: they work the same for Claude Code,
@@ -3940,6 +4013,158 @@ def _build_session_retro_step(step_number: int = 6) -> str:
         "sweeper can see the retro ran. Keep it light — under a minute, "
         "~3–5 tool calls; don't burn the ship budget writing lengthy "
         "descriptions.\n"
+    )
+
+
+def _build_knowledge_ship_instructions(ship_mode: str,
+                                        project_path: str | None = None) -> str:
+    """Lighter session-end workflow for ``ceremony_profile == "knowledge"``.
+
+    Same machinery as ``_build_ship_instructions`` (worktree, direct merge to
+    master, deliverable attach, retro, ``move_card → Done``), but the
+    decisions on §4 of ``cockpit-richting-decision.md`` drop most of the
+    ceremony that exists only because code work needs it:
+
+    - **No FCR subagent.** A fresh-context compliance subagent is overkill
+      for a markdown deliverable — the researcher can do the same check
+      inline in three questions.
+    - **No frontend lint/build.** Knowledge work does not touch
+      ``frontend/``; the local pre-ship gate from §2 is skipped.
+    - **No new-UI affordance browser count.** Knowledge work adds docs and
+      notes, not DOM elements.
+    - **No PR mode.** The board does not expose PR for knowledge projects:
+      even when the dispatch-prompt header says ``Ship mode: pull-request``,
+      this profile forces direct merge. The opener is told once why.
+    - **Deliverable kind is ``note``** — a short title or doc-path. Code
+      work attaches ``branch`` / ``pr`` / ``commit``; knowledge work
+      attaches a human-readable pointer to the produced artefact.
+
+    The detailed bash (sync, ``git worktree add``, the carve-out handling,
+    the post-push main-checkout sync) lives in
+    ``.claude/skills/git-ship/SKILL.md`` — the prompt only points at it,
+    so this builder stays small. Mirrored by the researcher persona
+    (``researcher.md``) which is the human-readable copy; update both
+    together.
+    """
+    # ``cockpit-richting-decision.md`` §4 commits to *one* machinery: the
+    # researcher persona reads the same skill the engineer persona reads,
+    # just with a tighter filter on which steps to run. Pulling the bash
+    # inline here as well would double-maintain two ~190-line blocks
+    # (drift-val: kaart ``d9447e49``); pointing at the skill instead keeps
+    # this builder under a screen and the skill as the single source of
+    # truth.
+    skill_path = ".claude/skills/git-ship/SKILL.md"
+    effective_ship_mode = ship_mode
+    pr_forced_note = ""
+    if ship_mode == "pull-request":
+        # PR mode is not a valid choice for knowledge work — the spec is
+        # "geen PR" (no PR). Downgrade to direct merge with one explicit
+        # line in the prompt so the researcher does not re-litigate it.
+        effective_ship_mode = "direct"
+        pr_forced_note = (
+            "\n> **Note.** Your dispatch header said "
+            f"``Ship mode: {ship_mode}``, but the project carries the "
+            "knowledge ceremony profile which does not support PR mode. "
+            "Treat the effective mode as ``direct`` — merge to master in "
+            "one step, no draft PR. Section §4 of "
+            "``cockpit-richting-decision.md`` is the source for that "
+            "choice; this profile is the user-facing shape of §4.\n"
+        )
+
+    sync = (
+        "1. **Sync** — `git fetch origin` so you are up to date with the "
+        "remote.\n"
+    )
+    inline_compliance_check = (
+        "**Inline compliance-check (replaces the FCR subagent).** "
+        "Before shipping, walk through these three questions inline — the "
+        "FCR subagent is intentionally *not* part of the knowledge "
+        "profile (the cost/benefit doesn't pay back on a markdown "
+        "deliverable), and a self-check is the right size for this profile:\n"
+        "  1. **Spec coverage.** Does every requirement/bullet from the "
+        "card description land in the deliverable? If a sub-bullet is "
+        "missing, fix it before shipping — don't ship a partial.\n"
+        "  2. **Product meaning.** Can the owner of this knowledge repo "
+        "now do / see / decide something they could not before? "
+        "Document it in your ``move_card → Done`` summary (the "
+        "product-taal-conventie §5 in "
+        "``docs/cockpit/kanban-conventions.md`` already requires the "
+        "lead-with-product-meaning sentence — keep it).\n"
+        "  3. **Deliverable ref.** Is the value you pass to "
+        "``attach_deliverable(kind=\"note\", ref=…)`` a concrete pointer "
+        "the next reader can open — a doc path, a section heading, a "
+        "decision line — not \"see commit\"? The card row is the only "
+        "place this ref lives once the session ends.\n"
+        "If any answer is \"no\" or \"can't tell\": fix first, or "
+        "``report_impediment`` with the open question. Don't ship a card "
+        "you can't pass these three.\n"
+    )
+    no_frontend_checks = (
+        "2. **Frontend checks are skipped for this profile.** The "
+        "pre-ship frontend lint + build (skill §2) exists for code work "
+        "that touches ``frontend/``; knowledge work produces markdown and "
+        "docs, so the gate is intentionally absent. If your deliverable "
+        "does touch code for some reason, run those checks yourself "
+        "before shipping — the gate is skipped *by default*, not by "
+        "policy.\n"
+        "   Likewise, the new-UI affordance browser count (skill §2b) is "
+        "skipped — knowledge work adds documents and decisions, not DOM "
+        "elements.\n"
+    )
+    commit_step = (
+        "3. **Commit** — `git add -A && git commit -m \"<descriptive "
+        "summary>\"`. Keep the message focused on *what changed and why*; "
+        "the project owner reads commits, not just docs.\n"
+    )
+    ship_step = (
+        f"4. **Ship (mode = {effective_ship_mode}).** Follow `{skill_path}` "
+        f"§4{'a' if effective_ship_mode == 'direct' else 'b'} end-to-end. "
+        "The skill is provider-agnostic and mirrors the dispatch-prompt "
+        "recipe; the merge-to-master (or PR) bash lives there so we don't "
+        "duplicate ~190 lines of git plumbing here.\n"
+    )
+    deliverable_step = (
+        "5. **Attach the deliverable** — "
+        "``attach_deliverable(kind=\"note\", ref=\"<title or doc path>\")`` "
+        "with the dispatch MCP tool (or the REST fallback when MCP is "
+        "down). The note ref is the canonical handle the next reader of "
+        "this card will look for — a doc path (``docs/cockpit/foo.md``), "
+        "a section heading, or a decision line. Do **not** attach a "
+        "branch / commit / PR for knowledge work — those kinds are "
+        "reserved for the code profile.\n"
+    )
+    retro_step = (
+        "6. **Run the session-end retro** — invoke the ``session-retro`` "
+        "skill (read ``.claude/skills/session-retro/SKILL.md``; the "
+        "knowledge profile is lighter on engineering detail but the "
+        "four-pass filter and the dedupe pass still apply). Even a clean "
+        "session gets a no-op ``comment`` so the retro sweeper sees it. "
+        "Keep it under a minute, ~3–5 tool calls.\n"
+    )
+    done_step = (
+        "7. **Move the card to Done** — ``move_card(column=\"Done\", "
+        "summary=<what you delivered>)``. ``summary`` is required (the "
+        "call is rejected without it). **Product-taal** (conventie §5 in "
+        "``docs/cockpit/kanban-conventions.md``, kaart ``4358fe0a…`` + "
+        "kaart ``8b3ce64c…``): lead with one *productbetekenis*-zin "
+        "(what can the owner now see/decide that they could not before); "
+        "follow with 2–4 bullets naming the doc/notitie that carries the "
+        "deliverable; **no** process-meta in the human-facing summary "
+        "(no FCR verdict, no retro outcome, no dedupe bookkeeping — "
+        "those belong in the activity-feed). A bare \"wrote a doc\" "
+        "passes the ``summary_required`` gate but fails the "
+        "product-taal-conventie.\n"
+    )
+    return (
+        f"{pr_forced_note}"
+        f"{sync}"
+        f"{inline_compliance_check}"
+        f"{no_frontend_checks}"
+        f"{commit_step}"
+        f"{ship_step}"
+        f"{deliverable_step}"
+        f"{retro_step}"
+        f"{done_step}"
     )
 
 
@@ -6800,6 +7025,14 @@ async def _run_card(
     )
     cav_active = bool(cav_text)
     pon_active = bool(pon_text)
+    # Resolve the project's ceremony profile (cockpit-richting-decision.md §4).
+    # ``code`` keeps the full engineer recipe; ``knowledge`` swaps in the
+    # lighter recipe (no FCR subagent, no frontend checks, no PR mode,
+    # deliverable is a note). Resolved here once per spawn, default ``code``
+    # on any lookup failure so a stray DB hiccup never strands a card in
+    # Doing. The lookup is a single column projection on the registry DB —
+    # see ``_load_ceremony_profile`` for the failure-mode contract.
+    ceremony_profile = await _load_ceremony_profile(project_path)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         phase=phase,
         impediment_question=impediment_question,
@@ -6810,7 +7043,8 @@ async def _run_card(
         project_path=project_path,
         worktree_path=worktree_path,
         prompt_injector_caveman=cav_text,
-        prompt_injector_ponytail=pon_text)
+        prompt_injector_ponytail=pon_text,
+        ceremony_profile=ceremony_profile)
     if phase == "executor" and card.parent_card_id is not None:
         # Only child cards (parent_card_id set) get the PLAN CONTEXT section.
         # Legacy single-agent cards never have a parent; prepending the

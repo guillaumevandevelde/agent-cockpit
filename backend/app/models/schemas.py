@@ -56,6 +56,14 @@ class RawFileContent(BaseModel):
 # by Cockpit). Enforced as an enum at the schema boundary — invalid values 422.
 ProjectKind = Literal["meta", "product", "archived"]
 
+# Ceremony profile (cockpit-richting-decision.md §4). The dispatch hot path
+# branches on this value to pick the session-end recipe: ``code`` = full
+# PR/ship workflow (default; everything pre-feature worked like this),
+# ``knowledge`` = lighter profile — no tests, no PR, deliverable is a note
+# or document, persona is researcher.md. Enforced at the schema boundary so
+# an invalid value 422s before it ever reaches the ORM/DB layer.
+CeremonyProfile = Literal["code", "knowledge"]
+
 
 class ProjectBase(BaseModel):
     """Base project schema."""
@@ -65,6 +73,7 @@ class ProjectBase(BaseModel):
     source: str | None = None
     kind: ProjectKind = "product"
     priority: int | None = None
+    ceremony_profile: CeremonyProfile = "code"
 
 
 class ProjectCreate(ProjectBase):
@@ -80,6 +89,7 @@ class ProjectUpdate(BaseModel):
     is_active: bool | None = None
     kind: ProjectKind | None = None
     priority: int | None = None
+    ceremony_profile: CeremonyProfile | None = None
 
 
 class ProjectResponse(ProjectBase):

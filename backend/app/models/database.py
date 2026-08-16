@@ -31,6 +31,16 @@ class Project(Base):
         String, default="product", server_default="product", nullable=False
     )
     priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Ceremony profile (cockpit-richting-decision.md §4): the dispatch hot
+    # path branches on this value to pick the session-end recipe. ``code`` =
+    # full PR/ship workflow (default; everything pre-feature worked like
+    # this). ``knowledge`` = lighter profile — no tests, no PR, deliverable
+    # is a note or document, persona is researcher.md. The enum is enforced
+    # at the Pydantic layer; the column default keeps pre-existing projects
+    # on the old behaviour without a one-shot backfill.
+    ceremony_profile: Mapped[str] = mapped_column(
+        String, default="code", server_default="code", nullable=False
+    )
     last_accessed: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
