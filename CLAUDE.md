@@ -116,6 +116,7 @@ bash scripts/test_sweep_unchecked_implemented_markers.sh   # ✅-marker-sweep (k
 bash scripts/test_sweep_stale_interviews.sh            # Stale-interview-sweeper (interviews/<slug>/ vangnet; zie kaartloze-app-inceptie-decision.md §5)
 bash scripts/test_sweep_orphaned_parents_awaiting_subtasks.sh   # Vangnet voor parents die in `Awaiting Subtasks` stranden zonder kinderen (kaart 400d6a77…)
 bash scripts/test_sweep_awaiting_plan_ref_overdue.sh   # Vangnet voor kinderen die hun `plan_ref` nooit krijgen (kaart 2341a40e…)
+bash scripts/test_sweep_self_improve_effect_claims.sh  # Effectclaim-vangnet voor afgeronde zelfverbeterkaarten (cockpit-richting-decision.md §8)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
@@ -179,6 +180,9 @@ cd backend && lint-imports                     # Twee importcontracten: transpor
 
 # ✅-marker-sweeper (vangnet voor `✅ Geïmplementeerd`-regels zonder waargenomen effect — kaart `21a349bc…`; conventie: recipe-writing-conventions.md §2; advisory; --strict = exit 1; JSON op stdout)
 ./scripts/sweep_unchecked_implemented_markers.py   # Flag `✅ Geïmplementeerd`/`✅ Uitgevoerd`-markers in docs/cockpit/*.md zonder `Effect:`-zin in dezelfde alinea (venster stopt op de eerste blanco regel, max 12 regels)
+
+# Effectclaim op afgeronde zelfverbeterkaarten (cockpit-richting-decision.md §8 — advisory; --strict = exit 1; JSON op stdout)
+./scripts/sweep_self_improve_effect_claims.py       # Flag Done-kaarten met `[self-improve]`/`[problem]`-titel of -label zonder `Effect:`-zin in beschrijving of comments
 
 # Lint
 cd frontend && npm run lint      # ESLint

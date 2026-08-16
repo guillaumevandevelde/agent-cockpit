@@ -103,6 +103,9 @@ Drie ingrepen: een harde bovengrens op het aandeel dispatch-slots voor `[self-im
 
 **Een slotlimiet knijpt de instroom niet af.** Drie van de veertien skills produceren zelfverbeterkaarten: `session-retro` draait aan het einde van élke gedispatchte sessie, `flag-problem` middenin, en `session-problem-scan` erover. Dat is de pomp achter de 318 kaarten uit §2. Een bovengrens op dispatch-slots laat die kaarten alleen langer wachten. `session-retro` moet daarom voorwaardelijk worden in plaats van onvoorwaardelijk.
 
+**✅ Geïmplementeerd (kaart `9a567259…`): de drie ingrepen.** `budget_closed` in `backend/app/kanban/self_improve.py` weegt per dispatch-tick de schakelaar, het slot-aandeel (`SLOT_CAP` 25% van de bezette claims, met een vloer van één) en de wrijving (`FRICTION_THRESHOLD` 0,20 voor Impediment/Done). `dispatch_project` roept die ene functie aan in plaats van de kale schakelaar. De effectclaim is een vangnet: `scripts/sweep_self_improve_effect_claims.py` vlagt Done-kaarten met een `[self-improve]`/`[problem]`-titel of -label zonder `Effect:`-zin, en hergebruikt daarvoor de `EFFECT_PATTERNS` van de docs-sweeper.
+Effect: nog niet in productie waargenomen — de rem vuurt pas op een tick met een levende claim; wel gedekt door acht tests in `backend/tests/test_self_improve_switch.py` en zeven in `scripts/test_sweep_self_improve_effect_claims.sh`.
+
 ## 9. Buiten scope
 
 Niet besloten in dit document: welke van de negentien geërfde schermen als eerste verdwijnt, het meldingskanaal zelf, de vorm van het ceremonieprofiel, en de precieze bovengrens uit §8. Die volgen uit de ontwerpen die op dit document staan.

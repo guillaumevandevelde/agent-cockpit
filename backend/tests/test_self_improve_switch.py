@@ -338,3 +338,63 @@ async def test_dispatch_project_picks_self_improve_card_when_loop_on(monkeypatch
             f"loop-kaart hoort opgepakt te worden wanneer de loop aan staat; "
             f"spawns={spawns!r}"
         )
+
+
+# --- Budget: slot-cap + wrijvingsdrempel (kaart 9a567259…) ---------------
+
+
+def _card(title="feature", column="Backlog", claimed_by=None):
+    return KanbanCard(title=title, labels=[], column=column, claimed_by=claimed_by)
+
+
+def test_slot_cap_allows_the_first_loop_card_on_a_quiet_board():
+    """Vloer van één: een stil bord mag één loop-kaart draaien."""
+    assert self_improve.slot_share_exceeded([]) is False
+
+
+def test_slot_cap_blocks_a_second_loop_card_below_the_share():
+    """Eén loop-kaart draait al en er zijn te weinig slots voor een tweede."""
+    cards = [
+        _card("[self-improve] a", claimed_by="agent:1"),
+        _card("feature", claimed_by="agent:2"),
+    ]
+    assert self_improve.slot_share_exceeded(cards) is True
+
+
+def test_slot_cap_allows_a_second_loop_card_once_the_board_is_busy():
+    """Bij acht bezette slots past een tweede loop-kaart binnen 25%."""
+    cards = [_card("[self-improve] a", claimed_by="agent:0")]
+    cards += [_card(f"feature {i}", claimed_by=f"agent:{i}") for i in range(1, 8)]
+    assert self_improve.slot_share_exceeded(cards) is False
+
+
+def test_friction_ratio_is_none_without_done_cards():
+    assert self_improve.friction_ratio([_card(column="Backlog")]) is None
+
+
+def test_friction_ratio_counts_impediment_over_done():
+    cards = [_card(column="Impediment")] + [_card(column="Done") for _ in range(4)]
+    assert self_improve.friction_ratio(cards) == pytest.approx(0.25)
+
+
+def test_budget_closes_below_the_friction_threshold():
+    """Weinig wrijving = geen reden voor opruimwerk; loop-kaarten blijven liggen."""
+    cards = [_card(column="Done") for _ in range(20)] + [_card(column="Impediment")]
+
+    async def _check():
+        async with KanbanSessionLocal() as s:
+            return await self_improve.budget_closed(s, "git:example.com/me/quiet", cards)
+
+    assert asyncio.run(_check()) is True
+
+
+def test_budget_open_above_the_friction_threshold():
+    cards = [_card(column="Done") for _ in range(4)] + [
+        _card(column="Impediment") for _ in range(2)
+    ]
+
+    async def _check():
+        async with KanbanSessionLocal() as s:
+            return await self_improve.budget_closed(s, "git:example.com/me/busy", cards)
+
+    assert asyncio.run(_check()) is False
