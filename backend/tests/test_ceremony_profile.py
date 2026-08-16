@@ -412,3 +412,96 @@ async def test_load_ceremony_profile_defaults_on_empty_row():
             await dispatch_module._load_ceremony_profile("/some/path")
             == "code"
         )
+
+# ---- persona-swap: ceremony_profile=knowledge routes engineer fallback
+# ---- to researcher.md (cockpit-richting-decision.md §4).
+
+class _FakeCard:
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+@pytest.fixture
+def knowledge_project(tmp_path):
+    """Project layout with researcher.md + engineer.md + analyst.md + reviewer.md
+    present in .claude/agents. Used to verify the knowledge ceremony routes the
+    engineer-default fallback to researcher while leaving analyst/reviewer
+    routes alone (kaart 5fcfca7f… persona-swap blocker)."""
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    for name in ("engineer", "researcher", "analyst", "reviewer"):
+        (agents / f"{name}.md").write_text(f"# {name} persona\n")
+    return tmp_path
+
+
+def test_phase_target_agent_knowledge_swaps_engineer_to_researcher(knowledge_project):
+    """ceremony_profile='knowledge' overrides the engineer fallback to
+    researcher when both personas exist in the project — the mismatch the
+    feature was created to fix. Other personas (analyst/reviewer) keep
+    their existing precedence: knowledge is *not* a global override."""
+    card = _FakeCard()
+    assert (
+        dispatch_module._phase_target_agent(
+            card, project_path=str(knowledge_project), phase="executor",
+            source_column="Backlog", ceremony_profile="knowledge",
+        )
+        == "researcher"
+    )
+
+
+def test_phase_target_agent_knowledge_keeps_analyst_phase(knowledge_project):
+    """Knowledge projects still get an analyst when the analyst phase fires —
+    the swap only applies to the executor fallback lane."""
+    card = _FakeCard()
+    assert (
+        dispatch_module._phase_target_agent(
+            card, project_path=str(knowledge_project), phase="analyst",
+            source_column="Backlog", ceremony_profile="knowledge",
+        )
+        == "analyst"
+    )
+
+
+def test_phase_target_agent_knowledge_preserves_explicit_reviewer(knowledge_project):
+    """An explicit agent_override='reviewer' on a knowledge project still
+    resolves to reviewer — the ceremony override only re-routes the engineer
+    default, not arbitrary persona picks."""
+    card = _FakeCard()
+    assert (
+        dispatch_module._phase_target_agent(
+            card, project_path=str(knowledge_project), phase="executor",
+            source_column="Backlog", agent_override="reviewer",
+            ceremony_profile="knowledge",
+        )
+        == "reviewer"
+    )
+
+
+def test_phase_target_agent_knowledge_without_researcher_falls_back(knowledge_project):
+    """If the project doesn't carry researcher.md, knowledge projects
+    degrade to the legacy engineer routing rather than failing the spawn.
+    The blueprint ships researcher.md for new projects, but hand-created
+    projects may not have it."""
+    (knowledge_project / ".claude" / "agents" / "researcher.md").unlink()
+    card = _FakeCard()
+    assert (
+        dispatch_module._phase_target_agent(
+            card, project_path=str(knowledge_project), phase="executor",
+            source_column="Backlog", ceremony_profile="knowledge",
+        )
+        == "engineer"
+    )
+
+
+def test_phase_target_agent_code_profile_unchanged(knowledge_project):
+    """ceremony_profile='code' (default) keeps the existing engineer
+    fallback — the persona swap is opt-in via the project setting."""
+    card = _FakeCard()
+    assert (
+        dispatch_module._phase_target_agent(
+            card, project_path=str(knowledge_project), phase="executor",
+            source_column="Backlog", ceremony_profile="code",
+        )
+        == "engineer"
+    )
