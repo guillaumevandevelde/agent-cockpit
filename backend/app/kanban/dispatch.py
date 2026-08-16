@@ -67,6 +67,8 @@ from app.kanban.project_key import (
     resolve_project_path,
     safe_resolve_project_key,
 )
+from app.kanban.self_improve import is_enabled as self_improve_is_enabled
+from app.kanban.self_improve import is_self_improve_card as _is_self_improve_card
 from app.kanban.service import (
     all_card_ids,
     get_card,
@@ -6422,7 +6424,10 @@ async def _escalate_overdue_plan_ref(
 
 
 def _next_card(
-    cards: Iterable[KanbanCard], live_ids: set[str] | None = None,
+    cards: Iterable[KanbanCard],
+    live_ids: set[str] | None = None,
+    *,
+    skip_self_improve: bool = False,
 ) -> KanbanCard | None:
     """Pick the next card to dispatch, or None.
 
@@ -6430,6 +6435,14 @@ def _next_card(
     card whose parent was deleted is recognised as permanently orphaned rather
     than treated as merely waiting for a plan. Omitting it only costs
     resolution, never correctness.
+
+    ``skip_self_improve`` is the consumptiekant of the self-improve toggle
+    (``app.kanban.self_improve``). When True, cards whose title or labels match
+    ``is_self_improve_card`` are excluded from every tier — the dispatch-prompt
+    counterpart (``DISABLED_PROMPT_BLOCK``) already stops new production, so
+    the flip side is to stop consuming the existing backlog until the operator
+    flips the switch back on. Default False preserves today's behaviour for
+    every caller that doesn't know about the toggle.
 
     **Tier order: in-flight work before new work.** Orphans (crashed in-flight)
     come first, then ``_DISPATCH_COLUMNS`` — "To Resume" (parked in-flight),
@@ -6463,6 +6476,8 @@ def _next_card(
 
     def selectable(c) -> bool:
         if c.claimed_by:
+            return False
+        if skip_self_improve and _is_self_improve_card(c):
             return False
         hold = card_hold(c, cards_by_id, live_ids)
         return hold is None or hold.reason not in _SELECTION_HOLDS
@@ -8389,11 +8404,19 @@ async def dispatch_project(
         session, project_key=project_key, cards=cards,
     )
 
+    # Consumptiekant van de zelfverbeteringsschakelaar (kaart ff9877ca…). De
+    # productiekant leeft in `app.kanban.self_improve.DISABLED_PROMPT_BLOCK`;
+    # hier lezen we dezelfde meta-sleutel één keer per tick en geven het
+    # door aan `_next_card` zodat bestaande `[self-improve]`/`[problem]`-
+    # kaarten blijven liggen zolang de operator de loop uit heeft staan.
+    # Standaard aan = zelfde gedrag als voor deze kaart.
+    loop_off = not await self_improve_is_enabled(session, project_key)
+
     # Fill every dispatchable card in this tick. The per-column cap (when set)
     # is the only structural limit at this level; the hardware/OS-level cap
     # checked inside the transport enforces the actual memory bound.
     while True:
-        card = _next_card(cards, board_ids)
+        card = _next_card(cards, board_ids, skip_self_improve=loop_off)
         if card is None:
             break
 
@@ -8473,6 +8496,15 @@ async def dispatch_project(
         # mid-tick we still want a second line of defence here. The actual gate
         # status is read fresh from the working-set copy in `cards_by_id` above.
         if _is_gated(card):
+            cards = [c for c in cards if c.id != card.id]
+            continue
+
+        # Defence-in-depth for the self-improve toggle: `_next_card` already
+        # filters these out when ``loop_off`` is True, but a card that flips
+        # from "regular feature" to `[problem]` between the read and this
+        # check would otherwise slip through. Mirrors the ``_is_gated`` branch
+        # directly above (kaart ff9877ca…).
+        if loop_off and _is_self_improve_card(card):
             cards = [c for c in cards if c.id != card.id]
             continue
 

@@ -99,6 +99,8 @@ Drie ingrepen: een harde bovengrens op het aandeel dispatch-slots voor `[self-im
 
 **Nog niet afgedwongen: de consumptiekant.** De dispatcher zou bestaande `[self-improve]`-kaarten moeten overslaan zolang de schakelaar uit staat, maar die wijziging hoort in `dispatch.py` — en dat bestand staat op 10.110 regels en valt onder de omvangsratel. Die poort weigert terecht. De volgende stap is het pane-resume-cluster uit `dispatch.py` lichten; pas daarna past de consumptiekant erin. Zie [`architectuur.md`](./architectuur.md) "Wat hier nog moet gebeuren".
 
+**✅ Geïmplementeerd (kaart `ff9877ca…`): de consumptiekant.** `_next_card` filtert `[self-improve]`/`[problem]`-kaarten weg zodra de schakelaar uit staat; `dispatch_project` leest dezelfde meta-sleutel één keer per tick en heeft een per-iteratie defence-in-depth-check. Standaard aan = huidige gedrag voor bestaande callers; vier tests dekken beide richtingen (`test_self_improve_switch.py`).
+
 **Een slotlimiet knijpt de instroom niet af.** Drie van de veertien skills produceren zelfverbeterkaarten: `session-retro` draait aan het einde van élke gedispatchte sessie, `flag-problem` middenin, en `session-problem-scan` erover. Dat is de pomp achter de 318 kaarten uit §2. Een bovengrens op dispatch-slots laat die kaarten alleen langer wachten. `session-retro` moet daarom voorwaardelijk worden in plaats van onvoorwaardelijk.
 
 ## 9. Buiten scope
