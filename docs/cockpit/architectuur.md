@@ -65,9 +65,13 @@ De scheduler draait op APScheduler's in-memory jobstore, dus elke job sterft met
 
 `scripts/check-add-job-callers.sh` bewaakt de vorm: `_sched.add_job` mag alleen in `scheduler.py` staan, plus twee geratelde plekken (`kanban/dispatch.py`, `scheduling/auto_resume.py`) die alleen korter mag worden.
 
-**Nog niet duurzaam:** `auto_resume_service.set_enabled` schrijft alleen naar een geheugen-dict, en `auto_resume.py` raakt geen database. Zet je auto-resume aan via `POST /api/v1/session-hooks/...`, dan is dat na een herstart stil weer uit. Dat is een echte bug en vraagt een eigen tabel of kolom; hij staat hier opgeschreven in plaats van vergeten.
+**Opgelost op 2026-08-16.** `auto_resume_service.set_enabled` schreef alleen naar een geheugen-dict, dus auto-resume stond na elke herstart stil weer uit. Er is nu een `auto_resume_configs`-tabel; de route schrijft door en `reconciler.hydrate_auto_resume` laadt de rijen bij het opstarten terug. De dicts blijven bestaan als cache, en wat deze draai al is gezet wint van de rij.
+
+**Wel opgevallen, niet opgelost:** de route is `/auto-resume/{cwd:path}`, en zo'n padparameter levert het pad *zonder* leidende slash. De sleutel die de API vastlegt (`home/me/project`) is dus niet dezelfde string als de `cwd` die de session-hook doorgeeft (`/home/me/project`). Lezen en schrijven via de API zijn onderling consistent, dus de instelling werkt vanuit de UI — maar de hook-kant kijkt mogelijk naar een andere sleutel. Dat vraagt een meting op een echte hook-payload voordat er iets aan verandert.
 
 ## Wat hier nog moet gebeuren
+
+**Het pane-resume-cluster uit `dispatch.py` lichten.** Dat is nu de eerstvolgende blokkade, niet een netheidswens. `dispatch.py` staat op 10.110 regels en mag niet groeien, dus de consumptiekant van de zelfverbeter-schakelaar past er niet meer in. De extractie is niet triviaal: `tests/test_pane_resume.py` patcht op twaalf plekken `dispatch.safe_resolve_project_key`, en die patches bereiken de verplaatste code niet meer — precies de no-op-patch-val uit `test-doubles-convention.md`. Elke patch moet dus mee verhuizen, met een assertie dat de dubbel ook echt vuurde.
 
 `headless_runner.py` en `acp_transport.py` zijn feitelijk mechanisme dat in de domeinmap woont. Ze verplaatsen is opruimwerk en gebeurt bij gelegenheid, volgens de snoeiregels uit [`cockpit-richting-decision.md`](./cockpit-richting-decision.md) §6 — niet in één grote beweging.
 

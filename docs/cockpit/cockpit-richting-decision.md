@@ -95,6 +95,10 @@ De loop blijft bestaan maar wordt begrensd en op het opruimwerk uit §6 gericht.
 
 Drie ingrepen: een harde bovengrens op het aandeel dispatch-slots voor `[self-improve]`-kaarten; de verhouding Impediment/Done als aanjager in plaats van de klok; en een effectclaim per afgeronde zelfverbeterkaart, in de vorm die `sweep_unchecked_implemented_markers.py` al voor documenten afdwingt.
 
+**Gebouwd op 2026-08-15: een aan/uit-schakelaar per bord.** `self_improve:<project_key>` in `KanbanMeta`, standaard aan, om te zetten via `GET`/`POST /api/v1/kanban/self-improve`. **Effect:** de drie producerende skills — `session-retro`, `flag-problem`, `session-problem-scan` — dragen nu een stap 0 die de schakelaar leest en direct stopt als de loop uit staat. Waarnemingen gaan dan naar de afsluitende samenvatting op de kaart in plaats van naar een nieuwe kaart, zodat ze niet verdwijnen maar wel bij een mens landen. Fail-open: is het endpoint onbereikbaar, dan draait alles zoals voorheen.
+
+**Nog niet afgedwongen: de consumptiekant.** De dispatcher zou bestaande `[self-improve]`-kaarten moeten overslaan zolang de schakelaar uit staat, maar die wijziging hoort in `dispatch.py` — en dat bestand staat op 10.110 regels en valt onder de omvangsratel. Die poort weigert terecht. De volgende stap is het pane-resume-cluster uit `dispatch.py` lichten; pas daarna past de consumptiekant erin. Zie [`architectuur.md`](./architectuur.md) "Wat hier nog moet gebeuren".
+
 **Een slotlimiet knijpt de instroom niet af.** Drie van de veertien skills produceren zelfverbeterkaarten: `session-retro` draait aan het einde van élke gedispatchte sessie, `flag-problem` middenin, en `session-problem-scan` erover. Dat is de pomp achter de 318 kaarten uit §2. Een bovengrens op dispatch-slots laat die kaarten alleen langer wachten. `session-retro` moet daarom voorwaardelijk worden in plaats van onvoorwaardelijk.
 
 ## 9. Buiten scope

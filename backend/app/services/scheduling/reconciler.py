@@ -89,3 +89,19 @@ async def reinstall_pending_pane_resumes() -> int:
     if installed:
         logger.info("reconciler re-installed %d pane resume(s) after restart", installed)
     return installed
+
+
+async def hydrate_auto_resume() -> int:
+    """Laad de opgeslagen auto-resume-instellingen terug in het geheugen.
+
+    Zonder dit stond auto-resume na elke herstart weer uit voor iedereen die
+    hem had aangezet, zonder enig signaal.
+    """
+    from app.services.scheduling import auto_resume_store
+    from app.services.scheduling.auto_resume import auto_resume_service
+
+    rows = await auto_resume_store.load_all()
+    loaded = auto_resume_service.hydrate(rows)
+    if loaded:
+        logger.info("reconciler laadde %d auto-resume-instelling(en) terug", loaded)
+    return loaded

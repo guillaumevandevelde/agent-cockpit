@@ -84,7 +84,7 @@ Niet alle geheugen is een gebrek. Drie zaken blijven expliciet in het geheugen:
 Verlies betekent hier dat de fabriek stil een belofte vergeet:
 
 - ~~`pending_queue._queue` — kaarten die op spawn wachten.~~ **Bij de uitvoering weerlegd (2026-08-15):** `enqueue` claimt de kaart niet en verplaatst hem niet, dus die blijft onopgeëist in Todo staan en de dispatch-tick vindt hem elke tien seconden opnieuw. De wachtrij is zelfherstellend; een herstart kost hooguit een retry-vertraging. Duurzaam maken zou werk zijn zonder opbrengst.
-- `auto_resume._enabled` en `_messages` — configuratie die de gebruiker via de API zet. **Nog open:** `set_enabled` schrijft alleen naar een geheugen-dict, dus auto-resume staat na een herstart stil weer uit. Vraagt een eigen kolom of tabel.
+- `auto_resume._enabled` en `_messages` — configuratie die de gebruiker via de API zet. **Gebouwd 2026-08-16:** tabel `auto_resume_configs`, de route schrijft door, en `reconciler.hydrate_auto_resume` laadt bij het opstarten terug. **Effect:** auto-resume aanzetten blijft aan staan na een herstart, waar dat eerder stil verviel.
 - De pane-resume-belofte. Die heeft zijn rij al — `pane_resume_pending` in de kaart-metadata — maar niets bouwde hem terug. **Gebouwd 2026-08-15:** `services/scheduling/reconciler.py`, plus `pane_resume_cwd` en `pane_resume_message` in dezelfde rij, want zonder die twee is de rij niet genoeg om de job te herbouwen.
 - De eenmalige jobs die buiten `scheduler.py` om worden gepland. Op moment van schrijven zijn dat twee plekken, `dispatch.py:5807` en `auto_resume.py:338`; zoek ze bij twijfel opnieuw op met een grep naar `_sched.add_job`.
 

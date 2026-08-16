@@ -36,6 +36,7 @@ from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
 from .secrets import router as secrets_router
 from .security import router as security_router
+from .self_improve import router as self_improve_router
 from .session_hooks.router import router as session_hooks_router
 from .sessions import router as sessions_router
 from .status import router as status_router
@@ -92,6 +93,7 @@ router.include_router(session_hooks_router)
 router.include_router(webhooks_router)
 router.include_router(recurring_triggers_router)
 router.include_router(security_router)
+router.include_router(self_improve_router)
 router.include_router(kanban_router)
 router.include_router(run_activity_router)
 router.include_router(app_runs_router)

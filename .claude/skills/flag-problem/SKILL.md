@@ -5,6 +5,26 @@ description: Use when you notice a problem during your own session — a bug, co
 
 # flag-problem
 
+## Stap 0 — staat de zelfverbeteringsloop aan?
+
+**Doe dit vóór alles.** Het bord kan de loop uitgezet hebben, en dan hoort deze
+skill niets te produceren:
+
+```bash
+curl -s "http://localhost:8000/api/v1/kanban/self-improve?project_key=<PROJECT_KEY>"
+```
+
+Antwoordt dat met `"enabled": false`, stop dan direct. File geen kaart, plaats
+geen comment. Noem je waarneming in je afsluitende samenvatting op de host-kaart
+— daar leest een mens het, en die beslist of er een kaart van komt.
+
+Waarom deze poort bestaat: drie skills produceerden 318 van de 855 kaarten in
+zeven weken, en een limiet op dispatch-slots knijpt alleen de consumptie af, niet
+de instroom. Zie `docs/cockpit/cockpit-richting-decision.md` §8. Is het endpoint
+onbereikbaar (backend uit), ga dan gewoon door — fail-open.
+
+---
+
 You are mid-task and you notice something broken that isn't what you were asked
 to fix. Examples: a stale doc, a tool that lied about its own defaults, an
 inconsistent API, a footgun that cost you 10 minutes to work around.

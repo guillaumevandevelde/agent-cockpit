@@ -93,6 +93,21 @@ class AutoResumeService:
         self._enabled: dict[str, bool] = {}   # cwd -> enabled
         self._messages: dict[str, str] = {}   # cwd -> per-cwd message override
 
+    def hydrate(self, rows) -> int:
+        """Vul de cache uit opgeslagen rijen. Aangeroepen bij het opstarten.
+
+        Overschrijft niets wat al in geheugen staat: een instelling die deze
+        draai al is gezet is verser dan de rij waaruit we laden.
+        """
+        loaded = 0
+        for cwd, enabled, message in rows:
+            if cwd not in self._enabled:
+                self._enabled[cwd] = enabled
+                loaded += 1
+            if message and cwd not in self._messages:
+                self._messages[cwd] = message
+        return loaded
+
     def is_enabled(self, cwd: str) -> bool:
         return self._enabled.get(cwd, False)
 
