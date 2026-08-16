@@ -67,7 +67,7 @@ from app.kanban.project_key import (
     resolve_project_path,
     safe_resolve_project_key,
 )
-from app.kanban.self_improve import is_enabled as self_improve_is_enabled
+from app.kanban.self_improve import budget_closed as self_improve_budget_closed
 from app.kanban.self_improve import is_self_improve_card as _is_self_improve_card
 from app.kanban.service import (
     all_card_ids,
@@ -8404,13 +8404,12 @@ async def dispatch_project(
         session, project_key=project_key, cards=cards,
     )
 
-    # Consumptiekant van de zelfverbeteringsschakelaar (kaart ff9877ca…). De
-    # productiekant leeft in `app.kanban.self_improve.DISABLED_PROMPT_BLOCK`;
-    # hier lezen we dezelfde meta-sleutel één keer per tick en geven het
-    # door aan `_next_card` zodat bestaande `[self-improve]`/`[problem]`-
-    # kaarten blijven liggen zolang de operator de loop uit heeft staan.
-    # Standaard aan = zelfde gedrag als voor deze kaart.
-    loop_off = not await self_improve_is_enabled(session, project_key)
+    # Consumptiekant van het zelfverbeteringsbudget (kaart ff9877ca…, begrensd
+    # in kaart 9a567259…). `budget_closed` weegt drie dingen: de aan/uit-
+    # schakelaar, het slot-aandeel (max 25% van de bezette claims) en de
+    # verhouding Impediment/Done als aanjager. Sluit het budget, dan blijven
+    # bestaande `[self-improve]`/`[problem]`-kaarten liggen tot de volgende tick.
+    loop_off = await self_improve_budget_closed(session, project_key, cards)
 
     # Fill every dispatchable card in this tick. The per-column cap (when set)
     # is the only structural limit at this level; the hardware/OS-level cap

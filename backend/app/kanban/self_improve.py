@@ -20,6 +20,8 @@ erover. Deze schakelaar raakt daarom allebei:
 Standaard staat de loop **aan**: een bord zonder rij gedraagt zich als vandaag.
 Uitzetten is een bewuste handeling, en aanzetten ook.
 """
+from collections.abc import Iterable
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +34,26 @@ META_PREFIX = "self_improve:"
 # titelvorm en maar 27 het label.
 _TITLE_MARKERS = ("[self-improve]", "[problem]")
 _LABEL_MARKERS = ("self-improve", "problem")
+
+
+# Budget bovenop de schakelaar (`cockpit-richting-decision.md` §8). De
+# schakelaar is de noodrem; dit is de normale werking.
+#
+# `SLOT_CAP` — maximaal aandeel van de bezette dispatch-slots dat naar
+# loop-kaarten mag gaan. Met een vloer van één: op een bord met weinig
+# gelijktijdige sessies zou een strikt aandeel de loop volledig doden, en
+# dat is de schakelaar zijn taak, niet die van het budget.
+#
+# `FRICTION_THRESHOLD` — de verhouding Impediment/Done als aanjager in
+# plaats van de klok. Boven de drempel is er wrijving om op te ruimen en
+# mag de loop draaien; eronder loopt het bord soepel en blijven
+# loop-kaarten liggen. De meting van 2026-08-15 zag 0,09-0,14 in de rustige
+# weken en 0,29-0,47 in de wrijvingsweken; 0,20 ligt daartussen.
+SLOT_CAP = 0.25
+FRICTION_THRESHOLD = 0.20
+
+_IMPEDIMENT_COLUMN = "Impediment"
+_DONE_COLUMN = "Done"
 
 
 def _meta_key(project_key: str) -> str:
@@ -86,6 +108,54 @@ def is_self_improve_card(card: KanbanCard) -> bool:
     if isinstance(labels, str):
         labels = [labels]
     return any(str(label).lower() in _LABEL_MARKERS for label in labels)
+
+
+def slot_share_exceeded(
+    cards: Iterable[KanbanCard], cap: float = SLOT_CAP,
+) -> bool:
+    """Of nog één loop-kaart erbij het slot-aandeel over ``cap`` tilt.
+
+    Slot = een bezette claim, want dat is wat een gelijktijdige sessie
+    kost. De vloer is één: zolang er geen loop-kaart draait mag er altijd
+    één bij, ook op een stil bord. Daarboven geldt het aandeel, dus bij
+    25% pas een tweede loop-kaart vanaf acht bezette slots.
+    """
+    claimed = [c for c in cards if c.claimed_by]
+    loop_claimed = sum(1 for c in claimed if is_self_improve_card(c))
+    return loop_claimed >= max(1, int(cap * (len(claimed) + 1)))
+
+
+def friction_ratio(cards: Iterable[KanbanCard]) -> float | None:
+    """Verhouding Impediment/Done op dit bord, of ``None`` zonder Done-kaarten.
+
+    ``None`` betekent onmeetbaar en telt als "geen reden om te remmen" —
+    een vers bord of een bord vlak na *Clear Done* hoort niet stil te
+    vallen op een deling door nul.
+    """
+    cards = list(cards)
+    done = sum(1 for c in cards if c.column == _DONE_COLUMN)
+    if not done:
+        return None
+    return sum(1 for c in cards if c.column == _IMPEDIMENT_COLUMN) / done
+
+
+async def budget_closed(
+    session: AsyncSession, project_key: str, cards: Iterable[KanbanCard],
+) -> bool:
+    """Of loop-kaarten deze tick moeten blijven liggen.
+
+    Drie redenen, in volgorde: de schakelaar staat uit, het slot-aandeel
+    is op, of het bord heeft te weinig wrijving om opruimwerk te
+    rechtvaardigen. Vervangt de kale schakelaar-check aan de
+    consumptiekant in ``dispatch.dispatch_project``.
+    """
+    cards = list(cards)
+    if not await is_enabled(session, project_key):
+        return True
+    if slot_share_exceeded(cards):
+        return True
+    ratio = friction_ratio(cards)
+    return ratio is not None and ratio < FRICTION_THRESHOLD
 
 
 # De regel die in de dispatch-prompt landt zodra de loop uit staat. Expliciet
