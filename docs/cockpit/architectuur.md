@@ -47,13 +47,18 @@ Dit draait als **ratel**. De uitzonderingslijst staat in `pyproject.toml` en mag
 
 De laatste twee importeren `subprocess` binnen een functie in plaats van op modulehoogte. Een grep op regelbegin ziet die niet; import-linter wel.
 
-### 3. Een bestand boven 800 regels mag niet groeien
+### 3. SOLID, niet een harde regel op regels
 
-Geen importregel had `dispatch.py` op 10.110 regels voorkomen — alle imports daarin zijn keurig. Wat ontbrak was een grens op **groei**. Elke afzonderlijke toevoeging was verdedigbaar; niemand bewaakte de som.
+De oorspronkelijke versie van deze sectie luidde: "een bestand boven 800 regels mag niet groeien". Die regel is **een richtlijn**, niet de wet — de wet is SOLID. Een bestand van 900 regels met één duidelijke verantwoordelijkheid is gezonder dan drie bestanden van 300 regels die elkaar via drie lagen modules aanroepen om hetzelfde te doen.
 
-`scripts/check-file-size-ratchet.sh` legt de omvang van elk bestand boven de drempel vast in `.file-size-baseline`. Krimpen mag altijd en schuift de baseline mee omlaag. Groeien mag nooit, ook niet via `--update`. Zakt een bestand onder de drempel, dan valt het uit de baseline en is het weer vrij.
+Wat we wel afdwingen, in volgorde van zwaarte:
 
-Bij invoering: 21 bewaakte bestanden. Bijkomend effect: een kaart die `dispatch.py` aanraakt moet er iets uithalen om er iets in te mogen zetten.
+1. **Single Responsibility** — elk module heeft één reden om te veranderen. De eerste vraag bij een refactor is niet "wordt 't te lang?" maar "doet deze module dingen die we ook los kunnen benoemen?". `dispatch.py` deed er zes: prompt-constructie, transport-factory, sessie-liveness, persona-resolutie, dispatch-loop, retry-queue. Het eerste dat los moest (prompt-constructie) staat nu in `backend/app/kanban/ship_prompt.py`. Verder uit elkaar trekken volgt bij gelegenheid.
+2. **Geen ongecontroleerde groei** — `scripts/check-file-size-ratchet.sh` legt de omvang van elk bestand boven de drempel (default 800) vast in `.file-size-baseline`. Krimpen mag altijd en schuift de baseline mee omlaag. Groeien mag nooit, ook niet via `--update`. Zakt een bestand onder de drempel, dan valt het uit de baseline en is het weer vrij. Bij invoering: 21 bewaakte bestanden. Het script is een bewaker tegen *stille accumulatie* — niet de maatstaf voor "mag dit bestaan".
+3. **Open/Closed** — uitbreiding via nieuwe modules, niet via het opzwellen van bestaande. Een kaart die een nieuwe provider-familie toevoegt schrijft een nieuwe module, niet een nieuwe `if`-tak in `dispatch.py`.
+4. **Cyclische imports** — verboden. De extractie naar `ship_prompt.py` loste dit op voor de twee helpers die de prompt-bouwer raken (`_effective_resume_cli_id`, `_claimant_session`): de import gebeurt lazy binnen de aanroepende functie, niet op module-niveau.
+
+De drempel en de baseline blijven, maar ze zijn voortaan een **gemak**, niet de opperste regel. Een bestand dat SOLID is maar de drempel rakelt, staat niet per se fout — de eerstvolgende logische extractie verkleint 'm vanzelf.
 
 ### 4. Geen belofte zonder rij
 
