@@ -168,3 +168,54 @@ def test_prompt_requires_external_credential_preflight_guidance():
     assert "minimax_api_key" in prompt_lower
     assert "get /api/v1/secrets/?project_key=" in prompt_lower
     assert "namen" in prompt_lower and "waarden" in prompt_lower
+
+
+# ---- Leaf-mode `kind="note"` for docs deliverables (kanban card 692d3522) ----
+# An analyst-leaf-design-deliverable whose artefact is a `docs/cockpit/*.md`
+# lands on master as a doc, not as a code branch. ``attach_deliverable(kind="branch", …)``
+# is the wrong deliverable shape for that artefact — the branch-ref is meaningless
+# once the doc is merged, and a future reader of the card has no useful
+# pointer back to the artefact. The leaf-mode werkwijze must prescribe
+# ``attach_deliverable(kind="note", ref=<doc-path>)`` for the docs branch
+# so the next reader can open the doc directly from the card row.
+
+
+def test_prompt_leaf_mode_uses_kind_note_for_docs_deliverable():
+    """Leaf-mode werkwijze must point analyst-leaf-ships whose artefact is a
+    ``docs/cockpit/*.md`` doc at ``kind="note"`` with the doc-path as ref.
+
+    Pins the AC from kanban card ``692d3522432b4b0c855b933acc6bffc0``:
+    analyst-leaf-decisions with a docs deliverable must use ``kind="note"``
+    instead of the previous blanket ``attach de branch als deliverable``
+    (which was wrong for docs artefacts — the branch-ref is meaningless
+    once the doc is merged to master, leaving the card row pointing at a
+    vanished ref). The instruction must be in the leaf-mode werkwijze
+    specifically, so a fresh session does not have to infer it from the
+    generic ship-recipe (which is for code work).
+    """
+    # Find the leaf-mode werkwijze block by its section header, so we
+    # don't accidentally pick up a `kind="note"` mention elsewhere in
+    # the prompt (e.g., a multi-agent decomposition example).
+    import re
+    leaf_section_match = re.search(
+        r"Werkwijze \(modus 2[^)]*\):(.*?)(?=\n## |\n### |\Z)",
+        ANALYST_PROMPT, re.DOTALL,
+    )
+    assert leaf_section_match, (
+        "ANALYST_PROMPT must contain a 'Werkwijze (modus 2 …)' section "
+        "header so the leaf-mode doc-deliverable instruction can anchor "
+        "to it."
+    )
+    leaf_section = leaf_section_match.group(1).lower()
+    assert "docs/cockpit" in leaf_section, (
+        "Leaf-mode werkwijze must name `docs/cockpit` as the doc-artefact "
+        "shape — without that anchor the `kind=\"note\"` hint has no "
+        "scope. Section text:\n" + leaf_section_match.group(1)
+    )
+    assert 'kind="note"' in leaf_section or "kind='note'" in leaf_section, (
+        "Leaf-mode werkwijze must prescribe `kind=\"note\"` for docs "
+        "deliverables — the previous `attach de branch als deliverable` "
+        "left the card row pointing at a vanished ref once the branch "
+        "was auto-cleaned (kanban card 692d3522432b4b0c855b933acc6bffc0). "
+        "Section text:\n" + leaf_section_match.group(1)
+    )

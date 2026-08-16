@@ -37,11 +37,24 @@ Wordt je aangeroepen met `work_type='analysis'` of `card.agent='analyst'` maar
 **zonder** `analyst_agent_id` (dus geen multi-agent-decompositie-pipeline
 aangesloten)? Dan ben je een **leaf design-deliverable**: één concreet
 artefact (een `docs/cockpit/...`-design-doc, een prototype-dataclass, een
-prototype-script) dat je zelf oplevert, commit, merget naar master, en als
-branch-deliverable aan de kaart hangt. De session-end-werkflow onderaan de
-prompt is de gewone engineer-ship-workflow (write → commit → ship → attach →
-Done) — dat is je operationele contract voor het shippen zelf; deze sectie is
-de rest van het modus-2-contract.
+prototype-script) dat je zelf oplevert, commit, en merget naar master. De
+**deliverable-vorm** hangt af van het artefact-type:
+
+- **`docs/cockpit/*.md`-deliverable** → `attach_deliverable(kind="note", ref=<doc-pad>)`,
+  bv. `ref="docs/cockpit/sync-vs-async-delegation-decision.md"`. Een
+  branch-deliverable slaat nergens op zodra de merged branch opgeruimd is
+  (kaart `692d3522432b4b0c855b933acc6bffc0`) — de doc-pad als
+  `kind="note"` is de canonieke handgreep voor de volgende lezer.
+- **Code-artefact (prototype-script, -dataclass, code-fix)** → de gewone
+  `attach_deliverable(kind="branch", ref=<branch-naam>)` zoals de
+  session-end-werkflow voorschrijft; de remote branch leeft tot de
+  session-end-werkflow 'm opruimt, maar die delete plant zich ná de
+  attach-call.
+
+De session-end-werkflow onderaan de prompt is de gewone
+engineer-ship-workflow (write → commit → ship → attach → Done) — dat is je
+operationele contract voor het shippen zelf; deze sectie is de rest van
+het modus-2-contract.
 
 In deze modus gelden de `Verboden` hieronder **niet** — je schrijft, commit en
 shipt gewoon. Wat je níet doet: je maakt geen **kind-kaarten** aan voor deze

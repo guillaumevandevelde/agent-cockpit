@@ -6747,14 +6747,19 @@ class TestBuildShipInstructionsSessionRetro:
         reproduced during the FCR step wiring of `_build_ship_instructions`
         — see [self-improve] card fff81b84…).
         """
-        # Anchors per mode — the step numbers differ between direct (5/6/7)
+        # Anchors per mode — the step numbers differ between direct (5/6/7/8)
         # and pull-request (6/7/8) per the shared numbering contract verified
         # by ``test_session_retro_step_uses_consistent_step_numbering``.
+        # Direct has an extra step 6 (clean-up the just-merged remote branch)
+        # added by kanban card ``692d3522432b…`` so the branch is alive while
+        # ``attach_deliverable`` lands — see also
+        # ``test_branch_delete_runs_after_attach_deliverable`` in
+        # ``test_ship_recipe_drift.py``.
         step_anchors = {
             "direct": (
                 "5. **Attach the deliverable**",
-                "6. **Run the session-end retro**",
-                "7. **Move the card to Done**",
+                "7. **Run the session-end retro**",
+                "8. **Move the card to Done**",
             ),
             "pull-request": (
                 "6. **Attach the deliverable**",
@@ -6787,14 +6792,22 @@ class TestBuildShipInstructionsSessionRetro:
             )
 
     def test_session_retro_step_uses_consistent_step_numbering(self):
-        """The retro step is renumbered in each mode to fit between attach (5/6)
-        and move (7/8). Regression guard: if the step number drifts, the agent
-        loses its place."""
-        # direct: attach=5, retro=6, move=7
+        """The retro step is renumbered in each mode to fit between attach and
+        move. Regression guard: if the step number drifts, the agent loses
+        its place.
+
+        Direct mode picked up an extra step (kanban card ``692d3522432b…``):
+        step 6 is the remote-branch clean-up that runs after
+        ``attach_deliverable`` so the branch is alive while the MCP call
+        lands. So direct is now attach=5, retro=7, move=8; pull-request
+        stays at attach=6, retro=7, move=8 because ``delete_branch_on_merge``
+        handles the branch on the GitHub side.
+        """
+        # direct: attach=5, retro=7, move=8
         direct = dispatch._build_ship_instructions("direct")
         assert "5. **Attach the deliverable**" in direct
-        assert "6. **Run the session-end retro**" in direct
-        assert "7. **Move the card to Done**" in direct
+        assert "7. **Run the session-end retro**" in direct
+        assert "8. **Move the card to Done**" in direct
         # pull-request: attach=6, retro=7, move=8
         pr = dispatch._build_ship_instructions("pull-request")
         assert "6. **Attach the deliverable**" in pr

@@ -927,116 +927,20 @@ def test_carve_out_substring_in_recovery_path(source_name: str) -> None:
 # path would strand the work — the PR route needs `origin/$BRANCH` to exist.
 # So the delete must sit inside the `if <push>; then` success branch, not
 # unconditionally after a bare push. (kanban card 3027671c…)
+#
+# NOTE — kanban card ``692d3522432b…`` restructured this: the delete is no
+# longer inline in the merge bash-script (it raced with the
+# ``attach_deliverable`` MCP call and made the attach land on a ref that
+# was already gone). The delete now lives in its own follow-up step AFTER
+# ``attach_deliverable``, gated by an ``if git ls-remote …`` pre-check.
+# The push-success invariant still holds structurally — the cleanup step
+# only runs after a successful bash-script exit (the agent reads the
+# stderr WARN on push failure and skips step 6 to report_impediment
+# instead), but the literal ``if-push-then … fi`` no longer wraps the
+# delete. ``test_branch_delete_runs_after_attach_deliverable`` pins the
+# new positional order; the old "delete inside if-push-then" helper is
+# removed.
 BRANCH_DELETE = 'git push origin --delete "$BRANCH"'
-PUSH_CONDITIONAL = 'if git -C "$WT" push origin HEAD:master; then'
-
-
-def _branch_delete_is_guarded_by_push_success(source_text: str) -> tuple[bool, str]:
-    """Return ``(ok, reason)``: whether the remote-branch delete runs only on
-    a successful push to master.
-
-    Checks, in order:
-
-    1. Both the push and the delete are present.
-    2. The push-to-master is used as an ``if`` *condition* (``PUSH_CONDITIONAL``)
-       rather than a bare statement — a bare ``git push … HEAD:master`` followed
-       by an unconditional delete would nuke ``origin/$BRANCH`` even when the
-       push was rejected.
-    3. The delete sits between that condition and the ``else``/``fi`` that
-       closes it at the same indent — i.e. in the *success* branch, not the
-       rejection branch and not after the block.
-
-    Positional, like ``_carve_out_is_in_recovery_path``: the substring
-    invariant in ``CORE_RECIPE_INVARIANTS`` pins *that* the delete exists,
-    this pins *when it fires*.
-    """
-    push_idx = source_text.find(PUSH_HANDLER)
-    delete_idx = source_text.find(BRANCH_DELETE)
-    if push_idx == -1 or delete_idx == -1:
-        return False, (
-            f"missing one of: push_idx={push_idx}, delete_idx={delete_idx} "
-            f"(expected {PUSH_HANDLER!r} and {BRANCH_DELETE!r})"
-        )
-    if delete_idx < push_idx:
-        return False, (
-            f"branch delete ({delete_idx}) appears BEFORE the push to master "
-            f"({push_idx}) — the branch would be deleted while the merge is "
-            f"still unpushed"
-        )
-    cond_idx = source_text.find(PUSH_CONDITIONAL)
-    if cond_idx == -1:
-        return False, (
-            f"push-to-master is not used as an if-condition "
-            f"({PUSH_CONDITIONAL!r} not found) — an unconditional delete after "
-            f"a bare push would also fire when the push is REJECTED, deleting "
-            f"the branch the pull-request fallback needs (kanban card 3027671c…)"
-        )
-
-    # Find the `else`/`fi` that closes the push-conditional at its own indent.
-    cond_line_start = source_text.rfind("\n", 0, cond_idx) + 1
-    cond_indent = _line_indent(source_text[cond_line_start:cond_idx + len(PUSH_CONDITIONAL)])
-    cursor = source_text.find("\n", cond_idx) + 1
-    close_idx = -1
-    for raw_line in source_text[cursor:].split("\n"):
-        stripped = raw_line.strip()
-        if stripped in ("else", "fi") and _line_indent(raw_line) == cond_indent:
-            close_idx = source_text.find(raw_line, cursor)
-            break
-        cursor += len(raw_line) + 1
-    if close_idx == -1:
-        return False, (
-            f"could not find the `else`/`fi` closing the push-conditional at "
-            f"indent {cond_indent} — the if-block looks malformed"
-        )
-    if not (cond_idx < delete_idx < close_idx):
-        return False, (
-            f"branch delete ({delete_idx}) is NOT inside the push-success "
-            f"branch (condition at {cond_idx}, closed at {close_idx}) — it "
-            f"would fire even when the push to master is rejected, deleting "
-            f"the branch the pull-request fallback needs"
-        )
-    return True, ""
-
-
-@pytest.mark.parametrize("source_name", sorted(SOURCES))
-def test_branch_delete_guarded_by_push_success(source_name: str) -> None:
-    """The remote-branch delete must fire only after a successful push.
-
-    Pins the positional invariant from kanban card ``3027671c…``. Presence
-    of ``git push origin --delete "$BRANCH"`` alone is not enough: the recipe
-    documents a pull-request fallback for when the push to master is rejected
-    (master moved / branch protection), and that fallback needs
-    ``origin/$BRANCH`` to still exist. A delete placed unconditionally after
-    a bare push would destroy the branch on exactly the path where it is
-    still needed — turning a recoverable rejection into lost work.
-    """
-    source_text = SOURCES[source_name]()
-    ok, reason = _branch_delete_is_guarded_by_push_success(source_text)
-    assert ok, f"{source_name}: branch delete not guarded by push success — {reason}"
-
-
-def test_branch_delete_guard_detects_unconditional_delete() -> None:
-    """Demonstrate the guard catches the naive "just append the delete" shape.
-
-    The card's own suggested fix appended ``git push origin --delete`` directly
-    after a bare ``git push origin HEAD:master``. That shape deletes the branch
-    even when the push was rejected. Pin the detector with a live negative case
-    so the contract is enforced, not assumed.
-    """
-    naive_mirror = (
-        'git -C "$WT" push origin HEAD:master\n'
-        'git push origin --delete "$BRANCH" || echo "WARN: al weg?"\n'
-        'git worktree remove --force "$WT"\n'
-    )
-    ok, reason = _branch_delete_is_guarded_by_push_success(naive_mirror)
-    assert not ok, (
-        f"guard did NOT flag an unconditional delete after a bare push; "
-        f"reason={reason!r}. The positional invariant has rotted."
-    )
-    assert "if-condition" in reason, (
-        f"unexpected failure reason: {reason!r}; expected a missing "
-        f"if-condition diagnosis."
-    )
 
 
 # Remote-branch cleanup guards the delete itself on the remote ref actually
@@ -1854,4 +1758,113 @@ def test_readme_marker_awk_predicate_detects_the_mode_drift() -> None:
         f"regression would no longer trip CI. "
         f"Anti-pattern: {README_AWK_PREDICATE_ANTI_PATTERN!r}; "
         f"present in fixture: {not detector_passes}."
+    )
+
+
+# Branch-delete ordering relative to attach_deliverable (kanban card
+# 692d3522432b4b0c855b933acc6bffc0). The direct-mode ship-recipe deletes
+# `origin/$BRANCH` to avoid the merged-branch pile-up (kanban card
+# 3027671c…); that delete must run AFTER the agent has called
+# ``attach_deliverable(kind="branch", ref="$BRANCH")``, otherwise the MCP
+# call sees a ref that is already gone on `origin` and — by the card's
+# report — fails noisily with `-32602`. The cleanest fix is to lift the
+# delete out of the merge bash-script and run it as a follow-up step,
+# after attach_deliverable.
+#
+# This test pins the new ordering: the ``git push origin --delete
+# "$BRANCH"`` line must appear in the source AFTER the literal
+# ``attach_deliverable`` mention. Existing structural invariants
+# (guarded-by-push-success, guarded-by-remote-ref-exists) still hold —
+# the delete is still inside an ``if ls-remote ... fi`` block, just
+# positioned in a later step instead of inside the merge bash-script.
+ATTACH_DELIVERABLE_MENTION = "attach_deliverable"
+# Anchor on the `<your-branch-name>` placeholder that the direct-mode
+# attach step passes as the deliverable ref. The SKILL.md uses backtick
+# quotes (`kind \`branch\``), the dispatch mirror uses double-double
+# (``kind="branch"``); both render the same on screen but differ as
+# literal substrings, so a single-string anchor is brittle. The ref
+# placeholder is identical in both mirrors and unique to the direct-mode
+# attach step (no other mention of `<your-branch-name>` exists in either
+# file), which makes it the most stable anchor for the ordering check.
+DIRECT_ATTACH_STEP = "<your-branch-name>"
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_branch_delete_runs_after_attach_deliverable(source_name: str) -> None:
+    """Branch-delete must run after the direct-mode ``attach_deliverable``
+    STEP (not just any earlier mention of the tool).
+
+    Pins the structural fix from kanban card ``692d3522432b…``: a
+    direct-mode ship that deleted ``origin/$BRANCH`` before
+    ``attach_deliverable(kind="branch", ref="$BRANCH")`` could not be
+    reported because the MCP call landed on a vanished ref. The fix
+    moves the delete to a follow-up step after attach, so the ref is
+    alive at attach-time. This test catches a future revert that
+    inlines the delete back into the merge bash-script — the parametrised
+    substring-presence test (``remote-branch cleanup: branch delete``)
+    would still pass, but the relative order would silently rot.
+
+    The anchor is ``<your-branch-name>`` (the placeholder the direct-mode
+    attach step passes as the deliverable ref), not the bare
+    ``attach_deliverable`` token — the SKILL.md has an earlier
+    ``attach_deliverable`` mention in its session-retro paragraph that
+    would satisfy a naive ordering check by accident and hide the real
+    regression (delete inside the merge bash-script that the agent runs
+    BEFORE the attach step). The ref placeholder is identical across
+    both mirrors and unique to the direct-mode attach step (no other
+    mention of ``<your-branch-name>`` exists in either file), which
+    makes it the most stable anchor for the ordering check.
+    """
+    source_text = SOURCES[source_name]()
+    attach_idx = source_text.find(DIRECT_ATTACH_STEP)
+    delete_idx = source_text.find(BRANCH_DELETE)
+    assert attach_idx != -1, (
+        f"{source_name}: missing direct-mode attach step "
+        f"({DIRECT_ATTACH_STEP!r}) — the recipe must call "
+        "attach_deliverable(kind=\"branch\", ref=<your-branch-name>) "
+        "explicitly"
+    )
+    assert delete_idx != -1, (
+        f"{source_name}: missing {BRANCH_DELETE!r} — the direct-mode "
+        "recipe must still delete the remote branch (kanban card 3027671c…)"
+    )
+    assert attach_idx < delete_idx, (
+        f"{source_name}: branch delete (idx={delete_idx}) appears BEFORE "
+        f"the direct-mode attach step (idx={attach_idx}) — the delete "
+        "must run as a follow-up step after attach, not inside the merge "
+        "bash-script. Moving it back in front of attach reintroduces "
+        "the `attach_deliverable kind=branch` failure on a just-deleted "
+        "ref (kanban card 692d3522432b4b0c855b933acc6bffc0)."
+    )
+
+
+def test_branch_delete_after_attach_detects_naive_inline() -> None:
+    """Live negative case: a recipe that inlines the delete back into the
+    merge bash-script (before the attach_deliverable step) must trip the
+    ordering guard. Demonstrates the contract so a future refactor that
+    silently re-orders the source cannot claim the guard still works.
+    """
+    naive_mirror = (
+        # The merge bash-script, with the delete inlined back where it
+        # used to live (kanban card 692d3522432b4b0c855b933acc6bffc0 pre-fix):
+        'if git -C "$WT" push origin HEAD:master; then\n'
+        '  if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then\n'
+        '    git push origin --delete "$BRANCH"\n'
+        '  fi\n'
+        'fi\n'
+        '5. **Attach the deliverable** — attach_deliverable ref=<your-branch-name>\n'
+    )
+    attach_idx = naive_mirror.find(DIRECT_ATTACH_STEP)
+    delete_idx = naive_mirror.find(BRANCH_DELETE)
+    assert attach_idx != -1 and delete_idx != -1, (
+        "test fixture bug: naive_mirror must contain both anchor strings"
+    )
+    assert delete_idx < attach_idx, (
+        "test fixture bug: naive_mirror must place the delete BEFORE attach"
+    )
+    # Replay the ordering check: this naive shape must FAIL the parametrised
+    # guard (delete < attach), so the guard correctly rejects it.
+    assert not (attach_idx < delete_idx), (
+        "guard did NOT flag an inline-before-attach delete; the ordering "
+        "invariant has rotted."
     )
