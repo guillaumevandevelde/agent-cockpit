@@ -7,6 +7,61 @@ from pathlib import Path
 import pytest
 
 
+def test_resolve_project_directory_fails_fast_when_worktree_deleted(monkeypatch, tmp_path):
+    """Kaart cac950cb…: when the worktree is gone, resolve_directory must fail
+    fast — without iterating the multi-MB transcript file. The prior
+    implementation walked line-by-line with ``json.loads`` on a 947K transcript
+    with 285 cwd entries (every one pointing at the deleted worktree), blocking
+    the dispatch tick for ~27s while the entire spawn attempt held a column
+    slot. The fix short-circuits on the decoded-path existence check.
+    """
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.agentic_cli.claude_code import ClaudeCodeCli
+    from app.services.runs import cc_spawn
+
+    # The decoded path (.claude/worktrees/<branch>) does NOT exist —
+    # mirror the documented symptom where the worktree was merged and GC'd.
+    project_folder = "-tmp-wt-dead"
+    session_id = "sess-dead"
+    tdir = tmp_path / ".claude" / "projects" / project_folder
+    tdir.mkdir(parents=True)
+    # 285 cwd entries, each pointing at the dead worktree, modeled on the
+    # real 947K transcript (b4c34edd-…jsonl) that was the reproduce for
+    # kaart cac950cb… — gives the buggy path something real to chew on.
+    # Each line carries the full system prompt content (the real transcript
+    # lines are ~3KB each, dominated by the <EXTREMELY_IMPORTANT> superpowers
+    # prompt prefix), so json.loads() is doing real work per line.
+    heavy_payload = "x" * 3500  # ~3KB content per line, mirrors the real transcript
+    transcript_line = json.dumps(
+        {"cwd": "/home/vdvgu/claude-cockpit/.claude/worktrees/k-bug-rest-post-0007",
+         "content": heavy_payload}
+    )
+    (tdir / f"{session_id}.jsonl").write_text(
+        "\n".join(transcript_line for _ in range(285)) + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cc_spawn.Path, "home", classmethod(lambda cls: tmp_path))
+
+    provider = ClaudeCodeCli()
+    t0 = time.monotonic()
+    with pytest.raises(ValueError, match="Could not resolve project directory"):
+        provider.resolve_directory(
+            SpawnCommandOptions(
+                directory=str(tmp_path),
+                mode="resume",
+                session_id=session_id,
+                project_folder=project_folder,
+            )
+        )
+    elapsed = time.monotonic() - t0
+
+    # The fix: fail fast. The buggy version parses all 285 cwd entries
+    # before raising, which is ~5-30s on a real box. The fix should be
+    # well under a second.
+    assert elapsed < 1.0, f"resolve_directory took {elapsed:.2f}s — fast-fail broke"
+
+
 def test_resume_resolve_directory_prefers_transcript_cwd(monkeypatch, tmp_path):
     from app.services.agentic_cli.base import SpawnCommandOptions
     from app.services.agentic_cli.claude_code import ClaudeCodeCli
