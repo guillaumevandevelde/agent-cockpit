@@ -85,6 +85,8 @@ Opruimen is geen voornemen maar een regel, want "we ruimen later op" heeft 148.0
 
 Regel 3 wordt afdwingbaar gemaakt door de omvangsratel uit `kernharding-design.md` §3.
 
+**✅ Geïmplementeerd (kaart `8b1bd6bcf2244809b283696b90eef20c…`): regels 1 en 2.** `scripts/check-inherited-bucket-ratchet.sh` sommeert de regels van de negentien geërfde mappen en weigert groei (parallel aan de omvangsratel per bestand); een `--update` legt alleen krimp vast en weigert een achterdeur. Baseline opgenomen in `.inherited-bucket-baseline`. Eerste scherm verwijderd: `updates` (frontend `UpdatesPage` + `App.tsx` route + `navigation.ts` ingang + `RefreshCw`-import), 341 regels uit de bucket, 19 → 19 mappen. Vóór deze kaart was §6 alleen een voornemen; nu vuurt regel 2 op elke commit waar `git ls-files frontend/src/features/<geërfd>/` groeit.
+
 ## 7. Beslissing 7 — herbouw afgewezen, met herintredingsvoorwaarde
 
 Een herbouw is afgewezen. Doorslaggevend: de drie architecturale gebreken zijn toevoegingen, geen vervangingen. Duurzame toestand, migraties en modulegrenzen moet je in een nieuwe codebase net zo goed bouwen. Een herbouw gooit bovendien 314.000 regels test weg, en dat is de reden dat het huidige systeem werkt.

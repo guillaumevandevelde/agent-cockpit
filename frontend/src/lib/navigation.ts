@@ -29,7 +29,6 @@ import {
   Network,
   Castle,
   Globe,
-  RefreshCw,
   Building2,
   type LucideIcon,
 } from 'lucide-react'
@@ -71,7 +70,6 @@ const commonNavigation: NavGroup[] = [
       { name: 'Sandcastle', href: '/sandcastle', icon: Castle },
       { name: 'Hosts', href: '/hosts', icon: Globe },
       { name: 'Backup', href: '/backup', icon: Archive, capability: 'backup' },
-      { name: 'Updates', href: '/updates', icon: RefreshCw },
     ],
   },
 ]

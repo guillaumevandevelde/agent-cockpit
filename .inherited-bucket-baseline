@@ -1,0 +1,21 @@
+# Inherited-bucket-baseline — zie scripts/check-inherited-bucket-ratchet.sh
+# Regels: '<regels> <map>'. Alleen omlaag; groei wordt hier nooit vastgelegd.
+2400 backup
+1208 blueprints
+1085 commands
+5683 config
+911 context
+461 endpoints
+1992 hooks
+3809 mcp
+385 mcp-server
+1493 memory
+775 output-styles
+1165 permissions
+2288 plugins
+725 security
+1608 skills
+597 statusline
+433 subscriptions
+0 updates
+1232 usage
