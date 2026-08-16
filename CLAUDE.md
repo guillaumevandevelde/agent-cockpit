@@ -110,6 +110,7 @@ bash backend/test_commands_api.sh                         # Curl-based API tests
 ls scripts/test_*.sh     # family-level reference — check-test-harness-coverage.sh (kaart 5e988e4e, glob-form uit 8c7cfc14) dekt het hele scripts/test_*.sh spectrum
 bash scripts/test_po_digest_source.sh                  # PO-digest collector (mechanische helft)
 bash scripts/test_check_file_size_ratchet.sh           # Omvangsratel: bestanden boven 800 regels mogen niet groeien (architectuur.md regel 3)
+bash scripts/test_check_inherited_bucket_ratchet.sh    # Geërfd-bucket-ratel: de som-regels van de 19 cockpit-richting §3-schermen mag niet groeien
 bash scripts/test_check_doc_readability.sh             # Leesbaarheidsnorm-meter (zie de Taalgebruik-regel hieronder)
 bash scripts/test_check_decision_doc_anchors.sh        # file:line-anker-check op beslisdocs (zie taalgebruik-conventies.md §4, kaart `1bf9b52d…`)
 bash scripts/test_sweep_unchecked_implemented_markers.sh   # ✅-marker-sweep (kaart 21a349bc… — recipe-writing-conventions §2)
