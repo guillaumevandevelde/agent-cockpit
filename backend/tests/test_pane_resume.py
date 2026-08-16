@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import pytest_asyncio
 
-from app.kanban import dispatch
+from app.kanban import dispatch, pane_resume
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card, list_cards
 from app.utils.path_utils import convert_path_to_folder_name
@@ -66,6 +66,27 @@ def _stub_parse_reset_time(message, *, now=None):
     if reset <= reference:
         reset += timedelta(days=1)
     return reset, tz_name
+
+
+def _patch_project_key(monkeypatch):
+    """Patch `safe_resolve_project_key` op BEIDE modules die hem gebruiken.
+
+    Het pane-resume-cluster woont sinds de uitlichting in
+    `app.kanban.pane_resume`; dat bestand deed `from ... import
+    safe_resolve_project_key`, dus een patch op `dispatch` alleen bereikt die
+    binding niet meer en de test draait stil tegen de echte functie (de
+    no-op-patch-klasse uit docs/cockpit/test-doubles-convention.md).
+    De teruggegeven lijst laat een test asserten dat de dubbel écht vuurde.
+    """
+    calls: list[str] = []
+
+    def _fake(path):
+        calls.append(path)
+        return PK
+
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", _fake)
+    monkeypatch.setattr(pane_resume, "safe_resolve_project_key", _fake)
+    return calls
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -170,7 +191,7 @@ async def test_try_pane_resume_schedules_nudge_when_pane_alive(tmp_path, monkeyp
     tracks the pending nudge, activity comment explains the deferral."""
     session_name = "k-panealive-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
 
@@ -191,7 +212,7 @@ async def test_try_pane_resume_schedules_nudge_when_pane_alive(tmp_path, monkeyp
         "app.services.scheduling.session_resolver.resolve_target",
         return_value=f"{session_name}:0.0",
     ) as resolve_mock:
-        ok = await dispatch.try_pane_resume(
+        ok = await pane_resume.try_pane_resume(
             cwd=str(repo / ".claude" / "worktrees" / session_name),
             reset_time=reset_time,
             message="Continue where you left off.",
@@ -202,8 +223,8 @@ async def test_try_pane_resume_schedules_nudge_when_pane_alive(tmp_path, monkeyp
     # First nudge fires at reset_time + PANE_RESUME_MARGIN_S
     trigger = add_job_mock.call_args.kwargs["trigger"]
     fire_at = trigger.run_date
-    assert fire_at >= reset_time + timedelta(seconds=dispatch.PANE_RESUME_MARGIN_S - 5)
-    assert fire_at <= reset_time + timedelta(seconds=dispatch.PANE_RESUME_MARGIN_S + 5)
+    assert fire_at >= reset_time + timedelta(seconds=pane_resume.PANE_RESUME_MARGIN_S - 5)
+    assert fire_at <= reset_time + timedelta(seconds=pane_resume.PANE_RESUME_MARGIN_S + 5)
     # Card metadata reflects the pending nudge
     async with KanbanSessionLocal() as s:
         card = await get_card(s, cid)
@@ -212,6 +233,7 @@ async def test_try_pane_resume_schedules_nudge_when_pane_alive(tmp_path, monkeyp
     # Card stays on its agent column, claim stays put
     assert card.column == "engineer"
     assert card.claimed_by == f"agent:{session_name}"
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 @pytest.mark.asyncio
@@ -228,7 +250,7 @@ async def test_try_pane_resume_clamps_a_past_reset_time(tmp_path, monkeypatch):
     """
     session_name = "k-panepast-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
 
@@ -249,7 +271,7 @@ async def test_try_pane_resume_clamps_a_past_reset_time(tmp_path, monkeypatch):
         "app.services.scheduling.session_resolver.resolve_target",
         return_value=f"{session_name}:0.0",
     ):
-        ok = await dispatch.try_pane_resume(
+        ok = await pane_resume.try_pane_resume(
             cwd=str(repo / ".claude" / "worktrees" / session_name),
             reset_time=reset_time,
             message="Continue where you left off.",
@@ -258,7 +280,8 @@ async def test_try_pane_resume_clamps_a_past_reset_time(tmp_path, monkeypatch):
     fire_at = add_job_mock.call_args.kwargs["trigger"].run_date
     now = datetime.now(UTC)
     assert fire_at >= now - timedelta(seconds=5), "past nudge would be dropped as a misfire"
-    assert fire_at <= now + timedelta(seconds=dispatch.PANE_RESUME_MARGIN_S + 5)
+    assert fire_at <= now + timedelta(seconds=pane_resume.PANE_RESUME_MARGIN_S + 5)
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 @pytest.mark.asyncio
@@ -267,7 +290,7 @@ async def test_try_pane_resume_returns_false_when_pane_gone(tmp_path, monkeypatc
     back to the existing kill+To Resume path. No metadata, no scheduled nudge."""
     session_name = "k-panegone-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
 
@@ -285,7 +308,7 @@ async def test_try_pane_resume_returns_false_when_pane_gone(tmp_path, monkeypatc
     with patch(
         "app.services.scheduling.session_resolver.resolve_target", return_value=None,
     ):
-        ok = await dispatch.try_pane_resume(
+        ok = await pane_resume.try_pane_resume(
             cwd=str(repo / ".claude" / "worktrees" / session_name),
             reset_time=datetime.now(UTC) + timedelta(hours=5),
             message="Continue where you left off.",
@@ -298,6 +321,8 @@ async def test_try_pane_resume_returns_false_when_pane_gone(tmp_path, monkeypatc
     assert not (card.meta or {}).get("pane_resume_pending")
     assert card.column == "engineer"
     assert card.claimed_by == f"agent:{session_name}"
+    # Geen pk_calls-assertie: de pane-gone-tak keert terug vóór de
+    # project-key-resolutie, dus de dubbel hoort hier niet te vuren.
 
 
 # ---- handle_rate_limit_signal: pane-resume vs fallback ----------------------
@@ -312,7 +337,7 @@ async def test_handle_rate_limit_signal_uses_pane_resume_when_pane_alive(
     scheduled, the existing reaction is fully deferred."""
     session_name = "k-handlealive-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
 
@@ -349,6 +374,7 @@ async def test_handle_rate_limit_signal_uses_pane_resume_when_pane_alive(
     assert card.column == "engineer"
     assert card.claimed_by == f"agent:{session_name}"
     assert card.meta["pane_resume_pending"] is True
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 @pytest.mark.asyncio
@@ -360,7 +386,7 @@ async def test_handle_rate_limit_signal_falls_back_when_pane_gone(
     acceptance criteria #3."""
     session_name = "k-handlegone-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     _add_job_mock(monkeypatch)
 
@@ -388,6 +414,7 @@ async def test_handle_rate_limit_signal_falls_back_when_pane_gone(
 
     move_mock.assert_awaited_once()
     assert moved is True
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 # ---- backoff / max attempts -------------------------------------------------
@@ -407,7 +434,7 @@ async def test_handle_rate_limit_signal_reschedules_with_backoff_on_relimit(
     (kaart e2116332, productie-meting 2026-07-24)."""
     session_name = "k-backoff-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
 
@@ -459,10 +486,11 @@ async def test_handle_rate_limit_signal_reschedules_with_backoff_on_relimit(
     # Fire time strictly later than first nudge's fire time (first was at
     # reset+margin, second at reset+margin + backoff)
     first_fire = datetime.fromisoformat(card.meta["pane_resume_reset_at"]) + timedelta(
-        seconds=dispatch.PANE_RESUME_MARGIN_S
+        seconds=pane_resume.PANE_RESUME_MARGIN_S
     )
     second_fire = add_job_mock.call_args.kwargs["trigger"].run_date
     assert second_fire > first_fire
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 @pytest.mark.asyncio
@@ -480,7 +508,7 @@ async def test_handle_rate_limit_signal_skips_when_nudge_not_fired(
     meting 2026-07-24: 36 events × ~30 s tot fallback, 0 echte nudges)."""
     session_name = "k-pending-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
 
@@ -528,6 +556,7 @@ async def test_handle_rate_limit_signal_skips_when_nudge_not_fired(
     # the right budget.
     assert card.meta["pane_resume_pending"] is True
     assert card.meta["pane_resume_attempts"] == 1
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 @pytest.mark.asyncio
@@ -541,7 +570,7 @@ async def test_handle_rate_limit_signal_falls_back_after_max_attempts(
     after the previous nudge actually went out."""
     session_name = "k-maxattempts-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
     add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
 
@@ -559,7 +588,7 @@ async def test_handle_rate_limit_signal_falls_back_after_max_attempts(
             entity_id=cid,
             payload={"metadata": {
                 "pane_resume_pending": True,
-                "pane_resume_attempts": dispatch.PANE_RESUME_MAX_ATTEMPTS,
+                "pane_resume_attempts": pane_resume.PANE_RESUME_MAX_ATTEMPTS,
                 "pane_resume_reset_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
                 "pane_resume_fired": True,
             }},
@@ -584,6 +613,7 @@ async def test_handle_rate_limit_signal_falls_back_after_max_attempts(
     # Pending state cleared on fallback so the next dispatch tick doesn't try
     # to re-attempt pane-resume on this card.
     assert not (card.meta or {}).get("pane_resume_pending")
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 # ---- recovery ---------------------------------------------------------------
@@ -615,7 +645,7 @@ async def test_detect_transcript_clears_pane_resume_pending_on_recovered_transcr
     monkeypatch.setattr(
         claude_code_cli, "get_claude_projects_dir", lambda: projects_dir
     )
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
 
     import app.kanban.db as kdb
     monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
@@ -650,6 +680,7 @@ async def test_detect_transcript_clears_pane_resume_pending_on_recovered_transcr
     async with KanbanSessionLocal() as s:
         card = await get_card(s, cid)
     assert not (card.meta or {}).get("pane_resume_pending")
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 # ---- execute / fallback: scheduler hygiene ---------------------------------
@@ -668,7 +699,7 @@ async def test_execute_pane_resume_marks_fired_after_successful_send(
     reschedule) — see kaart e2116332."""
     session_name = "k-execfired-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
 
     import app.kanban.db as kdb
@@ -701,7 +732,7 @@ async def test_execute_pane_resume_marks_fired_after_successful_send(
     ), patch(
         "app.services.scheduling.tmux_inject.send_text", return_value=True,
     ) as send_mock:
-        ok = await dispatch._execute_pane_resume(
+        ok = await pane_resume._execute_pane_resume(
             cwd=str(repo / ".claude" / "worktrees" / session_name),
             message="Continue where you left off.",
         )
@@ -712,6 +743,7 @@ async def test_execute_pane_resume_marks_fired_after_successful_send(
         card = await get_card(s, cid)
     assert card.meta["pane_resume_fired"] is True
     assert card.meta["pane_resume_pending"] is True  # still pending until recovery clears it
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"
 
 
 @pytest.mark.asyncio
@@ -727,7 +759,7 @@ async def test_pane_resume_fallback_removes_scheduler_job(
     exactly this race."""
     session_name = "k-fallbackjob-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
-    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    pk_calls = _patch_project_key(monkeypatch)
     _patch_auto_resume(monkeypatch)
 
     import app.kanban.db as kdb
@@ -752,7 +784,7 @@ async def test_pane_resume_fallback_removes_scheduler_job(
         await s.commit()
 
     cwd = str(repo / ".claude" / "worktrees" / session_name)
-    expected_job_id = dispatch._pane_resume_job_id(cwd)
+    expected_job_id = pane_resume._pane_resume_job_id(cwd)
 
     from app.services.scheduling import scheduler as sched_module
 
@@ -763,7 +795,7 @@ async def test_pane_resume_fallback_removes_scheduler_job(
     with patch.object(
         dispatch, "move_limited_session_to_resume", return_value=True,
     ) as move_mock:
-        await dispatch._pane_resume_fallback_to_kill(cwd)
+        await pane_resume._pane_resume_fallback_to_kill(cwd)
 
     remove_job_mock.assert_called_once_with(expected_job_id)
     move_mock.assert_awaited_once()
@@ -773,3 +805,4 @@ async def test_pane_resume_fallback_removes_scheduler_job(
     # Pending state cleared on fallback.
     assert not (card.meta or {}).get("pane_resume_pending")
     assert not (card.meta or {}).get("pane_resume_fired")
+    assert pk_calls, "safe_resolve_project_key-dubbel vuurde niet — patch mist zijn doel"

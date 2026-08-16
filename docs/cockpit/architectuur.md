@@ -63,7 +63,7 @@ De scheduler draait op APScheduler's in-memory jobstore, dus elke job sterft met
 
 `services/scheduling/reconciler.py` leest die rijen bij het opstarten terug en installeert de jobs opnieuw; achterstallige beloften vuren meteen. Dat generaliseert `recurring_triggers.run_boot_inhaal`, dat na een gemiste maandag al precies dit deed.
 
-`scripts/check-add-job-callers.sh` bewaakt de vorm: `_sched.add_job` mag alleen in `scheduler.py` staan, plus twee geratelde plekken (`kanban/dispatch.py`, `scheduling/auto_resume.py`) die alleen korter mag worden.
+`scripts/check-add-job-callers.sh` bewaakt de vorm: `_sched.add_job` mag alleen in `scheduler.py` staan, plus twee geratelde plekken (`kanban/pane_resume.py`, `scheduling/auto_resume.py`) die alleen korter mag worden.
 
 **Opgelost op 2026-08-16.** `auto_resume_service.set_enabled` schreef alleen naar een geheugen-dict, dus auto-resume stond na elke herstart stil weer uit. Er is nu een `auto_resume_configs`-tabel; de route schrijft door en `reconciler.hydrate_auto_resume` laadt de rijen bij het opstarten terug. De dicts blijven bestaan als cache, en wat deze draai al is gezet wint van de rij.
 
@@ -71,7 +71,7 @@ De scheduler draait op APScheduler's in-memory jobstore, dus elke job sterft met
 
 ## Wat hier nog moet gebeuren
 
-**Het pane-resume-cluster uit `dispatch.py` lichten.** Dat is nu de eerstvolgende blokkade, niet een netheidswens. `dispatch.py` staat op 10.110 regels en mag niet groeien, dus de consumptiekant van de zelfverbeter-schakelaar past er niet meer in. De extractie is niet triviaal: `tests/test_pane_resume.py` patcht op twaalf plekken `dispatch.safe_resolve_project_key`, en die patches bereiken de verplaatste code niet meer — precies de no-op-patch-val uit `test-doubles-convention.md`. Elke patch moet dus mee verhuizen, met een assertie dat de dubbel ook echt vuurde.
+**✅ Geïmplementeerd (kaart de820d8a…): het pane-resume-cluster is uit `dispatch.py` gelicht.** Effect: `dispatch.py` zakte van 10.110 naar 9.686 regels; het cluster staat nu in `backend/app/kanban/pane_resume.py`. `dispatch.py` importeert de namen terug, zodat bestaande call-sites blijven werken. De no-op-patch-val is afgevangen: `tests/test_pane_resume.py` patcht `safe_resolve_project_key` op beide modules via één helper, en elke test assert dat de dubbel ook echt vuurde.
 
 `headless_runner.py` en `acp_transport.py` zijn feitelijk mechanisme dat in de domeinmap woont. Ze verplaatsen is opruimwerk en gebeurt bij gelegenheid, volgens de snoeiregels uit [`cockpit-richting-decision.md`](./cockpit-richting-decision.md) §6 — niet in één grote beweging.
 
