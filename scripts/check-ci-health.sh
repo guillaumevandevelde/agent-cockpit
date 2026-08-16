@@ -23,6 +23,16 @@
 #      billing broke ~2026-07-26, sessions kept shipping while no run
 #      actually executed for weeks).
 #
+#   3. **Runs worden weggeannuleerd (supersession)** — Van de afgeronde
+#      `master`-runs in het opgehaalde venster eindigde ≥
+#      `--cancelled-threshold` procent als `conclusion == cancelled`.
+#      De concurrency-group in `quality.yml` annuleert een lopende run
+#      zodra een nieuwe push binnenkomt; die commit krijgt dan nooit een
+#      oordeel, terwijl een ship wél een groene gate claimt. Gemeten op
+#      2026-08-16 over de laatste 100 runs: 41 van 100 master-pushes
+#      geannuleerd, dus 41 commits zonder afgerond oordeel. Vuurt pas
+#      vanaf 8 afgeronde master-runs, zodat een verse repo geen ruis geeft.
+#
 # Source of truth: `gh run list --json ...` + `gh run view <id> --json jobs`.
 # Tests inject fixtures via `CI_HEALTH_FIXTURES_DIR=<dir>` so the harness
 # never depends on a live `gh` session. Fixture shape:
@@ -37,6 +47,7 @@
 # Usage:
 #   bash scripts/check-ci-health.sh [--strict]
 #                                   [--red-threshold=N]      (default 3)
+#                                   [--cancelled-threshold=PCT] (default 25)
 #                                   [--workflow=NAME.yml]    (default quality.yml)
 #                                   [--repo=OWNER/REPO]
 #                                   [--fixtures-dir=DIR]
@@ -53,6 +64,10 @@ set -uo pipefail
 # --- arg parsing -----------------------------------------------------------
 STRICT=0
 RED_THRESHOLD=3
+CANCELLED_THRESHOLD=25
+# Minimum aantal afgeronde master-runs voordat check 3 iets zegt. Onder deze
+# steekproef is één geannuleerde run al 50% en dus geen signaal.
+CANCELLED_MIN_SAMPLE=8
 WORKFLOW="quality.yml"
 REPO=""
 FIXTURES_DIR=""
@@ -66,6 +81,7 @@ for arg in "$@"; do
   case "$arg" in
     --strict)         STRICT=1 ;;
     --red-threshold=*) RED_THRESHOLD="${arg#--red-threshold=}" ;;
+    --cancelled-threshold=*) CANCELLED_THRESHOLD="${arg#--cancelled-threshold=}" ;;
     --workflow=*)     WORKFLOW="${arg#--workflow=}" ;;
     --repo=*)         REPO="${arg#--repo=}" ;;
     --fixtures-dir=*) FIXTURES_DIR="${arg#--fixtures-dir=}" ;;
@@ -85,6 +101,11 @@ done
 
 if ! [[ "$RED_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$RED_THRESHOLD" -lt 1 ]; then
   echo "check-ci-health: ERROR: --red-threshold must be a positive integer (got '$RED_THRESHOLD')" >&2
+  exit 2
+fi
+
+if ! [[ "$CANCELLED_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$CANCELLED_THRESHOLD" -lt 1 ] || [ "$CANCELLED_THRESHOLD" -gt 100 ]; then
+  echo "check-ci-health: ERROR: --cancelled-threshold must be a percentage between 1 and 100 (got '$CANCELLED_THRESHOLD')" >&2
   exit 2
 fi
 
@@ -197,6 +218,28 @@ else
 fi
 
 # --- helpers ---------------------------------------------------------------
+# Check 3 — supersession. Telt puur uit de run-lijst, dus zonder extra
+# `gh run view`-call per run: een geannuleerde run heeft per definitie geen
+# jobs-verdict om op te lezen.
+CANCEL_STATS="$(python3 - "$RUN_LIST_JSON" "$LIMIT" <<'PY'
+import json, sys
+runs = json.loads(sys.argv[1])[: int(sys.argv[2])]
+done = [
+    r for r in runs
+    if r.get("headBranch") in ("master", "main") and r.get("conclusion")
+]
+cancelled = [r for r in done if r.get("conclusion") == "cancelled"]
+print(f"{len(cancelled)}|{len(done)}")
+PY
+)"
+IFS='|' read -r CANCELLED_N MASTER_N <<<"${CANCEL_STATS:-0|0}"
+if [ "${MASTER_N:-0}" -ge "$CANCELLED_MIN_SAMPLE" ]; then
+  CANCELLED_PCT=$(( CANCELLED_N * 100 / MASTER_N ))
+  if [ "$CANCELLED_PCT" -ge "$CANCELLED_THRESHOLD" ]; then
+    warn "$CANCELLED_N van $MASTER_N afgeronde $WORKFLOW-runs op master eindigde als 'cancelled' (${CANCELLED_PCT}%, drempel ${CANCELLED_THRESHOLD}%) — die commits kregen nooit een afgerond oordeel; de concurrency-group annuleert een lopende run bij elke nieuwe push. Een 'groene master' op zo'n commit is ongemeten."
+  fi
+fi
+
 # Fetch the per-run jobs JSON for `id`. In live mode `gh run view` accepts
 # a `<id>` positional; in fixture mode we read `run-<id>.json`.
 run_view() {
