@@ -16,6 +16,31 @@ SEARCH_CACHE_TTL_SECONDS = 60 * 60  # 1 hour for search results
 SKILLS_SH_BASE = "https://skills.sh"
 SKILLS_SH_SEARCH_API = f"{SKILLS_SH_BASE}/api/search"
 
+# GitHub `owner/repo` slug. Strict by design: no leading dashes (flag injection),
+# no whitespace or shell metacharacters (command injection), no path traversal.
+# Matches the canonical form every public skills.sh source on the leaderboard
+# uses today (e.g. `vercel-labs/agent-skills`, `anthropics/skills`).
+SKILL_SOURCE_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+class InvalidSkillSourceError(ValueError):
+    """Raised when a skill `source` does not match the canonical `owner/repo` form.
+
+    Prevents command-line injection via `npx -y skills add <source>`, where a
+    malicious value like `vercel/foo --registry=http://evil` would otherwise be
+    split into multiple argv positions.
+    """
+
+
+def _validate_source(source: str) -> str:
+    """Return ``source`` unchanged if valid, else raise ``InvalidSkillSourceError``."""
+    if not isinstance(source, str) or not SKILL_SOURCE_PATTERN.fullmatch(source):
+        raise InvalidSkillSourceError(
+            f"Invalid skill source '{source}': must match owner/repo "
+            f"(e.g. 'vercel-labs/agent-skills') with letters, digits, '.', '_' or '-'."
+        )
+    return source
+
 
 def _clean_terminal_output(text: str) -> str:
     """Strip ANSI codes, spinner frames, and terminal noise from CLI output."""
@@ -273,7 +298,14 @@ class SkillsRegistryService:
 
         Returns:
             dict with success, message, and logs.
+
+        Raises:
+            InvalidSkillSourceError: if ``source`` does not match the
+                ``owner/repo`` form. Prevents command-line injection via
+                the ``npx`` argv position.
         """
+        _validate_source(source)
+
         cmd = ["npx", "-y", "skills", "add", source, "--yes"]
 
         if global_install:
@@ -346,7 +378,13 @@ class SkillsRegistryService:
 
         Returns:
             List of skill names available in the repo.
+
+        Raises:
+            InvalidSkillSourceError: if ``source`` does not match the
+                ``owner/repo`` form.
         """
+        _validate_source(source)
+
         try:
             result = subprocess.run(
                 ["npx", "-y", "skills", "add", source, "--list"],
