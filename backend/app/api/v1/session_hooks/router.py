@@ -166,6 +166,10 @@ async def get_auto_resume(cwd: str):
 async def set_auto_resume(cwd: str, enabled: bool = True):
     """Enable or disable auto-resume for a project."""
     auto_resume_service.set_enabled(cwd, enabled)
+    # Schrijf door naar de tabel: zonder deze regel was de instelling na een
+    # herstart van de backend stil weer weg.
+    from app.services.scheduling import auto_resume_store
+    await auto_resume_store.save(cwd, enabled=enabled)
     return {
         "cwd": cwd,
         "enabled": enabled,

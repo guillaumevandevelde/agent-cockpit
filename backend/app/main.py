@@ -16,6 +16,7 @@ configure_logging()
 from fastapi.staticfiles import StaticFiles
 
 import app.models.agent_mail  # noqa: F401  (register tables for create_all)
+import app.models.auto_resume  # noqa: F401  (register tables for create_all)
 import app.models.host  # noqa: F401  (register tables for create_all)
 import app.models.mcp_token  # noqa: F401  (register tables for create_all)
 import app.models.recurring_trigger  # noqa: F401  (register tables for create_all)
@@ -155,7 +156,11 @@ async def _recover_and_start_dispatch() -> None:
     # claimed with nobody left to nudge it. Best-effort: a failure here must
     # not block startup.
     try:
-        from app.services.scheduling.reconciler import reinstall_pending_pane_resumes
+        from app.services.scheduling.reconciler import (
+            hydrate_auto_resume,
+            reinstall_pending_pane_resumes,
+        )
+        await hydrate_auto_resume()
         await reinstall_pending_pane_resumes()
     except Exception:
         logger.exception("pane-resume reconciliation failed at startup")

@@ -6,6 +6,7 @@ Without these imports, a model file would still exist on disk but its
 table wouldn't materialise in the DB on first run.
 """
 from app.models.agent_mail import *  # noqa: F401,F403
+from app.models.auto_resume import *  # noqa: F401,F403
 from app.models.host import *  # noqa: F401,F403
 from app.models.mcp_token import *  # noqa: F401,F403
 from app.models.recurring_trigger import *  # noqa: F401,F403
