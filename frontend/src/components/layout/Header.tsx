@@ -1,4 +1,4 @@
-import { Terminal, Radio, AlertCircle, Server } from "lucide-react";
+import { Terminal, Radio, AlertCircle, Server, Menu } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { AttentionToggle } from "@/components/ui/attention-toggle";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +6,7 @@ import { CockpitLogo } from "@/components/shared/CockpitLogo";
 import { useSystemStatus } from "@/hooks/useSystemStatus";
 import { useInstanceDocumentTitle } from "@/hooks/useInstanceDocumentTitle";
 import { useProviderContext } from "@/contexts/ProviderContext";
+import { useSidebar } from "@/contexts/SidebarContext";
 import { getInstanceAccentClasses } from "@/lib/instanceAccent";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +15,7 @@ export function Header() {
   const instance = status?.instance ?? null;
   const accentClasses = getInstanceAccentClasses(instance?.accent);
   const { providers, selectedProviderId, selectedProvider } = useProviderContext();
+  const { setMobileOpen } = useSidebar();
   const providerStatuses = providers
     .map((provider) => status?.providers?.[provider.id] ?? provider)
     .filter((provider) => provider.installed || provider.id === selectedProviderId);
@@ -35,6 +37,14 @@ export function Header() {
     <header className={cn("border-b bg-background", instance && "border-t-4", instance && accentClasses.headerBorder)}>
       <div className="flex h-16 items-center justify-between px-6">
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            className="sm:hidden -ml-1 inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
           <CockpitLogo className="h-10 w-10 text-primary" />
           <div>
             <h1 className="text-2xl font-bold text-primary leading-tight">Agent Cockpit</h1>

@@ -12,7 +12,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { AgenticCliId, AgenticCliStatus } from '@/types/providers'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
+
+interface SidebarProps {
+  variant?: 'desktop' | 'overlay'
+  onClose?: () => void
+}
 
 function NavGroupSection({ group, collapsed, selectedProvider }: {
   group: NavGroup
@@ -53,17 +58,28 @@ function NavGroupSection({ group, collapsed, selectedProvider }: {
   )
 }
 
-export function Sidebar() {
+export function Sidebar({ variant = 'desktop', onClose }: SidebarProps = {}) {
   const { collapsed, setCollapsed } = useSidebar()
   const { providers, selectedProviderId, selectedProvider, setSelectedProviderId } = useProviderContext()
   const visibleGroups = getNavigation(selectedProviderId)
+  const expanded = variant === 'overlay' || !collapsed
 
   return (
     <aside className={cn(
-      'border-r bg-background transition-all duration-200 flex flex-col',
-      collapsed ? 'w-14' : 'w-64'
+      'border-r bg-background transition-all duration-200 flex-col',
+      variant === 'desktop' ? 'hidden sm:flex' : 'flex',
+      variant === 'overlay' ? 'w-64 h-full shadow-xl' : (collapsed ? 'w-14' : 'w-64')
     )}>
-      {!collapsed && (
+      {variant === 'overlay' && onClose && (
+        <button
+          onClick={onClose}
+          className="absolute top-2 right-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+      {expanded && (
         <div className="py-4 border-b space-y-3">
           <ProjectSwitcher />
           <div className="px-4 space-y-1.5">
@@ -85,24 +101,26 @@ export function Sidebar() {
       )}
       <nav className={cn(
         'flex flex-col flex-1 overflow-y-auto',
-        collapsed ? 'gap-1 p-2' : 'gap-4 p-4'
+        expanded ? 'gap-4 p-4' : 'gap-1 p-2'
       )}>
         {visibleGroups.map((group) => (
           <NavGroupSection
             key={group.name}
             group={group}
-            collapsed={collapsed}
+            collapsed={!expanded}
             selectedProvider={selectedProvider}
           />
         ))}
       </nav>
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center justify-center p-3 border-t text-muted-foreground hover:text-foreground transition-colors"
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-      </button>
+      {variant === 'desktop' && (
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="flex items-center justify-center p-3 border-t text-muted-foreground hover:text-foreground transition-colors"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+        </button>
+      )}
     </aside>
   )
 }
