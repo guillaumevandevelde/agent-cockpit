@@ -25,7 +25,9 @@ cd "$REPO_ROOT" || exit 1
 ALLOWED_RE='^backend/app/services/scheduling/scheduler\.py$'
 
 # Ratel, vastgesteld 2026-08-15. Alleen korter maken.
-RATCHET_RE='^backend/app/(kanban/dispatch\.py|services/scheduling/auto_resume\.py)$'
+# 2026-08-16: het pane-resume-cluster verhuisde uit kanban/dispatch.py naar
+# kanban/pane_resume.py (kaart de820d8a…) — dezelfde ene aanroep, ander pad.
+RATCHET_RE='^backend/app/(kanban/pane_resume\.py|services/scheduling/auto_resume\.py)$'
 
 mapfile -t HITS < <(grep -rln '_sched\.add_job' backend/app --include='*.py' 2>/dev/null | sort)
 

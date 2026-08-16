@@ -4,7 +4,7 @@
 804 backend/app/api/v1/providers.py
 1000 backend/app/api/v1/runs/router.py
 1202 backend/app/kanban/acp_transport.py
-10110 backend/app/kanban/dispatch.py
+9681 backend/app/kanban/dispatch.py
 1637 backend/app/kanban/headless_runner.py
 1455 backend/app/kanban/mcp_server.py
 1104 backend/app/kanban/schemas.py
