@@ -469,23 +469,6 @@ if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
   git -C "$WT" commit --no-edit
 fi
 if git -C "$WT" push origin HEAD:master; then
-  # Merge landed on master — delete the now-dead remote branch. GitHub's
-  # `delete_branch_on_merge` (enabled 2026-07-07) only fires when a *PR*
-  # merges; this route closes no PR, so without this line every shipped card
-  # leaves a branch on `origin` forever (kanban card 3027671c…: 7 fully-merged
-  # branches piled up over 6 weeks). Guard the delete on the remote ref
-  # actually existing: a direct-mode branch that never made it to `origin`
-  # yields two `error:` lines from `git push --delete` that read like a
-  # failed ship, even though the push-to-master already succeeded — and that
-  # spurious output reliably trips "the ship failed" reading on the tail of
-  # the log (kanban card 552036fa…). Fail-open — an already-deleted branch
-  # must not kill the ship. Only the REMOTE branch goes; the local branch
-  # stays, so redispatch/resume off it still works.
-  if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-    git push origin --delete "$BRANCH" || echo "WARN: kon origin/$BRANCH niet verwijderen"
-  else
-    echo "INFO: origin/$BRANCH bestond niet — niets te verwijderen"
-  fi
   # Post-push main-checkout sync (kanban card 5e83b6e0…, fourth iteration).
   # The divergence guard above bases on local `master`, so a successful
   # push that doesn't also move local `master` in the main checkout leaves
@@ -528,6 +511,30 @@ git worktree remove --force "$WT"
 ```
 
 Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`).
+
+Then clean up the now-dead remote branch. The merge script above no longer
+deletes it inline — that fix ships with kanban card ``692d3522432b…``: the
+inline delete raced with this MCP call and made the attach land on a ref
+that was already gone. Run this only after `attach_deliverable` returns,
+so the ref is still alive while the call is in flight:
+
+```bash
+# Merge landed on master — delete the now-dead remote branch. GitHub's
+# `delete_branch_on_merge` (enabled 2026-07-07) only fires when a *PR*
+# merges; this route closes no PR, so without this line every shipped card
+# leaves a branch on `origin` forever (kanban card 3027671c…: 7
+# fully-merged branches piled up over 6 weeks). Guard the delete on the
+# remote ref actually existing: a direct-mode branch that never made it
+# to `origin` yields two `error:` lines from `git push --delete` that read
+# like a failed ship (kanban card 552036fa…). Fail-open — an
+# already-deleted branch must not kill the ship. Only the REMOTE branch
+# goes; the local branch stays, so redispatch/resume off it still works.
+if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  git push origin --delete "$BRANCH" || echo "WARN: kon origin/$BRANCH niet verwijderen"
+else
+  echo "INFO: origin/$BRANCH bestond niet — niets te verwijderen"
+fi
+```
 
 Next, **run the session-end retro**: invoke the `session-retro` skill (read
 `.claude/skills/session-retro/SKILL.md` for the full procedure — reflect →

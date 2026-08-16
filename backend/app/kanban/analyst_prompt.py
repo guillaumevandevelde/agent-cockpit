@@ -158,7 +158,19 @@ Werkwijze (modus 2 — leaf design-deliverable):
 1. Lees de kaart-titel + beschrijving + acceptance criteria.
 2. Schrijf het design-artefact (docs/cockpit/...-doc of prototype) en commit.
 3. Ship (merge naar master of open PR) zoals de session-end-werkflow voorschrijft.
-4. Attach de branch als deliverable.
+4. Attach de deliverable. Twee shapes, afhankelijk van het artefact-type:
+   - **`docs/cockpit/*.md`-deliverable** → `attach_deliverable(kind="note", ref=<doc-pad>)`,
+     bv. `attach_deliverable(kind="note", ref="docs/cockpit/sync-vs-async-delegation-decision.md")`.
+     Een branch-deliverable slaat nergens op als het artefact een merged doc
+     op master is (kaart `692d3522432b4b0c855b933acc6bffc0`): zodra de
+     remote branch opgeruimd is wijst de branch-ref naar nergens, en de
+     volgende lezer van de kaart heeft geen pointer meer naar de doc.
+     De doc-pad als `kind="note"` is de canonieke handgreep.
+   - **Code-artefact (prototype-script, -dataclass)** → de gewone
+     `attach_deliverable(kind="branch", ref=<branch-naam>)` zoals de
+     session-end-werkflow voorschrijft; de branch leeft tot `git push
+     origin --delete` in stap 6 hem weghaalt, maar de session-end-werkflow
+     plant die delete ná de attach-call.
 5. Verplaats de kaart naar 'Done' met een korte summary van wat je hebt
    opgeleverd, en kies de juiste outcome (zie "Outcome-contract" hieronder).
 
