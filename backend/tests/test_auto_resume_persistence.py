@@ -61,11 +61,7 @@ def test_hydrate_does_not_overwrite_a_fresher_in_memory_value():
 def test_the_api_route_persists_the_toggle():
     """De route moet doorschrijven, niet alleen de cache aanraken.
 
-    Lezen en schrijven gaan allebei via de route, met dezelfde sleutel. Let op:
-    ``{cwd:path}`` levert het pad ZONDER leidende slash, dus de sleutel die de
-    API vastlegt is niet dezelfde string als de ``cwd`` die de session-hook
-    doorgeeft. Dat is bestaand routegedrag en staat los van de persistentie die
-    deze test bewaakt; zie de notitie in docs/cockpit/architectuur.md.
+    Lezen en schrijven gaan allebei via de route, met dezelfde sleutel.
     """
     async def _flow():
         transport = ASGITransport(app=app)
@@ -96,3 +92,29 @@ def test_save_is_idempotent_and_partial():
     assert len(rows) == 1, rows
     assert rows[0][1] is False
     assert rows[0][2] == "eerste"
+
+
+def test_route_key_matches_the_hook_cwd():
+    """De enkele-slash-vorm legt dezelfde sleutel vast als de session-hook.
+
+    ``/auto-resume/{cwd:path}`` levert het pad zonder leidende slash, dus een
+    POST naar ``/auto-resume/home/me/project`` legde ``home/me/project`` vast.
+    De hook-kant (``hook_event`` → ``is_enabled(ev.cwd)``) kijkt naar het
+    absolute pad, dus auto-resume deed stil niets. De route zet de slash nu
+    terug.
+    """
+    async def _flow():
+        _simulate_restart()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            posted = await ac.post(
+                f"/api/v1/session-hooks/auto-resume/{CWD.lstrip('/')}",
+                params={"enabled": True},
+            )
+        return posted
+
+    posted = asyncio.run(_flow())
+    assert posted.status_code == 200, posted.text
+    assert posted.json()["cwd"] == CWD
+    # Dit is de sleutel waarop de session-hook kijkt.
+    assert auto_resume_service.is_enabled(CWD) is True
