@@ -65,54 +65,31 @@ jobs:
               labels: ['auto-fix-attempted'],
             });
 
-  # Interim measure, added 2026-08-15. The job above only fires for
-  # pull_request-triggered runs, but the direct-mode ship recipe merges to
-  # master, which is a `push`. That is why quality.yml stayed red on master
-  # from 2026-08-13 to 2026-08-15 with nobody noticing: the safety net covered
-  # the route we do not take. A red master has no PR to comment on, so this job
-  # raises a single tracking issue instead — deduplicated by label, so a run of
-  # reds does not produce a pile of issues.
-  #
-  # This is deliberately NOT the durable answer. "Something is broken" is the
-  # first of the two push cases in cockpit-richting-decision.md §4, and it
-  # belongs in the outbound notification channel described there. Remove this
-  # job once that channel exists.
-  open-issue-on-red-master:
+  # Durable answer for "something is broken" (cockpit-richting-decision.md §4,
+  # second push case). The previous interim measure opened a `red-master`
+  # tracking issue; that is replaced here by a Telegram push to the owner's
+  # chat. Secrets are configured per repo (Settings → Secrets and variables →
+  # Actions): TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID. Without both secrets the
+  # step is a no-op so a bot-less fork still runs the workflow.
+  notify-on-red-master:
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'master'
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
     steps:
-      - name: Open or reuse the red-master tracking issue
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const label = 'red-master';
-            const runUrl = context.payload.workflow_run.html_url;
-            const sha = context.payload.workflow_run.head_sha.slice(0, 8);
-            const existing = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: label,
-            });
-            const body = `Quality failed on master at \`${sha}\`.\n\n${runUrl}`;
-            if (existing.data.length > 0) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.data[0].number,
-                body,
-              });
-              return;
-            }
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: 'Quality is red on master',
-              labels: [label],
-              body: `${body}\n\nClose this issue once master is green again.`,
-            });
+      - name: Push red-master notification to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        if: env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        run: |
+          short_sha="${SHA:0:8}"
+          text="Quality failed on master at \`${short_sha}\`. ${RUN_URL}"
+          curl -fsS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            --data-urlencode "parse_mode=Markdown"

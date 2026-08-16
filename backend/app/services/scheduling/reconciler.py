@@ -63,11 +63,19 @@ async def reinstall_pending_pane_resumes() -> int:
             })
 
     installed = 0
+    overdue_installed = 0
     for item in pending:
         try:
-            from datetime import datetime
+            from datetime import UTC, datetime
 
             reset_time = datetime.fromisoformat(item["reset_at"])
+            # An overdue promise is the second push case from
+            # cockpit-richting-decision.md §4: the deadline already passed and
+            # nobody fired it. We only know that NOW (boot time), and we only
+            # want to push ONCE per overdue promise, so check before calling
+            # try_pane_resume — the function clamps reset_time that has passed
+            # to "one second from now", which would lose the original signal.
+            is_overdue = reset_time < datetime.now(UTC)
             ok = await try_pane_resume(
                 item["cwd"],
                 reset_time,
@@ -76,6 +84,9 @@ async def reinstall_pending_pane_resumes() -> int:
             )
             if ok:
                 installed += 1
+                if is_overdue:
+                    overdue_installed += 1
+                    await _notify_overdue_pane_resume(item["card_id"], reset_time)
             else:
                 # The pane is gone; there is nothing to resume into. The card
                 # keeps its flag so the existing reaper path can close it out.
@@ -88,7 +99,28 @@ async def reinstall_pending_pane_resumes() -> int:
 
     if installed:
         logger.info("reconciler re-installed %d pane resume(s) after restart", installed)
+    if overdue_installed:
+        logger.info(
+            "reconciler notified owner about %d overdue pane resume(s)",
+            overdue_installed,
+        )
     return installed
+
+
+async def _notify_overdue_pane_resume(card_id: str, was_due_at) -> None:
+    """Push the overdue-promise case from cockpit-richting-decision.md §4.
+
+    Imported lazily so importing reconciler does not pull httpx into every
+    caller of the module (dispatch.py imports reinstall_pending_pane_resumes
+    at module load in some paths).
+    """
+    from app.services.notifications.telegram import send_telegram
+
+    text = (
+        f"Pane resume overdue for card {card_id} "
+        f"(was due {was_due_at.isoformat()}). Rebuilt at startup."
+    )
+    await send_telegram(text)
 
 
 async def hydrate_auto_resume() -> int:

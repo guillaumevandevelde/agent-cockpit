@@ -133,6 +133,13 @@ class Settings(BaseSettings):
     minimax_api_key: str | None = None
     minimax_base_url: str | None = None
 
+    # Telegram outbound channel (cockpit-richting-decision.md §4). Process-env
+    # only — the values never enter the database, an API response, or a log
+    # line. With either field unset, ``services.notifications.telegram`` is a
+    # silent no-op so a bot-less dev machine keeps booting.
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+
     @property
     def meta_project_keys(self) -> list[str]:
         """`cockpit_meta_project_keys` split into a clean list of project_keys."""
