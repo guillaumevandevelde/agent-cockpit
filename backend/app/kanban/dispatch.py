@@ -235,7 +235,8 @@ def _effective_resume_cli_id(card) -> str:
 def _phase_target_agent(card, *, project_path: str, phase: str, source_column: str,
                         agent_override: str | None = None,
                         known_clis: set | None = None,
-                        fallback_persona: str | None = None) -> str:
+                        fallback_persona: str | None = None,
+                        ceremony_profile: str = "code") -> str:
     """Persona/column for the spawned session. Analyst phase is fixed to
     'analyst'; executor phase reuses the legacy overload-resolution rules from
     `_run_card` (the pre-`_phase_*` lines 767-768 of this module), so an
@@ -258,27 +259,44 @@ def _phase_target_agent(card, *, project_path: str, phase: str, source_column: s
     hardcoded 'engineer' fallback. Resolving at dispatch time closes that gap
     — including cards whose user later PATCHed work_type without re-picking
     agent — without touching the existing card row in DB.
+
+    `ceremony_profile` re-routes the engineer fallback to ``researcher`` for
+    knowledge projects (cockpit-richting-decision.md §4). The engineer persona
+    on a research card is the documented mismatch the profile was created to
+    fix; an explicit ``agent_override='engineer'`` on a knowledge project is
+    suppressed before the override short-circuit so it falls through to the
+    researcher swap. Other persona picks (analyst/reviewer via executor) keep
+    their existing precedence — the override is narrowly scoped to engineer.
     """
     if phase == "analyst":
         return "analyst"
+    # Knowledge ceremony: suppress an explicit engineer override so the
+    # researcher fallback below wins. Matches the existing CLI guard so a
+    # hypothetical "engineer" CLI id (not a persona) is left alone.
+    if (ceremony_profile == "knowledge"
+            and agent_override == "engineer"
+            and (known_clis is None or "engineer" not in known_clis)):
+        agent_override = None
     if agent_override and (known_clis is None or agent_override not in known_clis):
         return agent_override
     agents_dir = Path(project_path) / ".claude" / "agents"
     known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
     card_agent = getattr(card, "agent", None)
     if card_agent and card_agent in known_agents:
-        return card_agent
-    # Work-type fallback: when card.agent is missing or doesn't match a known
-    # persona (e.g. it's a CLI id like 'claude-code' from a legacy row),
-    # the work_type mapping decides the persona instead of the hardcoded
-    # 'engineer' fallback. Required to also match a known persona file —
-    # otherwise the work_type mapping could route to a column whose persona
-    # the project doesn't have, and the spawn below would land in an empty
-    # column.
-    if fallback_persona and fallback_persona in known_agents:
-        return fallback_persona
-    persona = _persona_for_card(project_path, card, source_column)
-    return _resolve_agent_from_persona(persona) or "engineer"
+        target = card_agent
+    elif fallback_persona and fallback_persona in known_agents:
+        target = fallback_persona
+    else:
+        persona = _persona_for_card(project_path, card, source_column)
+        target = _resolve_agent_from_persona(persona) or "engineer"
+    # Knowledge ceremony: re-route the engineer fallback to researcher when
+    # the project carries researcher.md. Degrades to the legacy engineer
+    # target on hand-created projects that lack the persona file.
+    if (ceremony_profile == "knowledge"
+            and target == "engineer"
+            and "researcher" in known_agents):
+        return "researcher"
+    return target
 
 
 def resolve_phase(card) -> str:
@@ -312,6 +330,15 @@ DEFAULT_SHIP_MODE = "pull-request"
 TRANSPORT_PREFIX = "transport:"
 TRANSPORTS = ("worktree", "sandcastle", "headless", "acp")
 DEFAULT_TRANSPORT = "worktree"
+# Default ceremony profile. ``cockpit-richting-decision.md`` §4 ships two
+# profiles: ``code`` (full PR/ship workflow, the pre-feature default) and
+# ``knowledge`` (no tests, no PR, lighter persona). Anything we cannot
+# resolve — unregistered project, registry DB unreachable, value missing on
+# the row — falls through to ``code`` so the fleet keeps its current
+# behaviour. Failure-modes default to the most conservative choice (more
+# ceremony, not less).
+CEREMONY_PROFILE_DEFAULT = "code"
+_CEREMONY_PROFILES = {"code", "knowledge"}
 # Per-project marker that records "auto-dispatch was force-disabled here by a
 # real backend start". Stored as JSON in ``KanbanMeta`` so the UI can show the
 # timestamp inline on the toggle component — without this, the WARNING in
@@ -2990,17 +3017,6 @@ async def _resolve_plan_for_child(session, card) -> tuple[str, str | None, str |
     return (PLAN_MISSING_ON_PARENT, None, plan_id, parent_id)
 
 
-# Default ceremony profile. ``cockpit-richting-decision.md`` §4 ships two
-# profiles: ``code`` (full PR/ship workflow, the pre-feature default) and
-# ``knowledge`` (no tests, no PR, lighter persona). Anything we cannot
-# resolve — unregistered project, registry DB unreachable, value missing on
-# the row — falls through to ``code`` so the fleet keeps its current
-# behaviour. Failure-modes default to the most conservative choice (more
-# ceremony, not less).
-CEREMONY_PROFILE_DEFAULT = "code"
-_CEREMONY_PROFILES = {"code", "knowledge"}
-
-
 async def _load_ceremony_profile(project_path: str | None) -> str:
     """Read the ``ceremony_profile`` column from the registry ``projects`` row.
 
@@ -4977,6 +4993,10 @@ async def _resolve_target_column(session, card, *, project_path: str,
     (empty) analyst column had room for — the analyst never picked them up. See
     the "analyst neemt geen analyse-kaarten op" postmortem.
 
+    Also loads the project's ``ceremony_profile`` so knowledge projects gate
+    against the researcher column instead of engineer — the cap must agree
+    with the column the spawn actually lands in (kaart 5fcfca7f… blocker).
+
     The work_type lookup mirrors `_run_card`'s try/except: a transient DB error
     degrades to the legacy engineer routing rather than wedging the tick.
     """
@@ -4991,10 +5011,12 @@ async def _resolve_target_column(session, card, *, project_path: str,
             card.id, project_key,
         )
         fallback_persona = None
+    ceremony_profile = await _load_ceremony_profile(project_path)
     return _phase_target_agent(
         card, project_path=project_path, phase="executor",
         source_column=card.column, agent_override=agent_override,
         known_clis=_known_cli_ids(), fallback_persona=fallback_persona,
+        ceremony_profile=ceremony_profile,
     )
 
 
@@ -6887,10 +6909,18 @@ async def _run_card(
             card.id, project_key,
         )
         fallback_persona = None
+    # Resolve the project's ceremony_profile before the target-agent resolver
+    # runs — knowledge projects need the researcher persona swap applied to
+    # the column the card is moved into, not only to the ship-recipe (kaart
+    # 5fcfca7f… blocker). Single projection on the registry DB; on any
+    # failure the helper defaults to "code" so a transient hiccup never
+    # strands a card in Doing.
+    ceremony_profile = await _load_ceremony_profile(project_path)
     target_agent = _phase_target_agent(
         card, project_path=project_path, phase=phase, source_column=source_column,
         agent_override=agent_override, known_clis=known_clis,
         fallback_persona=fallback_persona,
+        ceremony_profile=ceremony_profile,
     )
 
     await apply_operation(
@@ -7025,14 +7055,11 @@ async def _run_card(
     )
     cav_active = bool(cav_text)
     pon_active = bool(pon_text)
-    # Resolve the project's ceremony profile (cockpit-richting-decision.md §4).
-    # ``code`` keeps the full engineer recipe; ``knowledge`` swaps in the
-    # lighter recipe (no FCR subagent, no frontend checks, no PR mode,
-    # deliverable is a note). Resolved here once per spawn, default ``code``
-    # on any lookup failure so a stray DB hiccup never strands a card in
-    # Doing. The lookup is a single column projection on the registry DB —
-    # see ``_load_ceremony_profile`` for the failure-mode contract.
-    ceremony_profile = await _load_ceremony_profile(project_path)
+    # ``ceremony_profile`` was loaded earlier in ``_run_card`` so the persona
+    # swap could land on the right column; reuse it here for the ship-recipe
+    # branch in ``build_card_prompt``. The lookup is a single column
+    # projection on the registry DB — see ``_load_ceremony_profile`` for the
+    # failure-mode contract.
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         phase=phase,
         impediment_question=impediment_question,
