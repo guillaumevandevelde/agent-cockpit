@@ -67,7 +67,7 @@ De scheduler draait op APScheduler's in-memory jobstore, dus elke job sterft met
 
 **Opgelost op 2026-08-16.** `auto_resume_service.set_enabled` schreef alleen naar een geheugen-dict, dus auto-resume stond na elke herstart stil weer uit. Er is nu een `auto_resume_configs`-tabel; de route schrijft door en `reconciler.hydrate_auto_resume` laadt de rijen bij het opstarten terug. De dicts blijven bestaan als cache, en wat deze draai al is gezet wint van de rij.
 
-**Wel opgevallen, niet opgelost:** de route is `/auto-resume/{cwd:path}`, en zo'n padparameter levert het pad *zonder* leidende slash. De sleutel die de API vastlegt (`home/me/project`) is dus niet dezelfde string als de `cwd` die de session-hook doorgeeft (`/home/me/project`). Lezen en schrijven via de API zijn onderling consistent, dus de instelling werkt vanuit de UI — maar de hook-kant kijkt mogelijk naar een andere sleutel. Dat vraagt een meting op een echte hook-payload voordat er iets aan verandert.
+**✅ Geïmplementeerd (kaart f3f7106d…): de route herstelt de leidende slash van `cwd`.** Effect: een POST naar `/auto-resume/home/me/project` legt nu de sleutel `/home/me/project` vast — dezelfde string als de `cwd` uit de hook-payload, waarop `hook_event` `is_enabled` aanroept. Gemeten vóór de fix: de enkele-slash-vorm sloeg `home/me/project` op, dus auto-resume deed daarna stil niets. De dubbele-slash-vorm (`/auto-resume//home/me/project`) kwam al goed uit en blijft werken. Bewaakt door `test_route_key_matches_the_hook_cwd` in `backend/tests/test_auto_resume_persistence.py`.
 
 ## Wat hier nog moet gebeuren
 

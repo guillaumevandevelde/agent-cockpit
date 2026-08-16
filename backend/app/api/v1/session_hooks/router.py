@@ -153,9 +153,23 @@ async def hooks_install():
 
 # --- Auto-resume endpoints ---
 
+def _abs_cwd(cwd: str) -> str:
+    """Herstel de leidende slash die ``{cwd:path}`` weglaat.
+
+    Een POST naar ``/auto-resume/home/me/project`` levert ``home/me/project``.
+    De sleutel waarop ``hook_event`` boven kijkt is de ``cwd`` uit de
+    hook-payload, en die is absoluut (``/home/me/project``). Zonder deze
+    normalisatie komen die twee sleutels niet overeen en doet auto-resume
+    stil niets. De dubbele-slash-vorm (``/auto-resume//home/me/project``)
+    kwam wél goed uit en blijft werken.
+    """
+    return cwd if cwd.startswith("/") else "/" + cwd
+
+
 @router.get("/auto-resume/{cwd:path}")
 async def get_auto_resume(cwd: str):
     """Check if auto-resume is enabled for a project."""
+    cwd = _abs_cwd(cwd)
     return {
         "cwd": cwd,
         "enabled": auto_resume_service.is_enabled(cwd),
@@ -165,6 +179,7 @@ async def get_auto_resume(cwd: str):
 @router.post("/auto-resume/{cwd:path}")
 async def set_auto_resume(cwd: str, enabled: bool = True):
     """Enable or disable auto-resume for a project."""
+    cwd = _abs_cwd(cwd)
     auto_resume_service.set_enabled(cwd, enabled)
     # Schrijf door naar de tabel: zonder deze regel was de instelling na een
     # herstart van de backend stil weer weg.
@@ -179,5 +194,6 @@ async def set_auto_resume(cwd: str, enabled: bool = True):
 @router.delete("/auto-resume/{cwd:path}")
 async def cancel_auto_resume(cwd: str):
     """Cancel a pending auto-resume for a project."""
+    cwd = _abs_cwd(cwd)
     cancelled = auto_resume_service.cancel(cwd)
     return {"cwd": cwd, "cancelled": cancelled}
