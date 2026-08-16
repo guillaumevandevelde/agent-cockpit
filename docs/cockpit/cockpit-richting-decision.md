@@ -58,6 +58,8 @@ Afgewezen alternatieven: de fabrieksframing uit `00-orientation.md`, en de erfen
 
 Er ontbreekt hierbij een persona. `.claude/agents/` bevat er drie — analyst, engineer en reviewer — en die zijn alle drie fabrieksvormig. Een engineer-persona op een onderzoekskaart is een mismatch. Het ceremonieprofiel heeft dus een vierde persona nodig voor kenniswerk.
 
+**✅ Geïmplementeerd (kaart `5fcfca7f…`): het ceremonieprofiel.** Een `ceremony_profile` kolom (`code` | `knowledge`, default `code`) op de `projects`-tabel + Pydantic Literal + alembic-revisie `7a1c9e3b8d5f`. De dispatch-prompt leest het profiel één keer per spawn (`_load_ceremony_profile` in `backend/app/kanban/dispatch.py`) en kiest `_build_knowledge_ship_instructions` wanneer het `knowledge` is — geen FCR-subagent, geen frontend-checks, geen browser-count, geforceerde direct-merge (geen PR-route), `attach_deliverable(kind="note", ...)`. Nieuwe persona `.claude/agents/researcher.md` voor kenniswerk. Geen bestaand project raakt zijn profiel kwijt: de default is `code` en een project moet expliciet via `PATCH /api/v1/projects/{id}` omschakelen. Eenentwintig tests in `backend/tests/test_ceremony_profile.py` dekken de Pydantic-enum, het ORM-default, de PATCH-route, de dispatch-branch (inclusief de PR→direct-downgrade voor kennisprojecten), en de vier faalmodi van `_load_ceremony_profile`.
+
 ## 5. Beslissing 5 — de volgorde
 
 Route: **waarde-eerst**, met een kernharding ervóór. De drie waarde-onderdelen zijn het mobiele venster, de meldingsregel en het ceremonieprofiel.
