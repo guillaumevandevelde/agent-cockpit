@@ -474,15 +474,41 @@ export default function KanbanPage() {
       !FIXED_COLUMNS.has(column) &&
       !card.claimed_by?.startsWith("agent:");
 
+    // Done-moves carry a human-meaningful summary so the server's
+    // `summary_required` gate (kaart efbb82e6…) doesn't reject the UI
+    // drag with a bare "Failed to move card" toast. The card's
+    // `done_summary` banner and activity feed show the text verbatim.
+    // Non-terminal moves don't need a summary; the gate accepts None.
+    const moveSummary =
+      column === "Done"
+        ? `Moved to Done from ${card?.column ?? "Backlog"} via kanban UI`
+        : undefined;
+
     mutatingRef.current += 1;
     setCards((cs) => cs.map((c) => (c.id === cardId ? { ...c, column } : c)));
     try {
+      let moved: Card | undefined;
       try {
-        await kanbanApi.move(cardId, column);
+        moved = await kanbanApi.move(cardId, column, moveSummary);
       } catch {
         toast.error("Failed to move card");
         void reload();
         return;
+      }
+
+      // Parking affordance (kaart eb75b599…): a Done move for a card
+      // with ≥1 child lands in `Awaiting Subtasks` server-side instead
+      // of Done. The optimistic local state above already shows the
+      // requested column; surface the redirect explicitly so the user
+      // knows the card is waiting on its children rather than silently
+      // seeing it sit in the wrong lane on the next reload.
+      if (
+        column === "Done" &&
+        moved.column === "Awaiting Subtasks"
+      ) {
+        toast.info(
+          "Card parked in Awaiting Subtasks — will auto-close when its children reach Done.",
+        );
       }
 
       if (shouldDispatch && card) {

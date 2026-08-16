@@ -1018,6 +1018,26 @@ async def move_card(cid: str, payload: MoveRequest):
         if final_column == "Done" and card.parent_card_id:
             await service.try_close_ancestors(s, card.parent_card_id)
 
+        # In-place close for the just-parked card itself (kaart eb75b599…,
+        # review-round 2): a parent whose children are *already* Done
+        # when the operator drags it to Done via REST parks in
+        # ``Awaiting Subtasks`` (the redirect above) but has nothing to
+        # wait for — without an explicit close attempt it strands there
+        # forever, because the genuine-Done walk above only fires on a
+        # card that actually reached Done, and nothing else runs
+        # ``close_parent_if_all_children_done`` on the freshly parked
+        # card. ``try_close_ancestors(card_id)`` walks from this card:
+        # its first iteration sees the parked card, finds every child
+        # already Done, and moves it to Done in the same transaction —
+        # the user sees Done, not a pointless round-trip through
+        # ``Awaiting Subtasks``. When at least one child is still open
+        # ``close_parent_if_all_children_done`` returns False and the
+        # walk terminates without a close, matching the existing parked-
+        # parent invariant. Mirrors the auto-close invariant the MCP
+        # path upholds via its own post-move walk (``mcp_server.py:604-605``).
+        if final_column == "Awaiting Subtasks":
+            await service.try_close_ancestors(s, cid)
+
         await s.commit()
         return await _reload(s, cid)
 
