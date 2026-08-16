@@ -137,12 +137,12 @@ async def test_app_database_tables_cover_all_models_after_eager_import():
     """
     tables = set(Base.metadata.tables.keys())
 
+    # A representative sample, not an exhaustive list: it only has to prove the
+    # eager import populated the metadata. Drop an entry here when its model is
+    # deleted -- `mail_messages` outlived its model in the agent-mail wake/nudge
+    # removal (6ac13b84) and failed this gate on master until 2026-08-16.
     expected_core_tables = {
         "projects", "backups", "mcp_access_tokens",
-        # mail_messages is hier op 2026-08-16 uit verwijderd: commit 97e821fc
-        # (kaart 46930d26) haalde de berichten-, mailbox- en receipt-laag van
-        # Agent Mail weg, inclusief het model. De roster-laag bleef, dus
-        # mail_team_members en mail_agent_sessions horen er nog wel te staan.
         "mail_team_members", "mail_agent_sessions",
     }
     missing = expected_core_tables - tables
