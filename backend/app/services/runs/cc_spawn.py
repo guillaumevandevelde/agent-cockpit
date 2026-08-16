@@ -254,36 +254,84 @@ def _resolve_project_directory(project_folder: str, session_id: str | None = Non
     if folder_path.name != project_folder or ".." in folder_path.parts:
         raise ValueError(f"Invalid project folder: '{project_folder}'")
 
+    decoded = "/" + project_folder.lstrip("-").replace("-", "/")
+    decoded_path = Path(decoded)
+    # Guard against path traversal — must be an existing absolute directory
+    if not decoded_path.is_absolute() or ".." in decoded_path.parts:
+        raise ValueError(f"Invalid project folder: '{project_folder}'")
+
+    # Fast-path: the decoded worktree exists, so the resume project_folder is
+    # still good. Skip the transcript walker entirely (kaart cac950cb…).
+    if decoded_path.is_dir():
+        return str(decoded_path.resolve())
+
+    # Slow path: the decoded worktree is gone — look for a transcript cwd that
+    # points at a still-existing directory. This preserves the original
+    # transcript-preference behavior for the edge case where the user renamed
+    # the branch and the leftover transcript's cwd is the new (different) path.
+    # The fast-fail below intercepts the bug case where the worktree was
+    # merged + GC'd AND the transcript cwd points to the same dead path: the
+    # walker used to spin for ~27s parsing 285 × ~3KB lines on a 947K
+    # transcript (the real 2026-08-16 reproduce for kaart cac950cb…) before
+    # raising, blocking the entire dispatch tick while holding a column slot.
+    # Probe the first line cheaply before paying for the full parse.
     if session_id:
         transcript = Path.home() / ".claude" / "projects" / project_folder / f"{session_id}.jsonl"
         if transcript.is_file():
-            try:
-                with transcript.open("r", encoding="utf-8") as handle:
-                    for line in handle:
-                        try:
-                            cwd = json.loads(line).get("cwd")
-                        except json.JSONDecodeError:
-                            continue
-                        if not cwd:
-                            continue
-                        resolved = Path(cwd).resolve()
-                        if resolved.is_absolute() and ".." not in Path(cwd).parts and resolved.is_dir():
-                            return str(resolved)
-            except OSError:
-                logger.warning("Could not read Claude transcript for directory resolution: %s", transcript)
-
-    decoded = "/" + project_folder.lstrip("-").replace("-", "/")
-    resolved = Path(decoded).resolve()
-    # Guard against path traversal — must be an existing absolute directory
-    if not resolved.is_absolute() or ".." in Path(decoded).parts:
-        raise ValueError(f"Invalid project folder: '{project_folder}'")
-    if resolved.is_dir():
-        return str(resolved)
+            first_cwd = _read_first_transcript_cwd(transcript)
+            if first_cwd is not None:
+                if not _is_safe_absolute_path(first_cwd):
+                    raise ValueError(
+                        f"Could not resolve project directory for '{project_folder}'. "
+                        f"Please provide the directory path explicitly."
+                    )
+                resolved = Path(first_cwd).resolve()
+                if resolved.is_dir():
+                    return str(resolved)
+                # First cwd matches something but the directory is gone — same
+                # case as the decoded path, fall through to the raise.
+            else:
+                # No cwd anywhere in the transcript — same fast-fail as the
+                # decoded-path missing case.
+                pass
 
     raise ValueError(
         f"Could not resolve project directory for '{project_folder}'. "
         f"Please provide the directory path explicitly."
     )
+
+
+def _read_first_transcript_cwd(transcript: Path) -> str | None:
+    """Read the first ``cwd`` value from a Claude transcript file.
+
+    Walks the file line-by-line until a JSON object with a ``cwd`` field is
+    found. Avoids the cost of full json.loads() on every line by streaming
+    raw bytes and stopping at the first match. Returns ``None`` when no
+    ``cwd`` is found or the file cannot be read.
+    """
+    try:
+        with transcript.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                # Cheap prefix check skips the bulk of assistant/hook lines
+                # that have no cwd. Avoids paying for json.loads on the
+                # usually-much-larger non-cwd entries.
+                if '"cwd"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                cwd = entry.get("cwd")
+                if cwd:
+                    return cwd
+    except OSError:
+        logger.warning("Could not read Claude transcript for directory resolution: %s", transcript)
+    return None
+
+
+def _is_safe_absolute_path(cwd: str) -> bool:
+    """True when ``cwd`` is an absolute path without traversal segments."""
+    return Path(cwd).is_absolute() and ".." not in Path(cwd).parts
 
 
 def spawn_session(
