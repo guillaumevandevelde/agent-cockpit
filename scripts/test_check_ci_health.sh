@@ -54,6 +54,11 @@
 #       it, whether the PR run itself is green or billing-blocked.
 #  20.  cockpit-doctor check #9 surfaces reproduction B as a CI-health WARN
 #       and never prints the misleading "CI health clean" PASS.
+#  21.  **supersession**: van de afgeronde master-runs eindigde ≥25% als
+#       `cancelled` → geflagd (die commits kregen nooit een oordeel).
+#       `--cancelled-threshold=PCT` verzet de drempel.
+#  22.  supersession negeert een kleine steekproef (<8 afgeronde runs).
+#  23.  `--cancelled-threshold` weigert 0 en niet-numerieke waarden (exit 2).
 
 set -u
 
@@ -443,6 +448,49 @@ check "doctor reproduction B → emits CI health warning" \
   'echo "$OUT" | sed -E '\''s/\x1b\[[0-9;]*[a-zA-Z]//g'\'' | grep -qE "WARN.*CI health"'
 check "doctor reproduction B → does NOT say CI health clean" \
   '! echo "$OUT" | grep -qE "CI health clean"'
+
+# ----------------------------------------------------------------------------
+echo "Task 21: supersession — 4 van 10 afgeronde master-runs cancelled → geflagd"
+sup="$TMP/sup"
+write_fixtures "$sup" \
+  "9201|cancelled|master|46" \
+  "9202|cancelled|master|46" \
+  "9203|cancelled|master|46" \
+  "9204|cancelled|master|46" \
+  "9205|success|master|46" \
+  "9206|success|master|46" \
+  "9207|success|master|46" \
+  "9208|success|master|46" \
+  "9209|success|master|46" \
+  "9210|success|master|46"
+out=$(CI_HEALTH_FIXTURES_DIR="$sup" bash "$SUT" 2>&1); rc=$?
+check "supersession → exit 0 (advisory)" '[ "$RC" -eq 0 ]'
+check "supersession → emits WARNING" 'echo "$OUT" | grep -qE "WARNING:"'
+check "supersession → noemt cancelled + aantallen" \
+  'echo "$OUT" | grep -qE "4 van 10 .*cancelled"'
+check "supersession → noemt percentage en drempel" 'echo "$OUT" | grep -qE "40%.*25%"'
+check "supersession → --strict exits 1" \
+  'CI_HEALTH_FIXTURES_DIR='"$sup"' bash '"$SUT"' --strict >/dev/null 2>&1; [ $? -eq 1 ]'
+check "supersession → drempel 50 onderdrukt de hit" \
+  'CI_HEALTH_FIXTURES_DIR='"$sup"' bash '"$SUT"' --cancelled-threshold=50 2>&1 | grep -qE "^OK:"'
+
+# ----------------------------------------------------------------------------
+echo "Task 22: supersession — kleine steekproef geeft geen ruis"
+# 1 cancelled van 2 = 50%, maar onder de minimum-steekproef van 8 → stil.
+sup_small="$TMP/sup-small"
+write_fixtures "$sup_small" \
+  "9301|cancelled|master|46" \
+  "9302|success|master|46"
+out=$(CI_HEALTH_FIXTURES_DIR="$sup_small" bash "$SUT" 2>&1); rc=$?
+check "kleine steekproef → geen cancelled-warning" '! echo "$OUT" | grep -qiE "cancelled"'
+check "kleine steekproef → exit 0" '[ "$RC" -eq 0 ]'
+
+# ----------------------------------------------------------------------------
+echo "Task 23: --cancelled-threshold valideert zijn waarde"
+out=$(bash "$SUT" --cancelled-threshold=0 2>&1); rc=$?
+check "threshold=0 → exit 2" '[ "$RC" -eq 2 ]'
+out=$(bash "$SUT" --cancelled-threshold=abc 2>&1); rc=$?
+check "threshold=abc → exit 2" '[ "$RC" -eq 2 ]'
 
 # ----------------------------------------------------------------------------
 echo ""
