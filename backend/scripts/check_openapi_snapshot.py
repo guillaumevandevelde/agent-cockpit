@@ -104,6 +104,19 @@ def three_way_merge(snapshot: dict, base: dict, current: dict) -> dict:
     return result
 
 
+def targeted_update_stalled(merged: dict, current: dict) -> bool:
+    """True when a targeted update wrote nothing yet the snapshot is still stale.
+
+    `three_way_merge` applies `current - base`. When the drift originated on
+    master rather than on a branch, the merge-base is HEAD itself, so that delta
+    is empty and the merge is a no-op -- while the snapshot still disagrees with
+    the live spec and the gate stays red. Reporting "already up to date" there
+    sends the caller in a circle, because `run_check`'s failure message
+    recommends exactly this no-op command.
+    """
+    return contract_shape(merged) != current
+
+
 def unified_diff(old_text: str, new_text: str) -> str:
     return "".join(
         difflib.unified_diff(
@@ -202,6 +215,20 @@ def run_update(*, full: bool, dry_run: bool) -> int:
     new_text = snapshot_text(new_shape)
     diff = unified_diff(old_text, new_text)
     if not diff:
+        if targeted_update_stalled(new_shape, current):
+            print(
+                "Targeted update applied nothing, but the snapshot still does "
+                "not match the live API surface.\n\n"
+                "That means the drift originated on master rather than on this "
+                "branch: the merge-base is HEAD itself, so this branch's delta "
+                "is empty and --update has nothing to apply.\n\n"
+                "Run: cd backend && python scripts/check_openapi_snapshot.py "
+                "--full\n"
+                "(--full regenerates the whole snapshot; check the diff with "
+                "--dry-run first.)",
+                file=sys.stderr,
+            )
+            return 1
         print("Snapshot already up to date; nothing to write.")
         return 0
 
@@ -240,6 +267,8 @@ def run_check() -> int:
             "Run: cd backend && python scripts/check_openapi_snapshot.py --update\n"
             "(--update applies only this branch's changes; use --full to "
             "regenerate the whole snapshot.)\n"
+            "If --update reports it applied nothing, the drift originated on "
+            "master; it will then point you to --full.\n"
             "Then check whether the frontend's hand-maintained TypeScript "
             "types (frontend/src/types/) need matching updates, and commit "
             "both.",

@@ -12,6 +12,7 @@ from __future__ import annotations
 from scripts.check_openapi_snapshot import (
     _changed_line_count,
     snapshot_text,
+    targeted_update_stalled,
     three_way_merge,
     unified_diff,
 )
@@ -127,6 +128,40 @@ def test_no_branch_change_leaves_snapshot_untouched():
     snapshot = {"paths": {"/a": {}}, "components": {"schemas": {}}}
 
     assert three_way_merge(snapshot, base, current) == snapshot
+
+
+def test_stalled_when_targeted_update_is_a_noop_but_drift_remains():
+    # The master-drift case: an endpoint was deleted in a commit that landed on
+    # master without updating the snapshot. On master, merge-base(HEAD,
+    # origin/master) == HEAD, so base == current and three_way_merge returns the
+    # snapshot untouched -- while that snapshot still disagrees with the live
+    # spec. Reporting "already up to date" there is what kept quality.yml red:
+    # the check's failure message recommends exactly this no-op command.
+    current = {"paths": {"/keep": {"get": {}}}, "components": {"schemas": {}}}
+    merged = {
+        "paths": {"/keep": {"get": {}}, "/gone": {"post": {}}},
+        "components": {"schemas": {}},
+    }
+
+    assert targeted_update_stalled(merged, current) is True
+
+
+def test_not_stalled_when_merged_result_matches_live_spec():
+    current = {"paths": {"/keep": {"get": {}}}, "components": {"schemas": {}}}
+
+    assert targeted_update_stalled(dict(current), current) is False
+
+
+def test_stalled_ignores_env_dependent_root_path():
+    # "/" is stripped from the compared shape (it exists only when frontend/dist
+    # is on disk), so a snapshot carrying it is not drift.
+    current = {"paths": {"/keep": {"get": {}}}, "components": {"schemas": {}}}
+    merged = {
+        "paths": {"/keep": {"get": {}}, "/": {"get": {}}},
+        "components": {"schemas": {}},
+    }
+
+    assert targeted_update_stalled(merged, current) is False
 
 
 def test_unified_diff_empty_when_identical_and_counts_changes():
