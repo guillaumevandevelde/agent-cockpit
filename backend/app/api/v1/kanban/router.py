@@ -91,6 +91,14 @@ def _write_json_atomic(target: Path, data: dict) -> None:
     corrupt an existing .mcp.json."""
     import os
     tmp = target.with_suffix(target.suffix + ".tmp")
+    # Writes a JSON-dict (used for `.mcp.json`) to `~/.claude-registry/...` —
+    # local-only store, no network-reachable oppervlak, OS-permissies volstaan.
+    # Confirmed by-design in docs/cockpit/security-scanning-decision.md §2.1
+    # (kaart beace361…). Path-injection op deze functie wordt via
+    # `.github/codeql/codeql-config.yml` paths-ignore stillig afgedekt; deze
+    # per-call-site suppressie documenteert de by-design-uitspraak ook als de
+    # paths-ignore later versmalt.
+    # codeql[py/clear-text-storage-sensitive-data]
     tmp.write_text(json.dumps(data, indent=2))
     os.replace(tmp, target)
 

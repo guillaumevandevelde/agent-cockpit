@@ -1,0 +1,57 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Weekly — same cadence as the old default-setup scan.
+    - cron: "17 6 * * 1"
+
+# Cancel stale runs on the same ref+workflow so a fresh push doesn't pile
+# another full CodeQL pass on top of an in-progress one. Different workflows
+# on the same ref stay parallel (workflow prefix keeps the slot independent).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      # actions: read — required for github/codeql-action/init@v3 to read the
+      #   workflow run context.
+      # contents: read — clone the repo.
+      # security-events: write — upload SARIF to the code-scanning tab.
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+          - language: javascript-typescript
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Initializes the CodeQL CLI for the languages in the matrix. The
+      # `config-file` points at the by-design-policy committed in
+      # `.github/codeql/codeql-config.yml`; `queries: security-extended` is
+      # also pinned there.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          config-file: .github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
