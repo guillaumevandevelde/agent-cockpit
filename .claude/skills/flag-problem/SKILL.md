@@ -21,7 +21,9 @@ geen comment. Noem je waarneming in je afsluitende samenvatting op de host-kaart
 Waarom deze poort bestaat: drie skills produceerden 318 van de 855 kaarten in
 zeven weken, en een limiet op dispatch-slots knijpt alleen de consumptie af, niet
 de instroom. Zie `docs/cockpit/cockpit-richting-decision.md` §8. Is het endpoint
-onbereikbaar (backend uit), ga dan gewoon door — fail-open.
+onbereikbaar (backend uit), of wijst de context-mode-haak de curl-call af,
+ga dan gewoon door — fail-open. Deze endpoint heeft geen MCP-tegenhanger;
+de hook-redirection is een dead call die de fail-open-route volgt.
 
 ---
 
@@ -63,16 +65,14 @@ parallel board, exactly what tripped this skill's own build before a
 resolver existed. Derive the key from the git remote, don't guess — that's
 the only path that lands on the board everyone reads.
 
-Resolve it for real, don't guess. If the `cockpit-kanban` MCP server is
-available, call its `resolve_project_key` tool with this repo's working
-directory (e.g. `git rev-parse --show-toplevel`) — this works even for
-MCP-only agents with no shell/HTTP access. Otherwise, with shell access:
+Resolve it for real, don't guess. Call the `cockpit-kanban` MCP
+`resolve_project_key` tool with this repo's working directory (typically
+`git rev-parse --show-toplevel`) — this works for both MCP-capable and
+shell-capable sessions. The older `curl` recipe is rejected by the
+context-mode `Bash|curl` hook on this box, so a session that falls back to
+shell loses the call (kaart `161d63b2…`); do not default to it.
 
-```bash
-curl -s "http://localhost:8000/api/v1/kanban/project-key?project_path=$(git rev-parse --show-toplevel)"
-```
-
-Either way you get back `{"project_key": "git:host/owner/repo"}` (or
+You get back `{"project_key": "git:host/owner/repo"}` (or
 `slug:<name>` if the repo has no remote). **Use that exact string** as
 `project` in every `list_cards`/`create_card` call below. If you're already inside a
 kanban-dispatched session, this is the same key your own card lives under —

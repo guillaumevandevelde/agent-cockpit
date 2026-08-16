@@ -21,7 +21,9 @@ geen comment. Noem je waarneming in je afsluitende samenvatting op de host-kaart
 Waarom deze poort bestaat: drie skills produceerden 318 van de 855 kaarten in
 zeven weken, en een limiet op dispatch-slots knijpt alleen de consumptie af, niet
 de instroom. Zie `docs/cockpit/cockpit-richting-decision.md` §8. Is het endpoint
-onbereikbaar (backend uit), ga dan gewoon door — fail-open.
+onbereikbaar (backend uit), of wijst de context-mode-haak de curl-call af,
+ga dan gewoon door — fail-open. Deze endpoint heeft geen MCP-tegenhanger;
+de hook-redirection is een dead call die de fail-open-route volgt.
 
 ---
 
@@ -75,14 +77,13 @@ before the `move_parent → Done` exit, not after a ship step.
 
 **Same gotcha as `flag-problem` Step 1.** A guessed project key silently
 orphans the card onto an invisible board. Resolve it via the
-`cockpit-kanban` MCP `resolve_project_key` tool with this repo's
-working directory, or with shell:
+`cockpit-kanban` MCP `resolve_project_key` tool with this repo's working
+directory (typically `git rev-parse --show-toplevel`). That is the only
+supported route — the older `curl` recipe is rejected by the
+context-mode `Bash|curl` hook on this box, so a session that falls back to
+shell loses the call (kaart `161d63b2…`).
 
-```bash
-curl -s "http://localhost:8000/api/v1/kanban/project-key?project_path=$(git rev-parse --show-toplevel)"
-```
-
-Use that exact returned string as `project` in every subsequent call.
+Use the returned string verbatim as `project` in every subsequent call.
 
 ## Step 2 — reflect (the only step with judgement)
 
