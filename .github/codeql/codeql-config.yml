@@ -1,0 +1,75 @@
+# CodeQL advanced-setup config for guillaumevandevelde/agent-cockpit.
+#
+# By-design policy landed as a committable artefact — `git log` on this file is
+# the audit trail. Source of truth: docs/cockpit/security-scanning-decision.md
+# §2.1 (regel-tabel) + §7 (bijstelling 2026-08-16). Kaart: beeece50… / 19e28ba75….
+#
+# Threat model (§1): single-user host, backend bound to 127.0.0.1:8000. Anyone
+# who can reach the API already has shell on the host. `project_path`-style
+# inputs therefore have no privilege boundary to defend against the operator.
+#
+# Open alerts at 2026-08-16: 215 in 3 regels (py/path-injection 210, py/command-
+# line-injection 4 — 3 by-design + 1 REAL, py/clear-text-storage 1). This config
+# silences the 211 by-design alerts via paths-ignore + per-call-site suppressies.
+# The 1 REAL `skills_registry_service.py:298` alert stays open until sibling
+# kaart 3d5a95f56… (`source`-validatie op install_endpoint) lands.
+#
+# HERZIENING: jaarlijkse security-triage-sweep (recurring-cadence-proposal.md)
+# hertrekt deze tabel. Een te brede `paths-ignore` sluit toekomstige echte
+# path-injection-call-sites stil — alleen per-bestand-paden voor huidige
+# by-design-hits, nooit `backend/app/**`-glob.
+
+name: agent-cockpit-codeql
+
+queries:
+  - uses: security-extended
+
+paths-ignore:
+  # ── py/path-injection (by-design) ──────────────────────────────────────
+  # 210 alerts over 26 bestanden. `Path(project_path)`-ketens op operator-input
+  # (klasse 1/2 uit §1.2): de operator tikt het pad zelf in of zet de kaart
+  # op het bord. Geen externe user, geen privilege-grens. Per-bestand-paden
+  # i.p.v. `backend/app/services/**`-glob zodat een toekomstige echte
+  # path-injection in een by-design-geachte directory niet stil onder een
+  # te-rugge-glob valt.
+  - backend/app/api/v1/files.py
+  - backend/app/api/v1/projects.py
+  - backend/app/api/v1/kanban/router.py
+  - backend/app/kanban/dispatch.py
+  - backend/app/services/agent_service.py
+  - backend/app/services/apm_service.py
+  - backend/app/services/backup_service.py
+  - backend/app/services/blueprint/__init__.py
+  - backend/app/services/blueprint/store.py
+  - backend/app/services/ci_templates/__init__.py
+  - backend/app/services/command_service.py
+  - backend/app/services/config_service.py
+  - backend/app/services/hook_service.py
+  - backend/app/services/inception_service.py
+  - backend/app/services/memory_service.py
+  - backend/app/services/output_style_service.py
+  - backend/app/services/project_service.py
+  - backend/app/services/restore_service.py
+  - backend/app/services/run_service.py
+  - backend/app/services/runs/cc_spawn.py
+  - backend/app/services/runs/spawn.py
+  - backend/app/services/sandcastle_service.py
+  - backend/app/services/secrets_store.py
+  - backend/app/services/skill_dependency_service.py
+  - backend/app/utils/file_utils.py
+  - backend/app/utils/path_utils.py
+  # NIET in paths-ignore: backend/app/services/skills_registry_service.py —
+  # daar zit de echte REAL `py/command-line-injection` (kaart 3d5a95f56…).
+
+  # ── py/clear-text-storage-sensitive-data (by-design) ──────────────────
+  # 1 alert op `kanban/router.py:94` (`_write_json_atomic` → `~/.claude-registry/
+  # *.mcp.json`). Local-only store, OS-permissies volstaan. Hierboven onder
+  # `backend/app/api/v1/kanban/router.py` meegenomen; per-call-site
+  # `# codeql[…]`-suppressie staat in dat bestand als in-line documentatie
+  # voor het geval deze paths-ignore later versmalt.
+
+  # ── py/command-line-injection (by-design) ─────────────────────────────
+  # 3 alerts: cli_executor.py:99 (lgtm→codeql-conversie al gedaan in 9a5e9eae…),
+  # sandcastle_service.py:1163 + 1214. sandcastle_service.py zit in de
+  # path-injection paths-ignore hierboven; per-call-site `# codeql[…]`
+  # suppressies in dat bestand documenteren de by-design-uitspraak.

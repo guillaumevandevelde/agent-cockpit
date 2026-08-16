@@ -1160,6 +1160,11 @@ class SandcastleService:
         if not name.startswith(_CONTAINER_NAME_PREFIX):
             raise ValueError("not a sandcastle container")
 
+        # `runtime` is whitelisted against `_CONTAINER_PROVIDERS` (check above),
+        # `name` is gated on `_CONTAINER_NAME_PREFIX` (check above). `shell=False`
+        # via `create_subprocess_exec`. Confirmed by-design in
+        # docs/cockpit/security-scanning-decision.md §2.1 (kaart beace361…).
+        # codeql[py/command-line-injection]
         process = await asyncio.create_subprocess_exec(
             runtime, "logs", "-f", "--tail", "200", name,
             stdout=asyncio.subprocess.PIPE,
@@ -1211,6 +1216,12 @@ class SandcastleService:
             }
 
         try:
+            # `runtime` is whitelisted against `_CONTAINER_PROVIDERS` (check
+            # above), `dockerfile_path` is hardcoded from `__file__` (no
+            # operator-input in the commando-positie). `shell=False` via
+            # `create_subprocess_exec`. Confirmed by-design in
+            # docs/cockpit/security-scanning-decision.md §2.1 (kaart beace361…).
+            # codeql[py/command-line-injection]
             process = await asyncio.create_subprocess_exec(
                 runtime, "build", "-t", image_name, "-f", str(dockerfile_path), str(dockerfile_path.parent),
                 stdout=asyncio.subprocess.PIPE,
