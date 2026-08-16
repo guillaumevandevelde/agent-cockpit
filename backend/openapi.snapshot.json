@@ -14991,6 +14991,24 @@
         "title": "SeedCatalogResponse",
         "type": "object"
       },
+      "SelfImproveRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_key",
+          "enabled"
+        ],
+        "title": "SelfImproveRequest",
+        "type": "object"
+      },
       "SessionBlock": {
         "description": "5-hour billing block usage.",
         "properties": {
@@ -26390,6 +26408,85 @@
         "summary": "Redispatch All",
         "tags": [
           "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/self-improve": {
+      "get": {
+        "description": "Lees de schakelaar. ``enabled=true`` betekent: de loop draait.\n\nStandaard aan \u2014 een bord zonder rij gedraagt zich zoals het altijd deed.",
+        "operationId": "get_self_improve_api_v1_kanban_self_improve_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": true,
+            "schema": {
+              "title": "Project Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Self Improve",
+        "tags": [
+          "kanban"
+        ]
+      },
+      "post": {
+        "description": "Zet de schakelaar om. Idempotent.\n\nWerkt bij de volgende dispatch-tick, zonder herstart. Zet je hem uit, dan\nstopt de loop aan twee kanten: gedispatchte sessies krijgen de instructie\ngeen retro te draaien en geen `[self-improve]`-kaarten te filen, en de\ndispatcher slaat bestaande kaarten van die soort over.",
+        "operationId": "set_self_improve_api_v1_kanban_self_improve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfImproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Self Improve",
+        "tags": [
+          "kanban"
         ]
       }
     },

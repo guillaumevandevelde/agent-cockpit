@@ -71,6 +71,8 @@ De scheduler draait op APScheduler's in-memory jobstore, dus elke job sterft met
 
 ## Wat hier nog moet gebeuren
 
+**Het pane-resume-cluster uit `dispatch.py` lichten.** Dat is nu de eerstvolgende blokkade, niet een netheidswens. `dispatch.py` staat op 10.110 regels en mag niet groeien, dus de consumptiekant van de zelfverbeter-schakelaar past er niet meer in. De extractie is niet triviaal: `tests/test_pane_resume.py` patcht op twaalf plekken `dispatch.safe_resolve_project_key`, en die patches bereiken de verplaatste code niet meer — precies de no-op-patch-val uit `test-doubles-convention.md`. Elke patch moet dus mee verhuizen, met een assertie dat de dubbel ook echt vuurde.
+
 `headless_runner.py` en `acp_transport.py` zijn feitelijk mechanisme dat in de domeinmap woont. Ze verplaatsen is opruimwerk en gebeurt bij gelegenheid, volgens de snoeiregels uit [`cockpit-richting-decision.md`](./cockpit-richting-decision.md) §6 — niet in één grote beweging.
 
 ## Zelf draaien

@@ -5,6 +5,26 @@ description: Use when any dispatched session — executor/engineer or analyst �
 
 # session-retro
 
+## Stap 0 — staat de zelfverbeteringsloop aan?
+
+**Doe dit vóór alles.** Het bord kan de loop uitgezet hebben, en dan hoort deze
+skill niets te produceren:
+
+```bash
+curl -s "http://localhost:8000/api/v1/kanban/self-improve?project_key=<PROJECT_KEY>"
+```
+
+Antwoordt dat met `"enabled": false`, stop dan direct. File geen kaart, plaats
+geen comment. Noem je waarneming in je afsluitende samenvatting op de host-kaart
+— daar leest een mens het, en die beslist of er een kaart van komt.
+
+Waarom deze poort bestaat: drie skills produceerden 318 van de 855 kaarten in
+zeven weken, en een limiet op dispatch-slots knijpt alleen de consumptie af, niet
+de instroom. Zie `docs/cockpit/cockpit-richting-decision.md` §8. Is het endpoint
+onbereikbaar (backend uit), ga dan gewoon door — fail-open.
+
+---
+
 End-of-session self-improvement reflection. You look back over the work you
 just did in THIS session, identify 0–N concrete improvement points that
 would have made this session — or the next one — measurably better at
