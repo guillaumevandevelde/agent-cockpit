@@ -21,7 +21,10 @@ from app.models.schemas import (
 from app.services.agent_service import AgentService
 from app.services.skill_dependency_service import SkillDependencyService
 from app.services.skill_stats_service import SkillStatsService
-from app.services.skills_registry_service import SkillsRegistryService
+from app.services.skills_registry_service import (
+    InvalidSkillSourceError,
+    SkillsRegistryService,
+)
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
 
@@ -260,12 +263,15 @@ async def install_registry_skill(
 
     Uses `npx skills add <source>` to install.
     """
-    result = SkillsRegistryService.install_skill(
-        source=request.source,
-        skill_names=request.skill_names,
-        global_install=request.global_install,
-        project_path=project_path,
-    )
+    try:
+        result = SkillsRegistryService.install_skill(
+            source=request.source,
+            skill_names=request.skill_names,
+            global_install=request.global_install,
+            project_path=project_path,
+        )
+    except InvalidSkillSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     return RegistryInstallResponse(**result)
 
