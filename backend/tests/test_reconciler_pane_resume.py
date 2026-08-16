@@ -147,3 +147,64 @@ def test_an_overdue_promise_is_still_rebuilt(monkeypatch, minutes_ago):
 
     assert asyncio.run(reinstall_pending_pane_resumes()) == 1
     assert seen == [reset_at]
+
+
+def test_an_overdue_promise_pushes_telegram(monkeypatch):
+    """Een achterstallige belofte vuurt de §4-melding (Telegram)."""
+    async def _fake_try(cwd, reset_time, message, *, attempts=1):
+        return True
+
+    sent: list[str] = []
+
+    async def _fake_send(text, **_):
+        sent.append(text)
+        return True
+
+    import app.kanban.dispatch as dispatch_module
+    import app.services.notifications.telegram as tg_module
+    import app.services.scheduling.reconciler as reconciler_module
+
+    monkeypatch.setattr(dispatch_module, "try_pane_resume", _fake_try)
+    monkeypatch.setattr(tg_module, "send_telegram", _fake_send)
+    # De reconciler importeert send_telegram lazy in _notify_overdue_pane_resume;
+    # om de patch te laten werken moet hij op de bron-module staan waar de
+    # reconciler naar kijkt.
+    monkeypatch.setattr(reconciler_module, "send_telegram", _fake_send, raising=False)
+
+    reset_at = datetime.now(UTC) - timedelta(minutes=10)
+    asyncio.run(_card_with_pending_resume(
+        cwd="/x", message="m", reset_at=reset_at,
+    ))
+
+    assert asyncio.run(reinstall_pending_pane_resumes()) == 1
+    assert len(sent) == 1, sent
+    assert "Pane resume overdue" in sent[0]
+    assert reset_at.isoformat() in sent[0]
+
+
+def test_a_future_promise_does_not_push(monkeypatch):
+    """Een belofte die nog in de toekomst ligt is geen §4-geval — geen push."""
+    async def _fake_try(cwd, reset_time, message, *, attempts=1):
+        return True
+
+    sent: list[str] = []
+
+    async def _fake_send(text, **_):
+        sent.append(text)
+        return True
+
+    import app.kanban.dispatch as dispatch_module
+    import app.services.notifications.telegram as tg_module
+    import app.services.scheduling.reconciler as reconciler_module
+
+    monkeypatch.setattr(dispatch_module, "try_pane_resume", _fake_try)
+    monkeypatch.setattr(tg_module, "send_telegram", _fake_send)
+    monkeypatch.setattr(reconciler_module, "send_telegram", _fake_send, raising=False)
+
+    reset_at = datetime.now(UTC) + timedelta(minutes=30)
+    asyncio.run(_card_with_pending_resume(
+        cwd="/x", message="m", reset_at=reset_at,
+    ))
+
+    assert asyncio.run(reinstall_pending_pane_resumes()) == 1
+    assert sent == [], "een toekomstige belofte mag geen push veroorzaken"
