@@ -186,10 +186,10 @@ export const kanbanApi = {
       body: JSON.stringify({ project_path: projectPath }),
     }),
 
-  move: (id: string, column: string): Promise<Card> =>
+  move: (id: string, column: string, summary?: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}/move`, {
       method: "POST",
-      body: JSON.stringify({ column }),
+      body: JSON.stringify({ column, ...(summary ? { summary } : {}) }),
     }),
 
   reorder: (projectKey: string, column: string, orderedIds: string[]): Promise<{ items: Card[] }> =>

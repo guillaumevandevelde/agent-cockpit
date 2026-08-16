@@ -192,6 +192,53 @@ async def test_rest_parked_grandparent_walks_through_parent_to_done():
 
 
 @pytest.mark.asyncio
+async def test_rest_done_with_already_done_children_auto_closes_in_place():
+    """Edge case (kaart eb75b599… review-round 2) — a parent whose
+    children are *already* Done before the parent is moved must NOT
+    strand in `Awaiting Subtasks`. The auto-close walk the MCP path
+    runs on a genuine Done (`mcp_server.move_card:604-605`) only fires
+    on `final_column == "Done"`; the REST parking redirect makes
+    `final_column` `Awaiting Subtasks` whenever ≥1 child exists, so
+    `close_parent_if_all_children_done` is never called on the just-
+    parked card itself. Result on master: the parent parks, the walk
+    runs against `card.parent_card_id` (None for a top-level parent),
+    and the parked card waits forever for a child-Done that already
+    happened. Fix: after the parking redirect, call
+    `service.try_close_ancestors(card_id)` — its first iteration sees
+    the freshly parked card, finds every child Done, and moves the
+    parent to Done in the same transaction. Mirrors the MCP-side
+    auto-close invariant without re-introducing a Done round-trip
+    through Awaiting Subtasks as visible activity-feed noise."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        parent = await _create(ac, "P", "all-done-parent",
+                               column="Backlog", confirm=True)
+        child = await _create(ac, "P", "child",
+                              column="Backlog", parent_card_id=parent)
+
+        # Ship the child first — it lands in Done directly (no children
+        # of its own, so no parking redirect).
+        r = await ac.post(f"/api/v1/kanban/cards/{child}/move",
+                          json={"column": "Done",
+                                "summary": "child shipped first"})
+        assert r.status_code == 200, r.text
+        assert (await _column(ac, child)) == "Done"
+
+        # Now drag the parent to Done. Children are all Done already;
+        # the parent must end up in Done, NOT in `Awaiting Subtasks`.
+        r = await ac.post(f"/api/v1/kanban/cards/{parent}/move",
+                          json={"column": "Done",
+                                "summary": "parent shipped after child"})
+        assert r.status_code == 200, r.text
+        assert (await _column(ac, parent)) == "Done", (
+            "Parent with all-Done children must NOT park in Awaiting "
+            "Subtasks — `service.try_close_ancestors` must run on the "
+            "just-parked card itself so the in-place close fires "
+            "(AC #3 idempotency, review-round 2)."
+        )
+
+
+@pytest.mark.asyncio
 async def test_rest_done_parking_does_not_redirect_non_done_moves():
     """Regression guard — only `column == "Done"` may trigger the
     parking redirect. A REST move to any other column must land the
