@@ -146,6 +146,22 @@ jobs:
               > /tmp/doc_frontmatter_status 2>&1
           } || true
 
+      - name: Decision doc anchor drift
+        id: decision-doc-anchors
+        # Signal-only: surfaces docs/cockpit/*-decision.md that make claims
+        # about Cockpit code without backing them with a
+        # `backend/app|frontend/src|backend/tests:<line>` anchor (with or
+        # without surrounding backticks). Kaart 1bf9b52d… — the keep-row of
+        # `cc-native-cross-session-decision.md` (2026-08-10) rested on a
+        # kanban_ops-coupling that grep disproves in seconds; the doc had
+        # no anchor, so the false claim stood for three days. Advisory by
+        # design; mirrors the other doc-checks.
+        run: |
+          {
+            bash scripts/check-decision-doc-anchors.sh \
+              > /tmp/decision_doc_anchors_status 2>&1
+          } || true
+
       - name: Doc broken-link drift
         id: doc-links
         # Signal-only: surfaces relative Markdown links inside
@@ -184,6 +200,7 @@ jobs:
             echo "- CLAUDE.md age: $(cat /tmp/claude_md_age_status)"
             echo "- Spec drift: $(cat /tmp/spec_drift_status)"
             echo "- Decision register (incl. headers): $(cat /tmp/decision_register_status)"
+            echo "- Decision doc anchors: $(cat /tmp/decision_doc_anchors_status)"
             echo "- Doc frontmatter: $(cat /tmp/doc_frontmatter_status)"
             echo "- Doc broken links: $(cat /tmp/doc_links_status)"
             echo "- Generated doc index: $(cat /tmp/doc_index_status)"

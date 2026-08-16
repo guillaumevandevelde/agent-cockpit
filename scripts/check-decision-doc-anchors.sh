@@ -66,7 +66,19 @@ TOTAL=${#DOCS[@]}
 
 # Anchor: path under backend/app, frontend/src, or backend/tests, followed
 # by `:NN` (optionally `NN-MM` range). Surrounding backticks optional.
-ANCHOR_RE='`(backend/app|backend/tests|frontend/src)/[^`:[:space:]]+:[0-9]+(-[0-9]+)?`|\b(backend/app|backend/tests|frontend/src)/[^`[:space:]]+:[0-9]+(-[0-9]+)?'
+#
+# Two alternatives:
+#   1. Backticked: `backend/app/.../foo.py:42` — preceded by `` ` `` so the
+#      path starts cleanly inside the backticks.
+#   2. Unbackticked prose: ``backend/app/foo.py:42`` — preceded by whitespace
+#      or punctuation (NOT another path char or digit), so a mid-token
+#      fragment like ``xybackend/app/foo.py:42`` doesn't count.
+#
+# `awk` does not honour `\b` — gawk-style word boundaries silently become a
+# literal backspace byte when passed via `awk -v`. We therefore build the
+# boundary ourselves: a leading character class that excludes path chars and
+# digits, plus the `(^|...)` start-of-line alternative.
+ANCHOR_RE='`(backend/app|backend/tests|frontend/src)/[^`:[:space:]]+:[0-9]+(-[0-9]+)?`|(^|[[:space:][:punct:]])(backend/app|backend/tests|frontend/src)/[^`[:space:]]+:[0-9]+(-[0-9]+)?'
 
 # Count anchors per doc, skipping fenced code blocks.
 #

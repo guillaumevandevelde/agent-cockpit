@@ -195,6 +195,61 @@ out=$(DECISIONS_DIR="$paths" bash "$SUT" 2>&1); rc=$?
 check "backend/tests path IS an anchor"  '[ "$rc" = "0" ] && echo "$out" | grep -qE "^OK:"'
 
 # ----------------------------------------------------------------------------
+# Task 5b — unbackticked anchors count as anchors too. The script header
+# promises "Surrounding backticks are optional"; an awk `\b` would silently
+# become a backspace byte when passed via `awk -v`, so the harness pins the
+# behaviour with a doc that only has prose anchors (no backticks anywhere).
+# Without this task, `prompt-injectors-decision.md:20` would never have been
+# surfaced as a false-positive drift — the regression that the previous
+# reviewer caught.
+echo "Task 5b: unbackticked prose anchor IS counted as anchor (no false-positive on prompt-injectors style)"
+unbtick="$TMP/unbtick"; mkdir -p "$unbtick"
+cat > "$unbtick/decisions.md" <<'EOF'
+# reg
+EOF
+cat > "$unbtick/unbtick-decision.md" <<'EOF'
+---
+title: "X"
+type: decision
+status: decided
+---
+**Datum:** 2026-08-13
+**Status:** besloten
+**Kaart:** `abc12345`
+**Uitkomst:** GO.
+
+# X
+
+Het pad is backend/app/services/worker.py:42 volgens het harness hierboven.
+Ook frontend/src/features/x/Y.tsx:13-22 naast een komma.
+EOF
+out=$(DECISIONS_DIR="$unbtick" bash "$SUT" 2>&1); rc=$?
+check "unbackticked prose anchor → exit 0 (clean)"  '[ "$rc" = "0" ]'
+check "unbackticked prose anchor → exact OK line"    'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md in the sample carries a backend/app or frontend/src file:line anchor."'
+
+# Negative: same fixtures, but the prose anchor is glued to a path char so
+# `\b` would NOT have caught it — the boundary check must reject this.
+cat > "$unbtick/unbtick-decision.md" <<'EOF'
+---
+title: "X"
+type: decision
+status: decided
+---
+**Datum:** 2026-08-13
+**Status:** besloten
+**Kaart:** `abc12345`
+**Uitkomst:** GO.
+
+# X
+
+Een fragment xybackend/app/services/worker.py:42 mag niet tellen — het
+`xy`-voorvoegsel is geen anker-boundary.
+EOF
+out=$(DECISIONS_DIR="$unbtick" bash "$SUT" 2>&1); rc=$?
+check "mid-token anchor → still drift (boundary guard)"  'echo "$out" | grep -qF "unbtick-decision.md"'
+check "mid-token anchor → no false OK line"              '! echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md in the sample carries a backend/app or frontend/src file:line anchor."'
+
+# ----------------------------------------------------------------------------
 echo "Task 6: bare :line (no path) is NOT an anchor"
 bare="$TMP/bare"; mkdir -p "$bare"
 cat > "$bare/decisions.md" <<'EOF'
