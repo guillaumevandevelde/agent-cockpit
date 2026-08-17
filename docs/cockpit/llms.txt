@@ -163,8 +163,13 @@
 
 ## design
 
+- [E2E + soak harness voor dispatch lifecycle](./e2e-soak-harness-design.md): type=design status=active
 - [GitHub App credential binding voor push-identity](./github-app-credentials-design.md): type=design status=active
 
 ## how-to
 
 - [Auto-resume — sessie hervatten na een limietmelding](./auto-resume.md): type=how-to status=active
+
+## note
+
+- [Kanban-Write-Retry — exposure-matrix + 503-contract](./kanban-write-retry-exposure-matrix.md): type=note status=measured

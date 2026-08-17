@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 140 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 142 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -263,10 +263,11 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [ci-gate-decision.md](./ci-gate-decision.md) | — |
 | [ci-supersession-strategie-decision.md](./ci-supersession-strategie-decision.md) | — |
 
-### design (1)
+### design (2)
 
 | Document | Status |
 |---|---|
+| [E2E + soak harness voor dispatch lifecycle](./e2e-soak-harness-design.md) | 🟢 active |
 | [GitHub App credential binding voor push-identity](./github-app-credentials-design.md) | 🟢 active |
 
 ### how-to (1)
@@ -274,6 +275,12 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | Document | Status |
 |---|---|
 | [Auto-resume — sessie hervatten na een limietmelding](./auto-resume.md) | 🟢 active |
+
+### note (1)
+
+| Document | Status |
+|---|---|
+| [Kanban-Write-Retry — exposure-matrix + 503-contract](./kanban-write-retry-exposure-matrix.md) | measured |
 
 <!-- END GENERATED DOC INDEX -->
 ## Regels
