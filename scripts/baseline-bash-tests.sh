@@ -155,11 +155,17 @@ for harness in "$HARNESS_DIR"/test_*.sh; do
     if [ -n "${BASH_TEST_SKIP:-}" ] && printf '%s' "$name" | grep -qE "$BASH_TEST_SKIP"; then
         continue
     fi
-    out="$( cd "$BASH_TEST_CWD" && bash "$harness" 2>&1 )" || true
+    out="$( cd "$BASH_TEST_CWD" && bash "$harness" 2>&1 )"
+    rc=$?
 
     fails="$(printf '%s\n' "$out" | grep -E '^  FAIL: ' | sed -E 's/^  FAIL: //')"
 
-    if [ -z "$fails" ]; then
+    # Same exit-code gate as compare-bash-tests.sh: a clean exit 0 + no
+    # FAIL lines = passed, and stderr noise from a banner echo (backtick
+    # command-substitution on a unicode glyph, kanban card dbcae6ae…) is
+    # not a crash. Re-checking stderr unconditionally would re-poison
+    # the regenerated baseline with the same false positive.
+    if [ -z "$fails" ] && [ "$rc" -ne 0 ]; then
         err="$( cd "$BASH_TEST_CWD" && bash "$harness" 2>&1 1>/dev/null )" || true
         # Bash emits parse errors as `<file>: line N: syntax error: ...`,
         # NOT `bash: ...` — see bash(1) PARSE ERROR FORMAT. Cover both forms

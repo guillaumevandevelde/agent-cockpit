@@ -435,6 +435,65 @@ check "real compare does NOT list test_check_decision_register.sh as NEW" \
     '! (echo "$out" | awk "/^NEW/,/^\$/" | grep -q "test_check_decision_register\.sh")'
 
 # ----------------------------------------------------------------------------
+echo
+echo "Task 11: false-positive guard — exit-0 harness with stderr noise is NOT flagged"
+# Regression test for kanban card dbcae6ae353f429f952a2300b72f645e: a test
+# harness whose banner echo contains backticks wrapping a unicode glyph
+# (e.g. `↩︎`) triggers bash command-substitution. Bash tries to execute the
+# glyph as a command, fails, and emits `<file>: line N: ↩︎: command not
+# found` on stderr — but the harness continues, all tests pass, and the
+# script exits 0. The old heuristic matched any `command not found` on
+# stderr and flagged the harness as crashed. The fix gates the stderr
+# recheck on a non-zero exit code: a passing harness that just *mentions*
+# `command not found` in its banner is not a crash.
+fake_fp="$TMPDIR/fake_fp"
+mkdir -p "$fake_fp/scripts"
+cat > "$fake_fp/scripts/test_false_positive.sh" <<'EOF'
+#!/usr/bin/env bash
+# Banner with backticks around a unicode glyph — triggers bash to evaluate
+# `↩︎` as a command. Exit 0 because the harness itself passes.
+echo "scripts/test_x.sh: line 522: ↩︎: command not found" >&2
+echo "  ok: real-test-1"
+echo "  ok: real-test-2"
+echo ""
+echo "Total: 2 passed, 0 failed"
+exit 0
+EOF
+chmod +x "$fake_fp/scripts/test_false_positive.sh"
+# Sibling with an actual parse error — proves the real-crash branch still
+# fires after the fix (no over-correction).
+cat > "$fake_fp/scripts/test_real_crash.sh" <<'EOF'
+#!/usr/bin/env bash
+if true; then
+    echo "broken"
+EOF
+chmod +x "$fake_fp/scripts/test_real_crash.sh"
+
+# Empty baseline — every observed failure is NEW.
+: > "$state_dir/bash-test-baseline.txt"
+
+out=$(BASH_TEST_BASELINE_PATH="$state_dir/bash-test-baseline.txt" \
+      BASH_TEST_FAKE_WORKTREE=1 BASH_TEST_CWD="$fake_fp" \
+      bash "$SCRIPT_DIR/compare-bash-tests.sh" 2>&1 || true)
+check "exit-0 harness with 'command not found' stderr is NOT flagged as crashed" \
+    '! echo "$out" | grep -qE "test_false_positive\.sh.*crashed"'
+check "exit-0 harness with 'command not found' stderr does NOT appear in NEW" \
+    '! (echo "$out" | awk "/^NEW /,/^\$/" | grep -q "test_false_positive\.sh")'
+check "real parse-error harness is still flagged as crashed (no over-correction)" \
+    'echo "$out" | grep -qE "test_real_crash\.sh.*crashed"'
+
+# Same gating must hold on the baseline side: a clean harness with stderr
+# noise should not be captured as a pre-existing crash either, otherwise
+# the baseline poisons every future comparison.
+out=$(BASH_TEST_BASELINE_PATH="$state_dir/bash-test-baseline.txt" \
+      BASH_TEST_FAKE_WORKTREE=1 BASH_TEST_CWD="$fake_fp" \
+      bash "$SCRIPT_DIR/baseline-bash-tests.sh" --regen 2>&1 || true)
+check "baseline does NOT capture exit-0 noisy harness as pre-existing crash" \
+    '! grep -qE "test_false_positive\.sh.*crashed" "$state_dir/bash-test-baseline.txt"'
+check "baseline DOES capture real parse-error harness as pre-existing crash" \
+    'grep -qE "test_real_crash\.sh.*crashed" "$state_dir/bash-test-baseline.txt"'
+
+# ----------------------------------------------------------------------------
 mv "$TMPDIR" /tmp/_bash_test_baseline_artifacts >/dev/null 2>&1 || true
 echo
 echo "Total: $PASS passed, $FAIL failed"
