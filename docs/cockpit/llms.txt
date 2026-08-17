@@ -75,6 +75,7 @@
 - [Richting van Agent Cockpit — essentie, hosting, meldingen, kenniswerk en de volgorde van werken](./cockpit-richting-decision.md): type=decision status=decided
 - [Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie](./code-knowledge-graph-navigation-decision.md): type=decision status=decided
 - [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md): type=decision status=decided
+- [Fork-strategie — upstream claude-deck PR #316](./fork-strategy-claude-deck-316.md): type=decision status=decided
 - [Harnassen die een agent spawnen — inventarisatie en sandbox-status](./harnas-spawn-inventaris.md): type=decision status=decided
 - [Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies](./headless-session-retro-decision.md): type=decision status=decided
 - [Beslissing: human-takeover-UX voor headless sessies](./human-takeover-headless-decision.md): type=decision status=decided
