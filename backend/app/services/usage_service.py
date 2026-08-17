@@ -41,6 +41,22 @@ from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_mtime(filepath: Path) -> float:
+    """Return ``filepath.stat().st_mtime``, treating unreadable files as 0.0.
+
+    ``Path.stat`` raises ``OSError`` on a permission error, a vanished
+    symlink, or a file that disappeared between ``iterdir`` and ``stat``
+    during a concurrent write. The mtime pre-filter must never raise —
+    a missing file just drops out of the filtered set, which is the
+    same shape as "older than cutoff" anyway (kaart
+    ``393198f17bc847969962928c972ac49e``).
+    """
+    try:
+        return filepath.stat().st_mtime
+    except OSError:
+        return 0.0
+
 @dataclass
 class LoadedUsageEntry:
     """A single usage entry from JSONL files."""
@@ -164,9 +180,21 @@ class UsageService:
     # === JSONL Parsing ===
 
     async def discover_jsonl_files(
-        self, project_path: str | None = None
+        self,
+        project_path: str | None = None,
+        since: datetime | float | None = None,
     ) -> list[Path]:
-        """Discover all JSONL files in projects directory."""
+        """Discover all JSONL files in projects directory.
+
+        ``since``, when given, drops files whose ``st_mtime`` is older
+        than the cutoff — cheap pre-filter for the subscriptions page
+        which only needs data from the active 5h block (kaart
+        ``393198f17bc847969962928c972ac49e``: a cold-cache scan of all
+        1301 JSONL files (~700 MB) takes ~28s; with the mtime filter
+        only the ~130 files modified in the last few days are read).
+        Accepts either a ``datetime`` (UTC-aware or naive — naive is
+        treated as UTC) or a POSIX timestamp ``float``.
+        """
         files = []
 
         if not self.projects_dir.exists():
@@ -183,6 +211,10 @@ class UsageService:
             for project_folder in self.projects_dir.iterdir():
                 if project_folder.is_dir():
                     files.extend(project_folder.glob("*.jsonl"))
+
+        if since is not None:
+            cutoff_ts = since.timestamp() if isinstance(since, datetime) else since
+            files = [f for f in files if _safe_mtime(f) >= cutoff_ts]
 
         return files
 
@@ -270,10 +302,12 @@ class UsageService:
         return entries
 
     async def get_all_usage_entries(
-        self, project_path: str | None = None
+        self,
+        project_path: str | None = None,
+        since: datetime | float | None = None,
     ) -> list[LoadedUsageEntry]:
         """Load all usage entries from JSONL files."""
-        files = await self.discover_jsonl_files(project_path)
+        files = await self.discover_jsonl_files(project_path, since=since)
         all_entries = []
 
         for filepath in files:
@@ -852,6 +886,7 @@ class UsageService:
         recent: bool = True,
         active: bool = False,
         subscription_id: str | None = None,
+        since: datetime | None = None,
     ) -> BlockUsageListResponse:
         """Get 5-hour billing block usage.
 
@@ -860,20 +895,31 @@ class UsageService:
         ``subscriptions.attribution.subscription_id_for_model``) — e.g. so
         ``AnthropicUsageProvider`` doesn't sum MiniMax tokens into the
         Anthropic plan-tier ratio (kaart d160d13f...).
+
+        ``since`` is the mtime-cutoff applied at the file-discovery layer:
+        files older than this are skipped before any parsing happens.
+        Defaults to ``now - DEFAULT_RECENT_DAYS`` when ``recent=True``;
+        stays ``None`` when ``recent=False`` (full-history callers like
+        ``usage.py:get_block_usage`` opt out). Cached as part of the
+        cache key so a non-default cutoff doesn't poison the
+        default-cutoff cache row.
         """
+        if since is None and recent:
+            since = datetime.now(UTC) - timedelta(days=self.DEFAULT_RECENT_DAYS)
         cache_key = await self.get_cache_key(
             "block",
             project_path,
             recent=recent,
             active=active,
             subscription_id=subscription_id,
+            since=since.isoformat() if since is not None else None,
         )
         cached = await self.get_from_cache(cache_key)
 
         if cached:
             return BlockUsageListResponse(**cached)
 
-        entries = await self.get_all_usage_entries(project_path)
+        entries = await self.get_all_usage_entries(project_path, since=since)
         if subscription_id is not None:
             entries = [
                 e for e in entries
