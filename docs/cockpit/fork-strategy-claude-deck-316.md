@@ -69,6 +69,14 @@ NIET drop-in: onze kanban-DB is portable per machine, dispatch-loop is MCP-API-d
 
 Upstream route: webhook → `agent_teams.py` spinner. Bij ons: webhook → kanban-card create + optionele plan_attachment. Effect: product owner kan een GitHub-issue als dispatch-eenheid indienen zonder kanban-handmatig werk. Kost: FastAPI webhook endpoint, SecretStore entry voor webhook-secret, e2e test. Kind-kaart (a).
 
+✅ Geïmplementeerd (kaart `60e2f01d1bc848fd81fade100cf50df7`).
+Effect: een `issues.opened`-levering op `POST /api/v1/webhooks/github` levert nu een
+Backlog-kaart die de auto-dispatcher claimt; ondertekening is verplicht
+(HMAC-SHA256 tegen het SecretStore-geheim `GITHUB_WEBHOOK_SECRET`), en een
+herlevering geeft dezelfde kaart terug in plaats van een duplicaat. Spec,
+opzetrecept en de bewust-buiten-scope-lijst:
+[`github-issue-webhook.md`](./github-issue-webhook.md).
+
 ### 4.2 ⭐ GitHub App credentials (needs-decomposition)
 
 Upstream bindt commit/PR-identity aan een immutable dispatch attempt met repo-scoped GitHub App credentials. Effect: dispatch-output (PR/branch) heeft herleidbare actor + onvervalsbare push-recht; handmatige `git push` vanuit worktree verdwijnt. Kost: GitHub App installatie, SecretStore entry, `git_credential_helper.py`-equivalent, ship-recipe aanpassing (`git-ship/SKILL.md` + `dispatch.py::_build_ship_instructions`). Kind-kaart (b).

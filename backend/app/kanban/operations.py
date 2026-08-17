@@ -11,6 +11,7 @@ and, eventually, multi-device sync. Frozen on purpose — the sync seam (sync.py
 pruned. See docs/cockpit/sync-hlc-freeze-vs-prune.md.
 """
 import asyncio
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -140,6 +141,66 @@ async def apply_operation(
         op_type, entity_type, entity_id, project_key, sorted(payload.keys()),
     )
     return entity_id
+
+
+async def attach_plan(
+    session, *, parent_card_id: str, plan_markdown: str,
+    child_card_ids: list[str],
+    depends_on_graph: dict[str, list[str]] | None = None,
+) -> tuple[str, dict[str, str]]:
+    """Persist a plan on a parent card and wire a ``plan_ref`` to each child.
+
+    The compound op sequence behind ``add_plan_attachment``: one
+    ``add_plan_attachment`` op on the parent, then one ``link_plan_ref`` op per
+    child. Validation (parent/child existence, parent_mismatch, cycle
+    detection, child cap) stays with the caller — this helper only writes, and
+    the caller commits.
+
+    Wiring the ``plan_ref`` is not optional for a card that carries a
+    ``parent_card_id``: ``dispatch._awaiting_plan_ref`` holds such a child out
+    of dispatch until the deliverable exists, and that hold is silent (the card
+    looks unclaimed and unstarted but never dispatches). Any code path that
+    creates a child card must therefore also call this.
+
+    Returns ``(plan_deliverable_id, {child_card_id: plan_ref_deliverable_id})``.
+
+    The MCP tool (``mcp_server.add_plan_attachment``) and the REST mirror
+    (``api/v1/kanban/router.add_plan_attachment``) still carry their own copies
+    of this sequence with transport-specific error shapes; they can migrate
+    onto this helper without behaviour change.
+    """
+    deps = depends_on_graph or {}
+    parent = await session.get(KanbanCard, parent_card_id)
+    project_key = parent.project_key if parent is not None else ""
+    await apply_operation(
+        session, op_type="add_plan_attachment", entity_type="deliverable",
+        project_key=project_key, entity_id=parent_card_id,
+        payload={"plan_markdown": plan_markdown},
+    )
+    plan_deliverable_id = (await session.execute(
+        select(KanbanDeliverable)
+        .where(KanbanDeliverable.card_id == parent_card_id,
+               KanbanDeliverable.kind == "plan")
+        .order_by(KanbanDeliverable.created_at.desc())
+    )).scalars().first().id
+
+    plan_refs: dict[str, str] = {}
+    for child_id in child_card_ids:
+        await apply_operation(
+            session, op_type="link_plan_ref", entity_type="deliverable",
+            project_key=project_key, entity_id=child_id,
+            payload={"ref_json": json.dumps({
+                "parent_card_id": parent_card_id,
+                "plan_deliverable_id": plan_deliverable_id,
+            }), "depends_on": list(deps.get(child_id, []) or [])},
+        )
+        plan_refs[child_id] = (await session.execute(
+            select(KanbanDeliverable)
+            .where(KanbanDeliverable.card_id == child_id,
+                   KanbanDeliverable.kind == "plan_ref")
+            .order_by(KanbanDeliverable.created_at.desc())
+        )).scalars().first().id
+    return plan_deliverable_id, plan_refs
 
 
 async def release_card_claim(session, *, card_id: str, project_key: str) -> None:
