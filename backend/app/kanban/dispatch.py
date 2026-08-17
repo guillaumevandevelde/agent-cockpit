@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import re
-import shlex
 import subprocess
 import time
 import uuid
@@ -77,6 +76,36 @@ from app.kanban.service import (
     get_column_default_provider,
     list_cards,
 )
+
+# --- Prompt construction extracted to ship_prompt.py (kaart 745c4124...) ---
+# The prompt-building cluster (formerly ~2100 lines in this file) now lives in
+# its own module. The names below are re-exported so existing callers of
+# ``from app.kanban.dispatch import build_card_prompt`` (and the _build_*
+# helpers) keep working unchanged.
+from app.kanban.ship_prompt import (
+    PLAN_DANGLING_PARENT,  # noqa: F401 — re-exported for unit tests
+    PLAN_MALFORMED,  # noqa: F401 — re-exported for unit tests
+    PLAN_MISSING_ON_PARENT,  # noqa: F401 — re-exported for unit tests
+    PLAN_NO_REF,  # noqa: F401 — re-exported for unit tests
+    PLAN_OK,  # noqa: F401 — re-exported for unit tests
+    _build_analyst_session_end_instructions,  # noqa: F401 — re-exported for unit tests
+    _build_attachments_section,  # noqa: F401 — re-exported for unit tests
+    _build_knowledge_ship_instructions,  # noqa: F401 — re-exported for unit tests
+    _build_prior_branch_warning,  # noqa: F401 — re-exported for unit tests
+    _build_ship_instructions,  # noqa: F401 — re-exported for unit tests
+    _build_worktree_safety_callout,  # noqa: F401 — re-exported for unit tests
+    _load_ceremony_profile,
+    _plan_context_section,
+    _resolve_impediment,
+    _resolve_plan_for_child,
+    _resolve_prior_branch_warning,
+    _resolve_revisit,
+    _stamp_resume_target,
+    build_card_prompt,
+    compose_impediment_answer,  # noqa: F401 — re-exported for unit tests
+    extract_impediment_answer,  # noqa: F401 — re-exported for unit tests
+    extract_revisit_question,  # noqa: F401 — re-exported for unit tests
+)
 from app.kanban.subscription_pool import (
     PoolEntry,
     get_subscription_pool,
@@ -96,37 +125,6 @@ from app.services.scheduling.session_registry import session_registry
 from app.services.subscriptions.base import SubscriptionUsage
 from app.utils.path_utils import convert_path_to_folder_name
 from app.utils.timeutils import ensure_aware
-
-# --- Prompt construction extracted to ship_prompt.py (kaart 745c4124...) ---
-# The prompt-building cluster (formerly ~2100 lines in this file) now lives in
-# its own module. The names below are re-exported so existing callers of
-# ``from app.kanban.dispatch import build_card_prompt`` (and the _build_*
-# helpers) keep working unchanged.
-from app.kanban.ship_prompt import (
-    PLAN_OK, PLAN_NO_REF, PLAN_DANGLING_PARENT, PLAN_MISSING_ON_PARENT, PLAN_MALFORMED,
-    build_card_prompt,
-    compose_impediment_answer,
-    extract_impediment_answer,
-    extract_revisit_question,
-    _build_analyst_session_end_instructions,
-    _build_attachments_section,
-    _build_knowledge_ship_instructions,
-    _build_mcp_fallback_instructions,
-    _build_prior_branch_warning,
-    _build_problem_flag_instructions,
-    _build_reviewer_session_end_instructions,
-    _build_session_retro_step,
-    _build_ship_instructions,
-    _build_spec_doc_line,
-    _build_worktree_safety_callout,
-    _load_ceremony_profile,
-    _plan_context_section,
-    _resolve_impediment,
-    _resolve_plan_for_child,
-    _resolve_prior_branch_warning,
-    _resolve_revisit,
-    _stamp_resume_target,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -6740,6 +6738,15 @@ async def dispatch_project(
         # the `## IMPEDIMENT` section with the human's question + authoritative
         # answer. See kaart af951ad70... (resolve-impediment → Backlog, not
         # Doing) and `_resolve_impediment`'s docstring for the contract.
+        #
+        # `report_impediment` options-count contract: when a session calls
+        # `report_impediment` it MUST supply precies 4 entries in `options`
+        # (or omit the list entirely). **Precies 4** is de enige geldige
+        # niet-lege waarde: `mcp_server.report_impediment` weigert de call
+        # met `error: "invalid_option_count"` bij 1-3 of 5+ opties. The same
+        # anchor appears verbatim in `.claude/agents/{engineer,analyst,reviewer}.md`;
+        # `tests/test_impediment_options_drift.py::test_mirror_mentions_precies_4_contract`
+        # fails this build if any of the four mirrors drops the wording.
         impediment_question, impediment_answer = await _resolve_impediment(
             session, card,
         )

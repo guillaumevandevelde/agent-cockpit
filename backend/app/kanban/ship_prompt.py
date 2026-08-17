@@ -16,19 +16,13 @@ from __future__ import annotations
 import json
 import logging
 import shlex
-import subprocess
-import time
-from pathlib import Path
 
 from app.kanban.operations import apply_operation
-from app.kanban.prompt_injectors import resolve_active_injectors
 from app.kanban.service import (
-    answer_gate,
     card_activity,
-    enrich_done_info,
     get_card,
-    latest_gate_answer,
 )
+from app.utils.repo_utils import count_unmerged_commits
 
 logger = logging.getLogger(__name__)
 
@@ -208,20 +202,9 @@ def _build_prior_branch_warning(project_path: str, prior_session_name: str | Non
     """
     if not prior_session_name or not project_path:
         return ""
-    try:
-        result = subprocess.run(
-            ["git", "-C", project_path, "log", "--oneline",
-             f"origin/master..{prior_session_name}"],
-            capture_output=True, text=True, timeout=10,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    count = count_unmerged_commits(project_path, prior_session_name)
+    if count == 0:
         return ""
-    if result.returncode != 0:
-        return ""
-    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
-    if not lines:
-        return ""
-    count = len(lines)
     return (
         f"## PRID-BRANCH-WAARSCHUWING\n"
         f"**Let op:** een eerdere sessie (`{prior_session_name}`) liet "
@@ -269,7 +252,6 @@ async def _resolve_prior_branch_warning(
     Wired into ``_run_card`` so the warning reaches every dispatch path
     (auto-tick, manual ``dispatch_card``, ``redispatch_card``, ``dispatch_impediment_card``).
     """
-    from app.kanban.service import card_activity
 
     try:
         activity = await card_activity(session, card.id)
@@ -784,9 +766,8 @@ async def _stamp_resume_target(session, *, card, project_key: str,
     No-op when the card has no `agent:` claim (e.g. it was never picked
     up, only commented on by hand) — there's no prior session to resume.
     """
-    from app.kanban.operations import apply_operation
-    from app.kanban.session_recovery import _resolve_resume_target
     from app.kanban.dispatch import _effective_resume_cli_id
+    from app.kanban.session_recovery import _resolve_resume_target
 
     claimant = card.claimed_by or ""
     if not claimant.startswith(CLAIMANT_PREFIX):

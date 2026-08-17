@@ -36,8 +36,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
 
@@ -73,13 +72,13 @@ class WorktreeLease:
     owner: str
     expires_at: datetime
 
-    def is_live(self, now: Optional[datetime] = None) -> bool:
+    def is_live(self, now: datetime | None = None) -> bool:
         current = now if now is not None else _utcnow()
         return self.expires_at > current
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _lease_key(worktree_name: str) -> str:
@@ -99,7 +98,7 @@ def _parse_iso(value: str) -> datetime:
     """
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -108,7 +107,7 @@ async def set_worktree_lease(
     owner: str,
     *,
     ttl_seconds: int = WORKTREE_LEASE_TTL_SECONDS,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> WorktreeLease:
     """Write a lease + observed_owner for ``worktree_name``.
 
@@ -149,8 +148,8 @@ async def set_worktree_lease(
 async def get_worktree_lease(
     worktree_name: str,
     *,
-    now: Optional[datetime] = None,
-) -> Optional[WorktreeLease]:
+    now: datetime | None = None,
+) -> WorktreeLease | None:
     """Return the lease for ``worktree_name`` if both rows exist and parse.
 
     Returns ``None`` when either the expiry or the owner row is missing

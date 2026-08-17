@@ -35,3 +35,30 @@ def derive_repo_identity(cwd: str) -> dict:
         "repo_root": repo_root,
         "repo_name": os.path.basename(repo_root) or repo_root,
     }
+
+
+def count_unmerged_commits(project_path: str, branch: str) -> int:
+    """Return the number of commits on ``branch`` not yet on ``origin/master``.
+
+    Returns ``0`` when the branch doesn't exist on the remote, when
+    ``origin/master`` is unreachable, or when any subprocess / repo error
+    happens — fail-open, never wedge dispatch on a transient git hiccup.
+    Used by ``app.kanban.ship_prompt._build_prior_branch_warning`` to warn
+    a re-dispatched session that a prior claim left unmerged commits
+    behind (kanban card ff2d03fce…). Lives here so the kanban domain stays
+    free of direct ``subprocess`` imports (architectuur.md "Het domein
+    raakt geen mechanisme").
+    """
+    if not project_path or not branch:
+        return 0
+    try:
+        result = subprocess.run(
+            ["git", "-C", project_path, "log", "--oneline",
+             f"origin/master..{branch}"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return 0
+    if result.returncode != 0:
+        return 0
+    return sum(1 for line in result.stdout.splitlines() if line.strip())
