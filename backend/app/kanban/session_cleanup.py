@@ -18,6 +18,48 @@ logger = logging.getLogger(__name__)
 DONE_COLUMN = "Done"
 
 
+async def _read_worktree_lease(session_name: str):
+    """Thin wrapper around :func:`app.kanban.lease.get_worktree_lease`.
+
+    Lives here so this module's caller surface stays small and the import
+    cost is paid once at module load instead of inside the hot path. Any
+    exception is logged and downgraded to ``None`` so a malformed lease
+    row never blocks the canonical cleanup path — the pre-lease
+    behaviour is best-effort and the post-lease behaviour must be at
+    least as safe.
+    """
+    from app.kanban import lease
+
+    try:
+        return await lease.get_worktree_lease(session_name)
+    except Exception as exc:
+        logger.warning(
+            "could not read worktree lease for %s: %s — treating as no lease",
+            session_name, exc,
+        )
+        return None
+
+
+async def _clear_worktree_lease(session_name: str) -> None:
+    """Thin wrapper around :func:`app.kanban.lease.clear_worktree_lease`.
+
+    Best-effort: a delete failure is logged and swallowed so a half-broken
+    kanban DB cannot strand the cleanup half-way. The lease is a diagnostic
+    aid, not a correctness primitive — the cleanup either removes the
+    worktree directory or it does not, and that decision is independent of
+    whether the lease row survives.
+    """
+    from app.kanban import lease
+
+    try:
+        await lease.clear_worktree_lease(session_name)
+    except Exception as exc:
+        logger.warning(
+            "could not clear worktree lease for %s: %s",
+            session_name, exc,
+        )
+
+
 def _extract_session_name(claimed_by: str | None) -> str | None:
     """Extract session name from claimant string like 'agent:k-test-1234'."""
     if not claimed_by:
@@ -316,11 +358,34 @@ async def cleanup_session_for_card(
 
         project_path = await resolve_project_path(project_key)
         if project_path:
-            _remove_worktree_at(session_name, project_path)
+            # Lease check: when a kill -9 / host crash left a worktree behind,
+            # the canonical cockpit-richting cleanup path is the Done/Impediment
+            # move NOW, but the worktree may still be held by a parallel
+            # process (e.g. a fresh dispatch that re-used the same worktree
+            # name, or a hand-attached pane). The lease captures that
+            # "currently in use" state explicitly — if it is live, leave the
+            # worktree alone and let ``scripts/worktree-gc.sh`` reclaim it once
+            # the TTL elapses. See kanban card a2268cd2… + ``docs/cockpit/
+            # fork-strategy-claude-deck-316.md`` §4.3.
+            lease = await _read_worktree_lease(session_name)
+            if lease is not None and lease.is_live():
+                logger.info(
+                    "Skipping worktree removal for %s: live lease held by %s "
+                    "(expires %s); worktree-gc will reclaim after TTL",
+                    session_name, lease.owner, lease.expires_at.isoformat(),
+                )
+            else:
+                _remove_worktree_at(session_name, project_path)
         else:
             logger.warning(
                 "No registered path for project %s; worktree not removed", project_key
             )
+
+        # Always clear the lease on a terminal move — the claim release above
+        # is the canonical "this session is over" signal, and any subsequent
+        # worktree-gc run should not see a stale lease pointing at a deleted
+        # directory. Idempotent; a missing row is not an error.
+        await _clear_worktree_lease(session_name)
 
         await _release_claim(card_id, project_key)
         result["cleaned"] = True
