@@ -88,6 +88,14 @@ OUTCOME_NO_ACTION = "**Outcome:** no_action_needed"
 # when a decision is reopened (see spec §3 sectie 4).
 REVERSAL_MARKER = "↩︎ herzien door"
 
+# Tolerant matcher for the reversal phrase: decisions.md authors sometimes
+# emphasise "herzien door" in markdown-bold (`**herzien door**`), which
+# breaks the literal-substring check above (kaart 7468ee6c…). The regex
+# below allows 0+ `*` around each word so both the bare and bold-wrapped
+# forms route through the same path. The literal in REVERSAL_MARKER
+# remains the canonical source-of-truth; this regex is its matcher.
+_REVERSAL_RE = re.compile(r"↩︎\s*\**\s*herzien\s+\**\s*door")
+
 # Fallback path for the kanban DB. Mirrors backend/app/config.py::
 # _default_kanban_database_url so the script reads the same store the
 # live app reads from. Override via --kanban-db or $KANBAN_DB; the CLI flag
@@ -485,7 +493,7 @@ def _decisions_via_git(repo_root: Path, since: datetime, until: datetime) -> lis
         # `decisions` — they're how we signal "an earlier decision was
         # reopened", not a fresh direction. Exclude them here so the two
         # lists stay disjoint.
-        if REVERSAL_MARKER in row_text:
+        if _REVERSAL_RE.search(row_text):
             continue
         # Normalize whitespace runs to fold identical rows that differ only
         # in collapsing (rare, but the spec says dedupe on genormaliseerde
@@ -523,7 +531,7 @@ def _reversals_via_git(repo_root: Path, since: datetime, until: datetime) -> lis
             continue
         if not line.startswith("+"):
             continue
-        if REVERSAL_MARKER not in line:
+        if not _REVERSAL_RE.search(line):
             continue
         if commit_date is None:
             continue

@@ -519,6 +519,60 @@ assert d[\"window\"][\"since\"].startswith(\"2026-08-10T06:00:49\"), d[\"window\
 "'
 
 # ----------------------------------------------------------------------------
+echo "Task 14: reversal marker wrapped in markdown-bold is still filtered from decisions (kaart 7468ee6c…)"
+# The decisions.md table cell may wrap the marker phrase in `** … **` for
+# emphasis (Agent Mail keep-row precedent from 2026-08-17). The collector
+# must match the literal substring OR the bold-wrapped variant — otherwise
+# the same reversal row appears both under `decisions` and under
+# `course_changes` (double-counted in the digest).
+REPO14="$TMP/repo14"; mkdir -p "$REPO14/docs/cockpit"
+cd "$REPO14"
+git init -q -b main .
+git config user.email "t@e.com"
+git config user.name "t"
+export GIT_AUTHOR_DATE="2026-07-21T00:00:00Z"
+export GIT_COMMITTER_DATE="2026-07-21T00:00:00Z"
+printf '# reg\n' > docs/cockpit/decisions.md
+git add docs/cockpit/decisions.md
+git commit -q -m "init"
+# A row whose `↩︎ herzien door` is wrapped in markdown-bold. The bare
+# substring `↩︎ herzien door` would NOT match here as a contiguous run.
+export GIT_AUTHOR_DATE="2026-07-22T00:00:00Z"
+export GIT_COMMITTER_DATE="2026-07-22T00:00:00Z"
+ROW_BOLD='| 2026-07-25 | Optie A — keep. | Revisie | [`r.md`](./r.md) | id-bold |'
+# Splice the marker between two literal `**` runs so the row text reads
+# `↩︎ **herzien door**` byte-for-byte (preserves the `id-bold` cell id).
+ROW_BOLD_MARKED=$(printf '%s' "$ROW_BOLD" | sed 's/id-bold/& ↩︎ **herzien door**/')
+printf '# reg\n\n%s\n' "$ROW_BOLD_MARKED" > docs/cockpit/decisions.md
+git add docs/cockpit/decisions.md
+git commit -q -m "bold-wrapped reversal"
+# Also a plain (non-bold) reversal row, to lock in the existing behavior.
+export GIT_AUTHOR_DATE="2026-07-23T00:00:00Z"
+export GIT_COMMITTER_DATE="2026-07-23T00:00:00Z"
+ROW_PLAIN='| 2026-07-23 | Plain Optie B | Revisie | [`r2.md`](./r2.md) | ↩︎ herzien door id-plain |'
+printf '# reg\n\n%s\n\n%s\n' "$ROW_BOLD_MARKED" "$ROW_PLAIN" > docs/cockpit/decisions.md
+git add docs/cockpit/decisions.md
+git commit -q -m "add plain reversal row"
+unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+cd "$REPO_ROOT"
+out=$(python3 "$SUT" --repo-root "$REPO14" --project-key "pk" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1); rc=$?
+check "bold-marker → exit 0" '[ "$rc" -eq 0 ]'
+check "bold-marker → bold-wrapped reversal NOT under decisions" 'echo "$out" | pycheck "
+assert not [x for x in d[\"decisions\"] if \"id-bold\" in x.get(\"row\",\"\")], d[\"decisions\"]
+"'
+check "bold-marker → bare reversal still NOT under decisions (no regression)" 'echo "$out" | pycheck "
+assert not [x for x in d[\"decisions\"] if \"id-plain\" in x.get(\"row\",\"\")], d[\"decisions\"]
+"'
+check "bold-marker → bold-wrapped reversal surfaced under course_changes" 'echo "$out" | pycheck "
+matches=[x for x in d[\"course_changes\"] if x.get(\"kind\")==\"reversal\" and \"id-bold\" in x.get(\"row\",\"\")]
+assert len(matches)==1, (matches, d[\"course_changes\"])
+"'
+check "bold-marker → bare reversal surfaced under course_changes" 'echo "$out" | pycheck "
+matches=[x for x in d[\"course_changes\"] if x.get(\"kind\")==\"reversal\" and \"id-plain\" in x.get(\"row\",\"\")]
+assert len(matches)==1, (matches, d[\"course_changes\"])
+"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
