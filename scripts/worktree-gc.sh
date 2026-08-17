@@ -8,11 +8,8 @@
 # for cards that actually reach Done — merged-but-not-Done or manually created
 # worktrees leak. This script reclaims the leaked ones, safely.
 #
-# A worktree is REMOVED only when ALL THREE are true:
-#   1. its working tree is CLEAN (no uncommitted / untracked changes),
-#   2. its branch is fully merged into master (every commit's patch is already
-#      in master — detected with `git cherry`, so squash-merges count as merged),
-#   3. no kanban card currently holds an active agent claim on it. A kanban
+# A worktree is REMOVED only when ALL of the following are true:
+#   1. no kanban card currently holds an active agent claim on it. A kanban
 #      card whose `claimed_by` is `agent:<worktree_name>` and whose column is
 #      NOT Done/Impediment is a live session that would be killed by removal —
 #      exactly the failure this check guards against (see the
@@ -20,9 +17,20 @@
 #      postmortem). An Analyst-only session never commits, so its branch is
 #      trivially "merged+clean" from the moment it's created — without this
 #      guard, the next gc run kills it.
+#   2. no live worktree lease exists. Each spawn writes
+#      `worktree_lease:<name>` + `worktree_owner:<name>` rows in KanbanMeta
+#      with a TTL (default 24h). The lease is the hard signal that
+#      distinguishes "kill -9 orphan" from "currently in use" — without it,
+#      a fresh dispatch that re-uses a worktree name from a previous
+#      orphaned session would be silently clobbered. An expired lease is
+#      treated as no lease and is cleared on successful removal.
+#   3. its working tree is CLEAN (no uncommitted / untracked changes),
+#   4. its branch is fully merged into master (every commit's patch is already
+#      in master — detected with `git cherry`, so squash-merges count as merged).
 #
-# Anything dirty, unmerged, or actively claimed is KEPT and reported. The bare
-# top-level checkout and the `master` branch are never touched.
+# Anything dirty, unmerged, actively claimed, or under a live lease is KEPT
+# and reported. The bare top-level checkout and the `master` branch are never
+# touched.
 #
 # Usage:
 #   scripts/worktree-gc.sh            # dry-run: show what WOULD be removed (default)
@@ -82,6 +90,43 @@ if [ -r "$KANBAN_DB" ]; then
   done < <(python3 "$(dirname "$0")/kanban_active_worktrees.py" --db "$KANBAN_DB" 2>/dev/null || true)
 fi
 
+# Live worktree leases (kanban-meta `worktree_lease:<name>` rows). Each value
+# is `<owner>\t<iso_expiry>` so the gc script can decide live vs. expired
+# without round-tripping into Python for every worktree. Keyed by worktree
+# name; empty/absent = no lease (the pre-lease fallback applies).
+declare -A LEASED_WTS=()
+declare -A LEASE_OWNERS=()
+declare -A LEASE_EXPIRIES=()
+if [ -r "$KANBAN_DB" ]; then
+  while IFS=$'\t' read -r wt_name owner expiry; do
+    [ -n "$wt_name" ] || continue
+    [ -n "$expiry" ] || continue
+    LEASED_WTS["$wt_name"]=1
+    LEASE_OWNERS["$wt_name"]="$owner"
+    LEASE_EXPIRIES["$wt_name"]="$expiry"
+  done < <(python3 "$(dirname "$0")/kanban_worktree_leases.py" --db "$KANBAN_DB" 2>/dev/null || true)
+fi
+
+is_lease_live() {
+  # Decide whether an ISO-8601 expiry is still in the future. The strings
+  # come from `datetime.now(timezone.utc).isoformat()` /
+  # `datetime.fromisoformat(...)` so they parse with Python's stdlib. We
+  # delegate to a small Python one-liner so the script stays portable across
+  # GNU/BSD coreutils and macOS / WSL date flag differences.
+  local expiry="$1"
+  python3 - "$expiry" <<'PY'
+import sys
+from datetime import datetime, timezone
+try:
+    parsed = datetime.fromisoformat(sys.argv[1])
+except (TypeError, ValueError):
+    sys.exit(1)
+if parsed.tzinfo is None:
+    parsed = parsed.replace(tzinfo=timezone.utc)
+sys.exit(0 if parsed > datetime.now(timezone.utc) else 1)
+PY
+}
+
 removed=0 kept=0
 
 # Iterate worktree paths (skip the bare main checkout, which has no branch).
@@ -108,6 +153,19 @@ while IFS= read -r line; do
     kept=$((kept+1)); continue
   fi
 
+  # 0a. Live worktree lease? (kill -9 / host crash safety net)
+  # The lease is keyed by worktree name; an expired lease is treated as
+  # no lease and is dropped on successful removal (see the apply branch).
+  if [ -n "${LEASED_WTS[$wt_name]:-}" ]; then
+    expiry="${LEASE_EXPIRIES[$wt_name]}"
+    if is_lease_live "$expiry"; then
+      printf 'KEEP   %-40s  live lease (owner=%s, expires %s)\n' \
+        "$wt_name" "${LEASE_OWNERS[$wt_name]}" "$expiry"
+      kept=$((kept+1)); continue
+    fi
+    # expired lease — fall through and clean up; clear the row on success
+  fi
+
   # 1. Clean?
   if [ -n "$(git -C "$path" status --porcelain)" ]; then
     printf 'KEEP   %-40s  dirty (uncommitted changes)\n' "$(basename "$path")"
@@ -130,6 +188,10 @@ while IFS= read -r line; do
       printf 'REMOVED %-39s  worktree + branch %s\n' "$(basename "$path")" "$branch"
     else
       printf 'REMOVED %-39s  worktree (kept branch %s)\n' "$(basename "$path")" "$branch"
+    fi
+    # Drop any expired lease row so the next gc run sees no stale lease.
+    if [ -n "${LEASED_WTS[$wt_name]:-}" ]; then
+      python3 "$(dirname "$0")/kanban_worktree_leases.py" --db "$KANBAN_DB" --clear "$wt_name" 2>/dev/null || true
     fi
   else
     if [ "$is_base" = 0 ]; then

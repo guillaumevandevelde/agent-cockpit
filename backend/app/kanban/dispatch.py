@@ -2319,6 +2319,50 @@ async def _post_rtk_bridge_failure_async(
         await engine.dispose()
 
 
+def _record_worktree_lease(*, worktree_name: str, owner: str) -> None:
+    """Sync bridge to :func:`app.kanban.lease.set_worktree_lease`.
+
+    Mirrors the RTK installer's fail-open contract: the worktree lease
+    is a safety net, so a write failure must not abort the spawn. Uses
+    the same loop-aware bridge as ``_install_rtk_for_dispatch`` so the
+    call works whether the dispatch happened on a worker thread or on
+    the asyncio loop thread.
+
+    The lease is the only signal that distinguishes a live dispatch from
+    a kill -9-orphaned worktree (see ``docs/cockpit/fork-strategy-claude-deck-316.md``
+    §4.3). Writing it before the spawn runs means a crash anywhere in the
+    rest of the transport still leaves the worktree marked as recently
+    owned, so :func:`session_cleanup.cleanup_session_for_card` and
+    ``scripts/worktree-gc.sh`` both treat it as in-use until the TTL
+    elapses.
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.kanban import lease
+
+    def _run() -> None:
+        asyncio.run(lease.set_worktree_lease(worktree_name, owner))
+
+    def _execute(call: Callable[[], None]) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            call()
+            return
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(call).result()
+
+    try:
+        _execute(_run)
+    except Exception as exc:
+        logger.warning(
+            "worktree lease write failed for %s (owner=%s): %s — "
+            "spawn continues; gc will fall back to the pre-lease heuristic",
+            worktree_name, owner, exc,
+        )
+
+
 async def _install_rtk_for_dispatch_async(
     *, card_id: str, project_key: str, column_name: str,
     worktree_path: str, repo_path: str,
@@ -2450,6 +2494,17 @@ def make_worktree_transport(skip_permissions: bool = True,
             ["git", "-C", repo, "worktree", "add", "-b", session_name,
              worktree_path, "origin/master"],
             capture_output=True, text=True, timeout=60, check=True)
+
+        # Record a per-worktree lease + observed_owner before the session is
+        # spawned. The lease is a hard pattern that lets both the cleanup
+        # path (``cleanup_session_for_card``) and ``scripts/worktree-gc.sh``
+        # distinguish "active dispatch" from "orphaned by kill -9" — see
+        # kanban card a2268cd2… + ``docs/cockpit/fork-strategy-claude-deck-316.md``.
+        # Best-effort: a lease-write failure must not abort the spawn.
+        _record_worktree_lease(
+            worktree_name=session_name,
+            owner=(f"card:{card_id}" if card_id else f"dispatch:{session_name}"),
+        )
 
         # NOTE: we deliberately do NOT copy the repo-root ``.mcp.json`` into
         # the worktree. A fresh ``git worktree add origin/master`` only checks

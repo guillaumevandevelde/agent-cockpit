@@ -44,6 +44,14 @@ cur.execute("""
         claimed_at TEXT
     )
 """)
+# kanban_meta: the new worktree-lease layer (kanban card a2268cd2…). gc reads
+# ``worktree_lease:<name>`` + ``worktree_owner:<name>`` rows here.
+cur.execute("""
+    CREATE TABLE kanban_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )
+""")
 con.commit()
 con.close()
 PY
@@ -60,6 +68,24 @@ con.execute(
     "INSERT INTO kanban_cards (id, project_key, title, column, claimed_by, claimed_at) "
     "VALUES (?, ?, ?, ?, ?, ?)",
     (cid, "git-example-test", cid, col, claim, "2026-07-10T00:00:00"),
+)
+con.commit(); con.close()
+PY
+}
+
+# Insert a worktree lease. Args: db name owner expiry_iso
+insert_lease() {
+    local db="$1" name="$2" owner="$3" expiry="$4"
+    python3 - "$db" "$name" "$owner" "$expiry" <<'PY'
+import sqlite3, sys
+db, name, owner, expiry = sys.argv[1:5]
+con = sqlite3.connect(db)
+con.executemany(
+    "INSERT INTO kanban_meta (key, value) VALUES (?, ?)",
+    [
+        (f"worktree_lease:{name}", expiry),
+        (f"worktree_owner:{name}", owner),
+    ],
 )
 con.commit(); con.close()
 PY
@@ -188,6 +214,101 @@ insert_card "$T/kanban.db" "k-other-card" "Backlog" "agent:k-other"
 out="$(run_gc "" "$T" "$T/kanban.db")"
 check "WOULD-REMOVE when claim points elsewhere" \
     'echo "$out" | grep -qE "WOULD-REMOVE.*k-stale"'
+rm -rf "$T"
+
+echo ""
+echo "Task 10: a LIVE worktree lease blocks removal (kill -9 safety net)"
+T="$(mktemp -d)"
+make_worktree "$T" "k-leased" "k-leased"
+seed_kanban_db "$T/kanban.db"
+# No active claim — the agent process was killed before the Done move.
+# The lease is the only signal that this worktree is in use.
+FUTURE="$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%S+00:00' 2>/dev/null || \
+          date -u -v+1H '+%Y-%m-%dT%H:%M:%S+00:00')"
+insert_lease "$T/kanban.db" "k-leased" "dispatch:k-leased" "$FUTURE"
+out="$(run_gc "" "$T" "$T/kanban.db")"
+check "KEEP for live lease reason" \
+    'echo "$out" | grep -qE "KEEP[[:space:]]+k-leased.*live lease"'
+check "worktree still present" '[ -d "$T/.claude/worktrees/k-leased" ]'
+out_apply="$(run_gc --apply "$T" "$T/kanban.db")"
+check "KEEP on --apply too" \
+    'echo "$out_apply" | grep -qE "KEEP[[:space:]]+k-leased.*live lease"'
+check "worktree still present after --apply" \
+    '[ -d "$T/.claude/worktrees/k-leased" ]'
+rm -rf "$T"
+
+echo ""
+echo "Task 11: an EXPIRED lease is treated as no lease — gc reclaims the worktree"
+T="$(mktemp -d)"
+make_worktree "$T" "k-stale-lease" "k-stale-lease"
+seed_kanban_db "$T/kanban.db"
+# Subtract 1 second from the deadline so the value is unambiguously past.
+PAST="$(date -u -d '-1 second' '+%Y-%m-%dT%H:%M:%S+00:00' 2>/dev/null || \
+        date -u -v-1S '+%Y-%m-%dT%H:%M:%S+00:00')"
+insert_lease "$T/kanban.db" "k-stale-lease" "dispatch:zombie" "$PAST"
+out="$(run_gc --apply "$T" "$T/kanban.db")"
+check "REMOVED on --apply for expired lease" \
+    'echo "$out" | grep -qE "REMOVED.*k-stale-lease"'
+check "worktree directory removed" \
+    '[ ! -d "$T/.claude/worktrees/k-stale-lease" ]'
+# The expired lease row should be cleared so the next gc run sees no
+# stale lease pointing at a directory that no longer exists.
+check "expired lease row cleared from kanban_meta" \
+    '[ "$(python3 - "$T/kanban.db" "k-stale-lease" <<PY
+import sqlite3, sys
+db, name = sys.argv[1], sys.argv[2]
+con = sqlite3.connect(db)
+cur = con.execute("SELECT key FROM kanban_meta WHERE key IN (?, ?)",
+                  (f"worktree_lease:{name}", f"worktree_owner:{name}"))
+print(len(cur.fetchall()))
+PY
+)" = "0" ]'
+rm -rf "$T"
+
+echo ""
+echo "Task 12: a half-written lease (expiry without owner) is skipped"
+T="$(mktemp -d)"
+make_worktree "$T" "k-half" "k-half"
+seed_kanban_db "$T/kanban.db"
+FUTURE="$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%S+00:00' 2>/dev/null || \
+          date -u -v+1H '+%Y-%m-%dT%H:%M:%S+00:00')"
+# Only the expiry row; the owner row is missing. The helper script must
+# skip it so gc falls through to the standard merge+clean path.
+python3 - "$T/kanban.db" "k-half" "$FUTURE" <<'PY'
+import sqlite3, sys
+db, name, expiry = sys.argv[1], sys.argv[2], sys.argv[3]
+con = sqlite3.connect(db)
+con.execute("INSERT INTO kanban_meta (key, value) VALUES (?, ?)",
+            (f"worktree_lease:{name}", expiry))
+con.commit(); con.close()
+PY
+out="$(run_gc "" "$T" "$T/kanban.db")"
+check "WOULD-REMOVE for half-written lease (no owner row)" \
+    'echo "$out" | grep -qE "WOULD-REMOVE.*k-half"'
+rm -rf "$T"
+
+echo ""
+echo "Task 13: a malformed expiry is skipped, not crashed"
+T="$(mktemp -d)"
+make_worktree "$T" "k-bad-exp" "k-bad-exp"
+seed_kanban_db "$T/kanban.db"
+# Garbage value — the helper must skip without crashing the gc script.
+python3 - "$T/kanban.db" "k-bad-exp" <<'PY'
+import sqlite3, sys
+db, name = sys.argv[1], sys.argv[2]
+con = sqlite3.connect(db)
+con.executemany(
+    "INSERT INTO kanban_meta (key, value) VALUES (?, ?)",
+    [
+        (f"worktree_lease:{name}", "not-a-date"),
+        (f"worktree_owner:{name}", "dispatch:k-bad-exp"),
+    ],
+)
+con.commit(); con.close()
+PY
+out="$(run_gc "" "$T" "$T/kanban.db")"
+check "WOULD-REMOVE for malformed lease (skipped, not crashed)" \
+    'echo "$out" | grep -qE "WOULD-REMOVE.*k-bad-exp"'
 rm -rf "$T"
 
 echo ""

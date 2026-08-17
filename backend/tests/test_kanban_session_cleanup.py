@@ -138,6 +138,141 @@ async def test_cleanup_removes_worktree_when_tmux_dead(monkeypatch):
     assert removed[0] == ("k-test-1234", "/tmp/test-repo")
 
 
+# ---- lease wiring: cleanup_session_for_card -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skips_worktree_removal_when_lease_live(monkeypatch):
+    """A live lease means another dispatch owns the worktree name.
+
+    The pre-lease heuristic (active kanban claim + clean + merged) cannot
+    tell two consecutive dispatches apart when they share a worktree name;
+    the lease makes it explicit. ``cleanup_session_for_card`` must leave
+    the worktree alone in that case and let ``worktree-gc.sh`` reclaim it
+    after the TTL elapses.
+    """
+    from app.kanban import lease as lease_module
+
+    removed = []
+    cleared = []
+
+    def track_remove(session_name, project_path):
+        removed.append((session_name, project_path))
+        return True
+
+    async def fake_get_lease(worktree_name):
+        from datetime import datetime, timedelta, timezone
+        return lease_module.WorktreeLease(
+            owner="dispatch:other-session",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+
+    async def fake_clear(worktree_name):
+        cleared.append(worktree_name)
+
+    monkeypatch.setattr(session_cleanup, "_kill_tmux_session", lambda _: False)
+    monkeypatch.setattr(session_cleanup, "_remove_worktree_at", track_remove)
+    monkeypatch.setattr(
+        session_cleanup, "resolve_project_path",
+        AsyncMock(return_value="/tmp/test-repo"),
+    )
+    monkeypatch.setattr(lease_module, "get_worktree_lease", fake_get_lease)
+    monkeypatch.setattr(lease_module, "clear_worktree_lease", fake_clear)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _seed_card(s)
+        await s.commit()
+
+    await session_cleanup.cleanup_session_for_card(cid, "git:test/repo")
+
+    assert removed == [], "live lease must block worktree removal"
+    # Even when removal is skipped, the lease row is still cleared — the
+    # terminal move is the "this dispatch is over" signal regardless of
+    # whether the directory actually contained our worktree.
+    assert cleared == ["k-test-1234"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_removes_worktree_when_lease_expired(monkeypatch):
+    """An expired lease is treated as no lease — the pre-lease path runs."""
+    from app.kanban import lease as lease_module
+
+    removed = []
+
+    def track_remove(session_name, project_path):
+        removed.append((session_name, project_path))
+        return True
+
+    async def fake_get_lease(worktree_name):
+        from datetime import datetime, timedelta, timezone
+        return lease_module.WorktreeLease(
+            owner="dispatch:zombie",
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+
+    async def fake_clear(worktree_name):
+        pass
+
+    monkeypatch.setattr(session_cleanup, "_kill_tmux_session", lambda _: False)
+    monkeypatch.setattr(session_cleanup, "_remove_worktree_at", track_remove)
+    monkeypatch.setattr(
+        session_cleanup, "resolve_project_path",
+        AsyncMock(return_value="/tmp/test-repo"),
+    )
+    monkeypatch.setattr(lease_module, "get_worktree_lease", fake_get_lease)
+    monkeypatch.setattr(lease_module, "clear_worktree_lease", fake_clear)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _seed_card(s)
+        await s.commit()
+
+    await session_cleanup.cleanup_session_for_card(cid, "git:test/repo")
+
+    assert removed == [("k-test-1234", "/tmp/test-repo")]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_continues_when_lease_read_fails(monkeypatch):
+    """A broken kanban DB must not strand the cleanup half-way.
+
+    The inner ``lease.get_worktree_lease`` raises; the module's
+    ``_read_worktree_lease`` wrapper catches and downgrades to ``None``,
+    so cleanup falls back to the pre-lease path. Same shape for the
+    clear wrapper. This pins the contract: a broken lease layer cannot
+    stop the canonical Done-cleanup path.
+    """
+    from app.kanban import lease as lease_module
+
+    removed = []
+
+    def track_remove(session_name, project_path):
+        removed.append((session_name, project_path))
+        return True
+
+    async def fake_get_lease(worktree_name):
+        raise RuntimeError("synthetic kanban-db outage")
+
+    async def fake_clear(worktree_name):
+        raise RuntimeError("synthetic kanban-db outage")
+
+    monkeypatch.setattr(session_cleanup, "_kill_tmux_session", lambda _: False)
+    monkeypatch.setattr(session_cleanup, "_remove_worktree_at", track_remove)
+    monkeypatch.setattr(
+        session_cleanup, "resolve_project_path",
+        AsyncMock(return_value="/tmp/test-repo"),
+    )
+    monkeypatch.setattr(lease_module, "get_worktree_lease", fake_get_lease)
+    monkeypatch.setattr(lease_module, "clear_worktree_lease", fake_clear)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _seed_card(s)
+        await s.commit()
+
+    await session_cleanup.cleanup_session_for_card(cid, "git:test/repo")
+
+    assert removed == [("k-test-1234", "/tmp/test-repo")]
+
+
 @pytest.mark.asyncio
 async def test_worktree_path_accepts_persisted_absolute_resume_directory(
     monkeypatch, tmp_path,
