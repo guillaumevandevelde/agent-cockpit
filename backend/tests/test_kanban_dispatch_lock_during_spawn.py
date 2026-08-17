@@ -23,6 +23,8 @@ These tests pin two related invariants:
    commit re-closes the transaction but the spawn itself would have
    blocked the lock for the full ~30s window).
 """
+import asyncio
+import sqlite3
 import time
 import unittest.mock as mock
 
@@ -32,7 +34,7 @@ import pytest_asyncio
 from app.kanban import dispatch
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
+from tests.kanban_test_db import TestSessionLocal, _db_path, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 
@@ -358,4 +360,90 @@ async def test_fresh_worktree_branch_also_commits_before_spawn():
         f"SQLite write lock held for the full ~30-40s spawn window — "
         f"concurrent UI/MCP writes would 500 with 'database is locked'. "
         f"Regression of card a2d15978d897436ca992e22f9ba23ba6."
+    )
+
+
+def _write_lock_is_free() -> bool:
+    """True when no other connection holds the kanban write lock.
+
+    Asks the only question that matters, from a genuinely separate
+    connection: *can another writer get in?* The short ``timeout`` keeps a
+    regression fast — 0.2s instead of sitting out the full 5s
+    ``busy_timeout`` — so a held lock reads as a failure, not a hang.
+    """
+    con = sqlite3.connect(_db_path, timeout=0.2, isolation_level=None)
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("ROLLBACK")
+        return True
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            return False
+        raise
+    finally:
+        con.close()
+
+
+@pytest.mark.asyncio
+async def test_write_lock_is_free_during_the_pre_spawn_resolution_phase():
+    """The lock must already be free BEFORE the pre-spawn resolution phase.
+
+    Every other test in this module probes at spawn-time, which is too late
+    to see the real exposure. ``_run_card`` opens its transaction at the
+    very first write it does — claim, move, ``pending_spawn_session`` — and
+    then spends tens of seconds resolving before it reaches the pre-spawn
+    commit: provider/model resolution, ceremony profile, prior-branch git,
+    prompt injectors, plan lookup, and a 2s endpoint HTTP probe. SQLite
+    hands out one write lock, so every other writer on the board burns its
+    5s ``busy_timeout`` and fails for that whole window.
+
+    Measured on the live backend (``logs/backend/run-20260817-094413-3592-2.log``):
+    the tick claimed a card at 13:04:34.2 and only committed at ~13:05:00.8
+    — 26s. ``POST /kanban/cards`` hit a locked DB twice inside it, and three
+    ``DELETE /kanban/cards/{id}`` calls in the next tick's window returned
+    500 ``database is locked``.
+
+    The probe patches ``_resolve_prior_branch_warning`` — the consumer's
+    binding, per ``docs/cockpit/test-doubles-convention.md`` — because it
+    runs after all three writes and before the pre-spawn commit.
+    """
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        card = await get_card(s, cid)
+
+    observed: list[bool] = []
+    original = dispatch._resolve_prior_branch_warning
+
+    async def probing_prior_branch_warning(session, **kwargs):
+        # Probe from a worker thread, the way a real competing writer
+        # arrives (another request, the MCP server). A blocking sqlite3
+        # call on the event-loop thread would stall aiosqlite's own result
+        # delivery and deadlock the connection we are asking about.
+        observed.append(await asyncio.to_thread(_write_lock_is_free))
+        return await original(session, **kwargs)
+
+    dispatch._resolve_prior_branch_warning = probing_prior_branch_warning
+    try:
+        transport = _EventOrderingTransport()
+        transport.transport_kind = "worktree"
+        async with KanbanSessionLocal() as s:
+            transport._session_ref[0] = s
+            await dispatch._run_card(
+                s, card=card, project_key=PK, project_path="/p",
+                transport=transport, live_sessions=set(),
+            )
+    finally:
+        dispatch._resolve_prior_branch_warning = original
+
+    assert observed, (
+        "the probe never fired — _run_card no longer calls "
+        "_resolve_prior_branch_warning, so this test proves nothing"
+    )
+    assert all(observed), (
+        "the kanban write lock was still held when _run_card entered its "
+        "pre-spawn resolution phase. Claim/move/pending_spawn_session open "
+        "the transaction and the pre-spawn commit is tens of seconds away, "
+        "so every concurrent board write (POST /kanban/cards, DELETE "
+        "/kanban/cards/{id}) fails on busy_timeout for that whole window."
     )

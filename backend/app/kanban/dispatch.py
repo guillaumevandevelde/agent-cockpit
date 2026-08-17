@@ -4861,6 +4861,21 @@ async def _run_card(
         entity_id=card.id, payload={"pending_spawn_session": name},
     )
 
+    # Release the write lock here, not at the pre-spawn commit below. The
+    # three writes above open the transaction, and SQLite hands out one write
+    # lock; everything between here and that commit is slow resolution work,
+    # so committing only there locked the board for tens of seconds per card.
+    # ``dispatch_project``'s own two lock-release commits cannot cover this —
+    # the claim/move above re-open the transaction right after them. Measured
+    # window + the 500s it caused: see the pre-spawn-phase test in
+    # ``tests/test_kanban_dispatch_lock_during_spawn.py``.
+    #
+    # Durability changes in window, not in kind: the pre-spawn commit already
+    # made claim + move + bookmark durable before the ~37s spawn, and the same
+    # recovery covers the wider window — ``reap_stale_claims`` releases an
+    # ``agent:`` claim with no live session on the next tick.
+    await session.commit()
+
     # Load persona for the target agent. Analyst phase uses a dedicated
     # helper that falls back to the hardcoded ANALYST_PROMPT when no
     # `analyst.md` exists in the project — otherwise the analyst session
@@ -5048,22 +5063,16 @@ async def _run_card(
             "endpoint_base_url": endpoint_resolution["base_url"],
             "endpoint_auth_token": endpoint_resolution["auth_token"],
         }
-    if is_fresh_worktree:
-        # The synchronous worktree transport installs RTK through a private
-        # worker-thread event loop and DB connection. Release this session's
-        # SQLite write lock first; otherwise the worker blocks while posting
-        # its activity note and the token saver silently degrades to failed.
-        # Claim + move are durable before spawn, and the existing exception
-        # path applies and commits compensating release/move operations.
-        await session.commit()
-    else:
-        # Resume / headless / sandcastle paths also need claim + move +
-        # ``pending_spawn_session`` on disk BEFORE ``tmux new-session`` runs:
-        # otherwise a crash in the ~37s spawn window leaves a live tmux
-        # session with no DB row that recognises it (kaart "Onderbroken spawn
-        # lekt zijn tmux-sessie"). Commit is unconditional rather than gated
-        # on transport type so the bookmark is consistent across paths.
-        await session.commit()
+    # Second lock release, for whatever the resolution phase above wrote
+    # after the first one (usually the model-options cache). Unconditional
+    # across transports: the worktree transport installs RTK on a private
+    # worker thread with its own DB connection, which would block on a lock
+    # this session still held and degrade the token saver to ``failed``; and
+    # every path needs claim + move + ``pending_spawn_session`` on disk
+    # before ``tmux new-session`` runs, or a crash in the ~37s spawn window
+    # leaves a tmux session no DB row recognises (kaart "Onderbroken spawn
+    # lekt zijn tmux-sessie").
+    await session.commit()
     try:
         # Run the synchronous transport on a thread-pool worker so the
         # subprocess fan-out (git fetch + git worktree add + tmux
@@ -6581,6 +6590,30 @@ async def dispatch_project(
         session, project_key=project_key, cards=cards,
     )
 
+    # Release the SQLite write lock before the resolution phase below.
+    #
+    # Everything above is the tick's sweep phase, and every one of those
+    # sweeps writes: `reap_stale_claims` releases dead claims,
+    # the three liveness detectors move stuck cards, `_persist_holds` stamps
+    # hold state, `_escalate_overdue_plan_ref` comments. SQLite takes the
+    # single write lock at the first of those flushes and does not let go
+    # until a commit. Without this one, the lock stayed held through the
+    # per-card resolution loop and all of `_run_card`'s pre-spawn work
+    # (persona + ceremony profile + prior-branch git + prompt injectors +
+    # plan lookup + a 2s endpoint HTTP probe) — tens of seconds during which
+    # every *other* writer on the board fails. That is the mechanism behind
+    # "card create faalt": `POST /kanban/cards` exhausted its 5s
+    # `busy_timeout` and 500'd, five times inside one two-minute tick
+    # (logs/backend/run-20260817-082951-3592-0.log).
+    #
+    # Committing here is safe and is not a new pattern: `_run_card` already
+    # commits this same session mid-tick (see its pre-spawn commit) so the
+    # claim is durable before a ~37s spawn. Each sweep's effect is meant to
+    # stand on its own — a reaped stale claim must not be rolled back
+    # because a later phase raised — and the caller's exception handler
+    # applies and commits its own compensating ops regardless.
+    await session.commit()
+
     # Consumptiekant van het zelfverbeteringsbudget (kaart ff9877ca…, begrensd
     # in kaart 9a567259…). `budget_closed` weegt drie dingen: de aan/uit-
     # schakelaar, het slot-aandeel (max 25% van de bezette claims) en de
@@ -6725,6 +6758,13 @@ async def dispatch_project(
                 session, card=card, project_key=project_key,
                 project_path=project_path,
             )
+
+        # Second lock-release point, for the same reason as the one after the
+        # sweep phase: the per-card filters above write too
+        # (`_flag_dangling_dep_card`, `_stamp_resume_target`), and `_run_card`
+        # does not commit until just before its spawn — so without this, the
+        # write lock is held across its whole resolution phase.
+        await session.commit()
 
         # Two-phase dispatch: when the card has an analyst_agent_id and no
         # analyst_run_id yet, spawn the analyst first and persist the run id

@@ -287,7 +287,6 @@ def _credential_configured(credential_name: str | None, project_key: str) -> boo
 @router.get("/platforms/endpoints", response_model=EndpointListResponse)
 async def list_endpoints_endpoint(
     project_key: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
 ):
     """Return every configured Anthropic-compatible endpoint for the project.
 
@@ -299,6 +298,11 @@ async def list_endpoints_endpoint(
     the NewSessionDialog before the user picks a directory) pass nothing
     and read the shared default bucket. Project-scoped callers pass
     their resolved project_key and see only that project's endpoints.
+
+    Endpoints are ``KanbanMeta`` rows, so this opens a *kanban* session.
+    Injecting ``Depends(get_db)`` here reaches the device-local registry
+    store instead and 500s with ``no such table: kanban_meta`` — see
+    ``tests/test_runs_endpoints_route_session.py``.
     """
     from app.services.agentic_cli.endpoints import (
         DEFAULT_PROJECT_KEY,
@@ -308,7 +312,8 @@ async def list_endpoints_endpoint(
     )
 
     key = project_key or DEFAULT_PROJECT_KEY
-    endpoints = await _list(db, key)
+    async with KanbanSessionLocal() as ks:
+        endpoints = await _list(ks, key)
     return EndpointListResponse(
         endpoints=[
             EndpointResponse(
@@ -327,12 +332,14 @@ async def list_endpoints_endpoint(
 async def upsert_endpoint_endpoint(
     request: EndpointUpsertRequest,
     project_key: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
 ):
     """Insert or overwrite a single endpoint. Validation lives at the
     storage boundary (``endpoints.serialize_endpoint``) so a corrupt row
     is refused with a 400 instead of wedging the dispatcher on a bad
-    KanbanMeta row."""
+    KanbanMeta row.
+
+    Kanban session, not ``Depends(get_db)`` — see ``list_endpoints_endpoint``.
+    """
     from app.services.agentic_cli.endpoints import (
         DEFAULT_PROJECT_KEY,
         Endpoint,
@@ -348,8 +355,9 @@ async def upsert_endpoint_endpoint(
             credential_name=request.credential_name,
         )
         key = project_key or DEFAULT_PROJECT_KEY
-        await _upsert(db, key, ep)
-        await db.commit()
+        async with KanbanSessionLocal() as ks:
+            await _upsert(ks, key, ep)
+            await ks.commit()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return EndpointResponse(
@@ -365,8 +373,8 @@ async def upsert_endpoint_endpoint(
 async def delete_endpoint_endpoint(
     name: str,
     project_key: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
 ):
+    """Kanban session, not ``Depends(get_db)`` — see ``list_endpoints_endpoint``."""
     from app.services.agentic_cli.endpoints import (
         DEFAULT_PROJECT_KEY,
     )
@@ -374,8 +382,9 @@ async def delete_endpoint_endpoint(
         delete_endpoint as _delete,
     )
     try:
-        await _delete(db, project_key or DEFAULT_PROJECT_KEY, name)
-        await db.commit()
+        async with KanbanSessionLocal() as ks:
+            await _delete(ks, project_key or DEFAULT_PROJECT_KEY, name)
+            await ks.commit()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"deleted": True}
@@ -457,7 +466,6 @@ class SeedCatalogResponse(BaseModel):
 async def seed_free_endpoint_catalog(
     project_key: str | None = Query(default=None),
     overwrite: bool = Query(default=False),
-    db: AsyncSession = Depends(get_db),
 ):
     """Bulk-install the seed catalog into the project's endpoint registry.
 
@@ -466,17 +474,20 @@ async def seed_free_endpoint_catalog(
     ``?overwrite=true`` to replace existing rows with the catalog values
     (intended for re-seeding after a catalog bump; it will NOT touch any
     SecretStore entries, so credentials survive intact).
+
+    Kanban session, not ``Depends(get_db)`` — see ``list_endpoints_endpoint``.
     """
     from app.services.agentic_cli.endpoints import DEFAULT_PROJECT_KEY
     from app.services.agentic_cli.free_endpoint_catalog import seed_catalog
 
     try:
-        installed, skipped, skipped_names = await seed_catalog(
-            db,
-            project_key or DEFAULT_PROJECT_KEY,
-            overwrite=overwrite,
-        )
-        await db.commit()
+        async with KanbanSessionLocal() as ks:
+            installed, skipped, skipped_names = await seed_catalog(
+                ks,
+                project_key or DEFAULT_PROJECT_KEY,
+                overwrite=overwrite,
+            )
+            await ks.commit()
     except ValueError as exc:
         # tomllib.TOMLDecodeError subclasses ValueError on every supported
         # Python build, so a corrupt catalog lands here too.
@@ -686,10 +697,14 @@ async def spawn_session_endpoint(
                 resolve_compatible_endpoint as _resolve_compatible,
             )
             try:
-                resolved = await _resolve_compatible(
-                    db, project_key or DEFAULT_PROJECT_KEY, endpoint_name,
-                    requested_model=request.model,
-                )
+                # Kanban session: endpoints are ``KanbanMeta`` rows and do not
+                # live in the ``db`` (registry) store this handler uses for the
+                # host lookup — see ``list_endpoints_endpoint``.
+                async with KanbanSessionLocal() as ks:
+                    resolved = await _resolve_compatible(
+                        ks, project_key or DEFAULT_PROJECT_KEY, endpoint_name,
+                        requested_model=request.model,
+                    )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             if resolved is None:

@@ -204,8 +204,12 @@ export function CardEditDialog({
     // Screenshots staged in the dialog (create mode only). The caller uploads
     // them after the card exists — see KanbanPage's create handler.
     attachments: File[];
-  }) => void;
+  }) => void | Promise<void>;  // awaited — see `submitting`
 }) {
+  // One submit at a time: a create can stall for seconds under board write
+  // contention, so every impatient click used to create another card (three
+  // identical ones on 2026-08-17). Pinned by the in-flight test.
+  const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [priority, setPriority] = useState<Priority>(
@@ -1012,28 +1016,37 @@ export function CardEditDialog({
             Cancel
           </Button>
           <Button
-            disabled={!title.trim()}
-            onClick={() =>
-              onSubmit({
-                title,
-                description,
-                priority: priority === "none" ? null : priority,
-                labels,
-                work_type: workType || null,
-                agent: agent === AUTO ? null : agent,
-                model: model.trim() || null,
-                column_overrides: overridesFromDrafts(overrideDrafts),
-                transport: transport === "auto" ? null : transport,
-                resume_session_id,
-                resume_project_folder,
-                scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
-                analyst_agent_id: analystAgentId === AUTO ? null : analystAgentId,
-                executor_agent_id: executorAgentId === AUTO ? null : executorAgentId,
-                attachments: staged.map((s) => s.file),
-              })
-            }
+            disabled={!title.trim() || submitting}
+            onClick={async () => {
+              if (submitting) return;
+              setSubmitting(true);
+              try {
+                await onSubmit({
+                  title,
+                  description,
+                  priority: priority === "none" ? null : priority,
+                  labels,
+                  work_type: workType || null,
+                  agent: agent === AUTO ? null : agent,
+                  model: model.trim() || null,
+                  column_overrides: overridesFromDrafts(overrideDrafts),
+                  transport: transport === "auto" ? null : transport,
+                  resume_session_id,
+                  resume_project_folder,
+                  scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+                  analyst_agent_id: analystAgentId === AUTO ? null : analystAgentId,
+                  executor_agent_id: executorAgentId === AUTO ? null : executorAgentId,
+                  attachments: staged.map((s) => s.file),
+                });
+              } finally {
+                // Caller closes on success; on failure the dialog stays open,
+                // so hand the button back for a retry.
+                setSubmitting(false);
+              }
+            }}
           >
-            {initial ? "Update" : "Create"}
+            {initial ? (submitting ? "Updating…" : "Update")
+              : submitting ? "Creating…" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>

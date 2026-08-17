@@ -18054,7 +18054,7 @@
     },
     "/api/v1/agent-bridge/platforms/endpoints": {
       "get": {
-        "description": "Return every configured Anthropic-compatible endpoint for the project.\n\n``credential_configured`` is computed server-side so the UI never has\nto ask the user to paste a key \u2014 it only needs a \"not configured\"\nhint, identical to the MiniMax ``configured`` boolean.\n\n``project_key`` is optional: callers without a project context (e.g.\nthe NewSessionDialog before the user picks a directory) pass nothing\nand read the shared default bucket. Project-scoped callers pass\ntheir resolved project_key and see only that project's endpoints.",
+        "description": "Return every configured Anthropic-compatible endpoint for the project.\n\n``credential_configured`` is computed server-side so the UI never has\nto ask the user to paste a key \u2014 it only needs a \"not configured\"\nhint, identical to the MiniMax ``configured`` boolean.\n\n``project_key`` is optional: callers without a project context (e.g.\nthe NewSessionDialog before the user picks a directory) pass nothing\nand read the shared default bucket. Project-scoped callers pass\ntheir resolved project_key and see only that project's endpoints.\n\nEndpoints are ``KanbanMeta`` rows, so this opens a *kanban* session.\nInjecting ``Depends(get_db)`` here reaches the device-local registry\nstore instead and 500s with ``no such table: kanban_meta`` \u2014 see\n``tests/test_runs_endpoints_route_session.py``.",
         "operationId": "list_endpoints_endpoint_api_v1_agent_bridge_platforms_endpoints_get",
         "parameters": [
           {
@@ -18102,7 +18102,7 @@
         ]
       },
       "post": {
-        "description": "Insert or overwrite a single endpoint. Validation lives at the\nstorage boundary (``endpoints.serialize_endpoint``) so a corrupt row\nis refused with a 400 instead of wedging the dispatcher on a bad\nKanbanMeta row.",
+        "description": "Insert or overwrite a single endpoint. Validation lives at the\nstorage boundary (``endpoints.serialize_endpoint``) so a corrupt row\nis refused with a 400 instead of wedging the dispatcher on a bad\nKanbanMeta row.\n\nKanban session, not ``Depends(get_db)`` \u2014 see ``list_endpoints_endpoint``.",
         "operationId": "upsert_endpoint_endpoint_api_v1_agent_bridge_platforms_endpoints_post",
         "parameters": [
           {
@@ -18184,7 +18184,7 @@
     },
     "/api/v1/agent-bridge/platforms/endpoints-catalog/seed": {
       "post": {
-        "description": "Bulk-install the seed catalog into the project's endpoint registry.\n\nBy default, entries that already exist under the same ``name`` are left\nalone \u2014 the operator's runtime-config wins over the catalog. Pass\n``?overwrite=true`` to replace existing rows with the catalog values\n(intended for re-seeding after a catalog bump; it will NOT touch any\nSecretStore entries, so credentials survive intact).",
+        "description": "Bulk-install the seed catalog into the project's endpoint registry.\n\nBy default, entries that already exist under the same ``name`` are left\nalone \u2014 the operator's runtime-config wins over the catalog. Pass\n``?overwrite=true`` to replace existing rows with the catalog values\n(intended for re-seeding after a catalog bump; it will NOT touch any\nSecretStore entries, so credentials survive intact).\n\nKanban session, not ``Depends(get_db)`` \u2014 see ``list_endpoints_endpoint``.",
         "operationId": "seed_free_endpoint_catalog_api_v1_agent_bridge_platforms_endpoints_catalog_seed_post",
         "parameters": [
           {
@@ -18244,6 +18244,7 @@
     },
     "/api/v1/agent-bridge/platforms/endpoints/{name}": {
       "delete": {
+        "description": "Kanban session, not ``Depends(get_db)`` \u2014 see ``list_endpoints_endpoint``.",
         "operationId": "delete_endpoint_endpoint_api_v1_agent_bridge_platforms_endpoints__name__delete",
         "parameters": [
           {
@@ -24110,6 +24111,7 @@
         ]
       },
       "post": {
+        "description": "Create a card, retrying briefly when another writer holds the DB lock.\n\nSQLite serialises writers. Any concurrent writer that outlasts\n`sqlite_busy_timeout_ms` used to turn this into an unhandled 500 \u2014\nobserved against the auto-dispatch tick, which held one transaction\nacross its whole resolution phase. `run_write_with_retry` re-runs the\nwhole body in a fresh session (nothing is committed on a failed attempt,\nso a retry cannot double-create), and genuine exhaustion becomes a 503\nthe caller can retry rather than a 500 that reads like a board defect.",
         "operationId": "create_card_api_v1_kanban_cards_post",
         "requestBody": {
           "content": {

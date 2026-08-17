@@ -548,4 +548,48 @@ describe("CardEditDialog attachment staging", () => {
     );
     expect(screen.queryByLabelText("Bijlage kiezen")).toBeNull();
   });
+
+  it("submits once while the first submit is still in flight", async () => {
+    // The bug this pins: POST /kanban/cards can stall for seconds when the
+    // auto-dispatch tick holds the SQLite write lock. The dialog stays open
+    // until the caller resolves, so every extra click fired another create
+    // and the board got the same card three times (board state 2026-08-17:
+    // 97dfc77c / ac356ce9 / 5a12219c, all "Take a look at the open pull
+    // requests", created 54ms apart when the lock let go).
+    let resolveSubmit: (() => void) | undefined;
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+    render(
+      <CardEditDialog
+        open
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "New card" },
+    });
+    const button = screen.getByRole("button", { name: /create/i });
+
+    await act(async () => {
+      button.click();
+    });
+    // Two more impatient clicks during the stall.
+    button.click();
+    button.click();
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+
+    await act(async () => {
+      resolveSubmit?.();
+    });
+    // A failed submit must hand the button back — the caller keeps the
+    // dialog open on error so the user can retry.
+    expect(screen.getByRole("button", { name: /create/i })).not.toBeDisabled();
+  });
 });
