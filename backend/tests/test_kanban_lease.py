@@ -13,7 +13,7 @@ Covers the hard-pattern replacement for the pre-lease ``worktree-gc`` heuristic
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -28,7 +28,6 @@ from app.kanban.lease import (
 from app.kanban.models import KanbanMeta
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
-
 KanbanSessionLocal = TestSessionLocal()
 
 
@@ -40,7 +39,7 @@ async def _tables():
 
 @pytest.mark.asyncio
 async def test_set_worktree_lease_writes_expiry_and_owner():
-    now = datetime(2026, 8, 17, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
     written = await lease.set_worktree_lease(
         "k-test-1234", "card:abc", ttl_seconds=3600, now=now,
     )
@@ -62,7 +61,7 @@ async def test_set_worktree_lease_writes_expiry_and_owner():
 @pytest.mark.asyncio
 async def test_set_worktree_lease_overwrites_existing_lease():
     """A re-dispatch is allowed to claim the same worktree name."""
-    now = datetime(2026, 8, 17, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
     await lease.set_worktree_lease(
         "k-test-1234", "dispatch:old", ttl_seconds=60, now=now,
     )
@@ -114,7 +113,7 @@ async def test_get_worktree_lease_returns_none_for_malformed_expiry():
 
 @pytest.mark.asyncio
 async def test_lease_is_live_until_expiry_then_dead():
-    now = datetime(2026, 8, 17, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
     lease_entry = WorktreeLease(
         owner="card:abc",
         expires_at=now + timedelta(seconds=60),
@@ -150,7 +149,7 @@ async def test_clear_worktree_lease_is_idempotent_on_missing_rows():
 
 @pytest.mark.asyncio
 async def test_list_worktree_leases_returns_only_parseable_pairs():
-    now = datetime(2026, 8, 17, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
     await lease.set_worktree_lease("k-a", "dispatch:a", ttl_seconds=60, now=now)
     await lease.set_worktree_lease("k-b", "card:b", ttl_seconds=120, now=now)
 
@@ -179,7 +178,7 @@ async def test_list_worktree_leases_returns_only_parseable_pairs():
 
 @pytest.mark.asyncio
 async def test_set_worktree_lease_rejects_blank_inputs():
-    now = datetime(2026, 8, 17, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
     with pytest.raises(ValueError):
         await lease.set_worktree_lease("", "card:abc", now=now)
     with pytest.raises(ValueError):

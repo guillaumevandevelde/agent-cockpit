@@ -11608,6 +11608,15 @@
       "ProjectBase": {
         "description": "Base project schema.",
         "properties": {
+          "ceremony_profile": {
+            "default": "code",
+            "enum": [
+              "code",
+              "knowledge"
+            ],
+            "title": "Ceremony Profile",
+            "type": "string"
+          },
           "kind": {
             "default": "product",
             "enum": [
@@ -11676,6 +11685,15 @@
       "ProjectCreate": {
         "description": "Schema for creating a new project.",
         "properties": {
+          "ceremony_profile": {
+            "default": "code",
+            "enum": [
+              "code",
+              "knowledge"
+            ],
+            "title": "Ceremony Profile",
+            "type": "string"
+          },
           "kind": {
             "default": "product",
             "enum": [
@@ -11775,6 +11793,15 @@
       "ProjectResponse": {
         "description": "Schema for project response.",
         "properties": {
+          "ceremony_profile": {
+            "default": "code",
+            "enum": [
+              "code",
+              "knowledge"
+            ],
+            "title": "Ceremony Profile",
+            "type": "string"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -11846,6 +11873,21 @@
       "ProjectUpdate": {
         "description": "Schema for updating a project.",
         "properties": {
+          "ceremony_profile": {
+            "anyOf": [
+              {
+                "enum": [
+                  "code",
+                  "knowledge"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ceremony Profile"
+          },
           "is_active": {
             "anyOf": [
               {
@@ -26195,7 +26237,7 @@
     },
     "/api/v1/kanban/projects/from-interview": {
       "post": {
-        "description": "REST mirror of the MCP `create_project_from_interview` tool.\n\nCardless inceptie-flow (kanban card b9e6365a\u2026,\n`docs/cockpit/kaartloze-app-inceptie-decision.md` optie 3): an\ninteractive interview produces spec + plan + title + description, and\nthat bundle becomes a brand-new project on the kanban board in one\natomic transaction. No intake card is involved; the meta-board never\nsees this idea before birth.\n\nAction is atomic across filesystem (rm -rf the target dir), Project row,\nautodispatch-meta, and the partial first kanban card. Empty\n``spec_md`` or ``plan_md`` is rejected by the Pydantic schema (422)\n*before* any side effect; the service layer re-validates as a defense\nin depth.\n\nReturns the new `project_id`, the resolved `new_project_key`\n(slug:<basename> for git-init repos without a remote), and the id of\nthe first kanban card placed in the new project's Backlog. The first\ncard carries ``metadata[\"spec_doc\"]`` pointing at the design doc \u2014\nthe spec-driven-development pipeline can trace it from there.",
+        "description": "REST mirror of the MCP `create_project_from_interview` tool.\n\nCardless inceptie-flow (kanban card b9e6365a\u2026,\n`docs/cockpit/kaartloze-app-inceptie-decision.md` optie 3): an\ninteractive interview produces spec + plan + title + description, and\nthat bundle becomes a brand-new project on the kanban board in one\natomic transaction. No intake card is involved; the meta-board never\nsees this idea before birth.\n\nAction is atomic across filesystem (rm -rf the target dir), Project row,\nautodispatch-meta, and the partial first kanban card. Empty\n``spec_md`` or ``plan_md`` is rejected by the Pydantic schema (422)\n*before* any side effect; the service layer re-validates as a defense\nin depth.\n\nReturns the new `project_id`, the resolved `new_project_key`\n(slug:<basename> for git-init repos without a remote), and the id of\nthe first kanban card placed in the new project's Backlog. The first\ncard carries ``metadata[\"spec_doc\"]`` pointing at the design doc \u2014\nthe spec-driven-development pipeline can trace it from there.\n\nWrap contract: only the kanban session goes through\n``run_write_with_retry`` (kind-4). The app DB session is opened\nonce outside the wrapper so a retry never re-inserts the Project\nrow \u2014 see kanban-write-retry-vangnet-decision.md \u00a74 kind-4.",
         "operationId": "create_project_from_interview_api_v1_kanban_projects_from_interview_post",
         "requestBody": {
           "content": {

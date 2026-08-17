@@ -1,4 +1,5 @@
 import subprocess
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -161,10 +162,10 @@ async def test_cleanup_skips_worktree_removal_when_lease_live(monkeypatch):
         return True
 
     async def fake_get_lease(worktree_name):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         return lease_module.WorktreeLease(
             owner="dispatch:other-session",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
 
     async def fake_clear(worktree_name):
@@ -204,10 +205,10 @@ async def test_cleanup_removes_worktree_when_lease_expired(monkeypatch):
         return True
 
     async def fake_get_lease(worktree_name):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         return lease_module.WorktreeLease(
             owner="dispatch:zombie",
-            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            expires_at=datetime.now(UTC) - timedelta(seconds=1),
         )
 
     async def fake_clear(worktree_name):
