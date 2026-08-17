@@ -212,7 +212,10 @@ async def _handle_github_issue_opened(
         ) if name
     ]
 
-    existing = await _find_event_card(
+    # A payload without an issue number cannot be deduped: matching on
+    # `issue_number: None` would hit any card that lacks the key at all (a
+    # PR card on the same repo, say) and report a false `card_exists`.
+    existing = None if number is None else await _find_event_card(
         project_key=project_key,
         meta_match={"source": "github", "repo": repo, "issue_number": number},
     )
@@ -239,7 +242,7 @@ async def _handle_github_issue_opened(
         description=description,
         metadata={
             "source": "github",
-            "event": "issues.opened",
+            "event": f"issues.{payload.get('action') or 'opened'}",
             "repo": repo,
             "issue_number": number,
             "issue_url": url,
