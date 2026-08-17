@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 
 from app.kanban import dep_resolver as mcp_kanban_deps
 from app.kanban import service
-from app.kanban.db import KanbanSessionLocal
+from app.kanban.db import KanbanSessionLocal, run_write_with_retry
 from app.kanban.models import KanbanDeliverable
 from app.kanban.operations import (
     ClaimRejected,
@@ -97,9 +97,11 @@ async def _require_card(s, card_id: str):
 @mcp.tool()
 async def ping() -> dict:
     """Verify the kanban MCP server is reachable and the database is responsive."""
-    async with KanbanSessionLocal() as s:
-        await s.execute(text("SELECT 1"))
-    return {"ok": True, "server": "cockpit-kanban"}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await s.execute(text("SELECT 1"))
+        return {"ok": True, "server": "cockpit-kanban"}
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -161,15 +163,17 @@ async def list_cards(project: str, column: str | None = None,
     Default False preserves the full CardResponse shape every existing
     agent expects. Backwards-compatible opt-in.
     """
-    async with KanbanSessionLocal() as s:
-        known = await service.known_project_keys(s)
-        if project not in known:
-            return await _unknown_project_key_error(s, project, for_create=False)
-        rows = await service.list_cards(s, project, column, compact=compact)
-        if compact:
-            return [CardSummaryResponse.model_validate(c).model_dump()
-                    for c in rows]
-        return [await _card_dict(s, c) for c in rows]
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            known = await service.known_project_keys(s)
+            if project not in known:
+                return await _unknown_project_key_error(s, project, for_create=False)
+            rows = await service.list_cards(s, project, column, compact=compact)
+            if compact:
+                return [CardSummaryResponse.model_validate(c).model_dump()
+                        for c in rows]
+            return [await _card_dict(s, c) for c in rows]
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -194,51 +198,53 @@ async def get_card(card_id: str) -> dict:
     - No match → ``{"error": "not_found", "message": "…prefixes of ≥8 chars
       are accepted"}`` so the caller doesn't doubt the reference itself.
     """
-    async with KanbanSessionLocal() as s:
-        result = await service.resolve_card_by_id_or_prefix(s, card_id)
-        kind = result["kind"]
-        if kind == "exact" or kind == "prefix":
-            return await _card_dict(s, result["card"])
-        if kind == "prefix_too_short":
-            logger.debug("get_card: %s rejected — prefix too short",
-                         card_id)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            result = await service.resolve_card_by_id_or_prefix(s, card_id)
+            kind = result["kind"]
+            if kind == "exact" or kind == "prefix":
+                return await _card_dict(s, result["card"])
+            if kind == "prefix_too_short":
+                logger.debug("get_card: %s rejected — prefix too short",
+                             card_id)
+                return {
+                    "error": "prefix_too_short",
+                    "card_id": card_id,
+                    "min_length": result["min_length"],
+                    "message": (
+                        f"card_id prefix must be at least "
+                        f"{result['min_length']} characters to keep the "
+                        f"collision probability negligible; got "
+                        f"{len(card_id)}. Pass the full 32-char id instead, "
+                        f"or extend the prefix."
+                    ),
+                }
+            if kind == "ambiguous":
+                logger.info("get_card: %s ambiguous — %d matches",
+                            card_id, len(result["matches"]))
+                return {
+                    "error": "ambiguous_card_id",
+                    "card_id": card_id,
+                    "matches": result["matches"],
+                    "message": (
+                        f"card_id prefix {card_id!r} matched "
+                        f"{len(result['matches'])} cards. Pass the full "
+                        f"32-char id (one of `matches`) instead."
+                    ),
+                }
+            # kind == "not_found"
+            logger.debug("get_card: %s not found", card_id)
             return {
-                "error": "prefix_too_short",
+                "error": _NOT_FOUND,
                 "card_id": card_id,
-                "min_length": result["min_length"],
                 "message": (
-                    f"card_id prefix must be at least "
-                    f"{result['min_length']} characters to keep the "
-                    f"collision probability negligible; got "
-                    f"{len(card_id)}. Pass the full 32-char id instead, "
-                    f"or extend the prefix."
+                    f"No card matches {card_id!r}. The id may be a typo, the "
+                    f"card may have been deleted, or the prefix is too short — "
+                    f"a prefix of ≥{service.CARD_ID_PREFIX_MIN_LENGTH} chars "
+                    f"is accepted if the rest of the id is correct."
                 ),
             }
-        if kind == "ambiguous":
-            logger.info("get_card: %s ambiguous — %d matches",
-                        card_id, len(result["matches"]))
-            return {
-                "error": "ambiguous_card_id",
-                "card_id": card_id,
-                "matches": result["matches"],
-                "message": (
-                    f"card_id prefix {card_id!r} matched "
-                    f"{len(result['matches'])} cards. Pass the full "
-                    f"32-char id (one of `matches`) instead."
-                ),
-            }
-        # kind == "not_found"
-        logger.debug("get_card: %s not found", card_id)
-        return {
-            "error": _NOT_FOUND,
-            "card_id": card_id,
-            "message": (
-                f"No card matches {card_id!r}. The id may be a typo, the "
-                f"card may have been deleted, or the prefix is too short — "
-                f"a prefix of ≥{service.CARD_ID_PREFIX_MIN_LENGTH} chars "
-                f"is accepted if the rest of the id is correct."
-            ),
-        }
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -311,88 +317,92 @@ async def create_card(project: str, title: str, description: str = "",
     IDs, workflow provenance, last-seen upstream commit sha, etc. Stored as
     a JSON column on the card and round-tripped unchanged on read.
     """
-    async with KanbanSessionLocal() as s:
-        if not confirm_new_project:
-            known = await service.known_project_keys(s)
-            if project not in known:
-                return await _unknown_project_key_error(s, project, for_create=True)
-        # `scheduled_at` validation — the REST `CardCreate` schema only types
-        # it as `str | None`, so a typo would otherwise land verbatim and be
-        # silently fail-opened by dep_resolver.is_due (which treats an
-        # unparseable timestamp as "due now"). That's exactly the half of the
-        # cadence-chain incident that motivated this gate (kanban card
-        # `c7367319b9d245bdbd4cdc2ddc93e134`): a session that read the create
-        # response never noticed the field had been dropped, and the dispatch
-        # tick claimed the successor within 10s. We catch it here so the
-        # caller sees the error before the card is even created.
-        if scheduled_at is not None:
-            from datetime import datetime as _dt
-            try:
-                _dt.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-            except (ValueError, TypeError, AttributeError):
-                logger.info("create_card: rejected invalid scheduled_at=%r in %s",
-                            scheduled_at, project)
-                return {
-                    "error": "invalid_scheduled_at",
-                    "message": (
-                        f"scheduled_at must be an ISO-8601 timestamp "
-                        f"(e.g. '2026-08-04T07:00:00+00:00'); got {scheduled_at!r}"
-                    ),
-                    "card_id": None,
-                }
-        # Auto-fill `agent` from the work_type mapping so MCP-created cards
-        # don't recreate the regression from kanban card 9cf106e7 ("Card with
-        # analysis work type got picked up by an engineer"): without this, a
-        # card created via MCP with work_type='analysis' landed with
-        # agent=None and the dispatcher routed it to the hardcoded 'engineer'
-        # fallback. See service.resolve_create_agent and
-        # docs/cockpit/work-type-routing-analysis.md §2B.
-        resolved_agent = await service.resolve_create_agent(
-            s, project, work_type=work_type, explicit_agent=agent,
-        )
-        # Note the asymmetry: `work_type` is the raw caller input (None if
-        # the caller didn't set it), while `agent` is the *resolved* value
-        # (possibly derived from work_type via resolve_create_agent, not the
-        # caller's explicit input). This is the same pattern the REST
-        # create_card path uses (router.py:204) — see the
-        # `resolve_create_agent` docstring for the priority order. The
-        # op-log stores the resolved agent so `rematerialize()` replay
-        # reproduces the same routing decision — the user's explicit `agent`
-        # input alone wouldn't, since the explicit-vs-derived distinction
-        # is lost once the create op is folded into the materialized row.
-        cid = await apply_operation(s, op_type="create", entity_type="card",
-            project_key=project, entity_id=None,
-            payload={"title": title, "description": description,
-                     "column": column, "work_type": work_type,
-                     "agent": resolved_agent,
-                     "parent_card_id": parent_card_id,
-                     "depends_on": depends_on,
-                     "labels": labels,
-                     "metadata": metadata,
-                     "scheduled_at": scheduled_at})
-        await s.commit()
-        card = await service.get_card(s, cid)
-        logger.info("create_card: %s in %s (%s, work_type=%s, agent=%s)",
-                    cid, project, column, work_type, resolved_agent)
-        return await _card_dict(s, card)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            if not confirm_new_project:
+                known = await service.known_project_keys(s)
+                if project not in known:
+                    return await _unknown_project_key_error(s, project, for_create=True)
+            # `scheduled_at` validation — the REST `CardCreate` schema only types
+            # it as `str | None`, so a typo would otherwise land verbatim and be
+            # silently fail-opened by dep_resolver.is_due (which treats an
+            # unparseable timestamp as "due now"). That's exactly the half of the
+            # cadence-chain incident that motivated this gate (kanban card
+            # `c7367319b9d245bdbd4cdc2ddc93e134`): a session that read the create
+            # response never noticed the field had been dropped, and the dispatch
+            # tick claimed the successor within 10s. We catch it here so the
+            # caller sees the error before the card is even created.
+            if scheduled_at is not None:
+                from datetime import datetime as _dt
+                try:
+                    _dt.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+                except (ValueError, TypeError, AttributeError):
+                    logger.info("create_card: rejected invalid scheduled_at=%r in %s",
+                                scheduled_at, project)
+                    return {
+                        "error": "invalid_scheduled_at",
+                        "message": (
+                            f"scheduled_at must be an ISO-8601 timestamp "
+                            f"(e.g. '2026-08-04T07:00:00+00:00'); got {scheduled_at!r}"
+                        ),
+                        "card_id": None,
+                    }
+            # Auto-fill `agent` from the work_type mapping so MCP-created cards
+            # don't recreate the regression from kanban card 9cf106e7 ("Card with
+            # analysis work type got picked up by an engineer"): without this, a
+            # card created via MCP with work_type='analysis' landed with
+            # agent=None and the dispatcher routed it to the hardcoded 'engineer'
+            # fallback. See service.resolve_create_agent and
+            # docs/cockpit/work-type-routing-analysis.md §2B.
+            resolved_agent = await service.resolve_create_agent(
+                s, project, work_type=work_type, explicit_agent=agent,
+            )
+            # Note the asymmetry: `work_type` is the raw caller input (None if
+            # the caller didn't set it), while `agent` is the *resolved* value
+            # (possibly derived from work_type via resolve_create_agent, not the
+            # caller's explicit input). This is the same pattern the REST
+            # create_card path uses (router.py:204) — see the
+            # `resolve_create_agent` docstring for the priority order. The
+            # op-log stores the resolved agent so `rematerialize()` replay
+            # reproduces the same routing decision — the user's explicit `agent`
+            # input alone wouldn't, since the explicit-vs-derived distinction
+            # is lost once the create op is folded into the materialized row.
+            cid = await apply_operation(s, op_type="create", entity_type="card",
+                project_key=project, entity_id=None,
+                payload={"title": title, "description": description,
+                         "column": column, "work_type": work_type,
+                         "agent": resolved_agent,
+                         "parent_card_id": parent_card_id,
+                         "depends_on": depends_on,
+                         "labels": labels,
+                         "metadata": metadata,
+                         "scheduled_at": scheduled_at})
+            await s.commit()
+            card = await service.get_card(s, cid)
+            logger.info("create_card: %s in %s (%s, work_type=%s, agent=%s)",
+                        cid, project, column, work_type, resolved_agent)
+            return await _card_dict(s, card)
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
 async def claim_card(card_id: str, claimed_by: str) -> dict:
     """Claim a card. Returns the card, or {error: already_claimed, owner} or {error: not_found}."""
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("claim_card: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        try:
-            await apply_operation(s, op_type="claim", entity_type="card",
-                project_key="", entity_id=card_id, payload={"claimed_by": claimed_by})
-        except ClaimRejected as e:
-            return {"error": "already_claimed", "owner": e.current_owner}
-        await s.commit()
-        logger.info("claim_card: %s claimed by %s", card_id, claimed_by)
-        return await _card_dict(s, await service.get_card(s, card_id))
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("claim_card: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            try:
+                await apply_operation(s, op_type="claim", entity_type="card",
+                    project_key="", entity_id=card_id, payload={"claimed_by": claimed_by})
+            except ClaimRejected as e:
+                return {"error": "already_claimed", "owner": e.current_owner}
+            await s.commit()
+            logger.info("claim_card: %s claimed by %s", card_id, claimed_by)
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 # The summary/outcome gate lives in ``service.enforce_move_gate`` (kaart
@@ -476,137 +486,136 @@ async def move_card(card_id: str, column: str,
     for three rounds. Even a perfectly-written `summary` on this path is
     refused; the issue is the missing gate, not the missing prose.
     """
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("move_card: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("move_card: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
 
-        # Shared gate (kaart efbb82e6…). The same validation runs on the
-        # REST mirror of this tool — ``enforce_move_gate`` is the single
-        # source of truth so the two callers can't drift. On refusal we
-        # translate the exception back to the MCP wire shape
-        # (``{"error": code, "message": …, "allowed": [...]}``); on
-        # success we get back the cleaned inputs the rest of this
-        # function already needs.
-        try:
-            cleaned_summary, cleaned_outcome = await service.enforce_move_gate(
-                s, card, column, summary, outcome
+            # Shared gate (kaart efbb82e6…). The same validation runs on the
+            # REST mirror of this tool — ``enforce_move_gate`` is the single
+            # source of truth so the two callers can't drift. On refusal we
+            # translate the exception back to the MCP wire shape
+            # (``{"error": code, "message": …, "allowed": [...]}``); on
+            # success we get back the cleaned inputs the rest of this
+            # function already needs.
+            try:
+                cleaned_summary, cleaned_outcome = await service.enforce_move_gate(
+                    s, card, column, summary, outcome
+                )
+            except service.MoveGateRejected as e:
+                logger.info("move_card: %s rejected — %s", card_id, e.error_code)
+                out: dict = {"error": e.error_code, "message": e.message}
+                if e.allowed is not None:
+                    out["allowed"] = e.allowed
+                return out
+
+            # ``cleaned_summary`` / ``cleaned_outcome`` are the validated values
+            # returned by ``enforce_move_gate``; the routing-to-Impediment gate
+            # (kaart b8e3ac8b… decision A) is also enforced upstream and
+            # cannot reach here — so no second check is needed.
+
+            # Parent-parking (docs/cockpit/analyse-levenscyclus-decision.md §3):
+            # a Done move for a card with ≥1 child doesn't actually leave the
+            # board — it parks in `Awaiting Subtasks` until every child reaches
+            # Done. Parent-generic (§3.1: "heeft kinderen", not
+            # work_type=='analysis') and shares this interception point with
+            # the outcome gate above (§6) — outcome='decomposed' already
+            # verified ≥1 child exists, so that path always redirects here too.
+            final_column = column
+            if column == "Done" and await service.card_has_children(s, card_id):
+                final_column = "Awaiting Subtasks"
+                if card.project_key:
+                    await service.ensure_awaiting_subtasks_column(s, card.project_key)
+
+            # Independent reviewer gate (docs/cockpit/reviewer-agent-decision.md,
+            # REVISED 2026-07-18): when the project has a `reviewer` column, a card
+            # reaching *genuine* Done is first routed through the reviewer for an
+            # independent, board-enforced feature-compliance + consistency check —
+            # the engineer cannot skip it because the redirect happens here, not in
+            # the persona prompt. The card's agent is flipped to `reviewer` so the
+            # dispatcher spawns the reviewer persona (a `reviewer` column alone
+            # isn't enough — `_phase_target_agent` reads `card.agent` first), and
+            # the persona that did the work is stashed so a rejection resumes *it*.
+            # Excluded: the reviewer's own Done move (else it loops forever) and
+            # analysis cards (their outcome contract + child cards are the review
+            # surface). Parent cards already parked in Awaiting Subtasks above never
+            # reach `final_column == "Done"`, so they're excluded too.
+            gated_to_review = False
+            if (final_column == "Done"
+                    and card.agent != service.REVIEWER_COLUMN
+                    and not service.is_analyst_leaf_spike(card)
+                    and await service.reviewer_column_exists(s, card.project_key)):
+                gated_to_review = True
+                final_column = service.REVIEWER_COLUMN
+                from app.kanban.schemas import COLUMNS
+                return_agent = (
+                    card.column if card.column not in COLUMNS
+                    else (card.agent or "engineer")
+                )
+                new_meta = dict(card.meta or {})
+                new_meta[service.REVIEW_RETURN_AGENT_KEY] = return_agent
+                await apply_operation(s, op_type="update", entity_type="card",
+                    project_key="", entity_id=card_id,
+                    payload={"agent": service.REVIEWER_COLUMN, "metadata": new_meta})
+
+            await apply_operation(s, op_type="move", entity_type="card",
+                project_key="", entity_id=card_id, payload={"column": final_column})
+            # Shared side-effects (kaart efbb82e6…). ``apply_move_summary_comment``
+            # only fires when the destination column requires one (Done). The
+            # outcome helper does its own label-append + ``**Outcome:**`` comment
+            # — same place the REST mirror now uses. Materialising BEFORE commit
+            # is intentional: a partial state (label set, card not moved, or vice
+            # versa) cannot land on disk.
+            #
+            # Note: the Summary comment + outcome side-effects fire based on
+            # ``column == "Done"`` (the operator's intent), not ``final_column``
+            # — a parent card with children still parks in Awaiting Subtasks but
+            # the **Outcome:** comment lands too, so the activity feed captures
+            # the analyst's intent regardless of where the card actually ended
+            # up. This matches the pre-refactor behaviour and the existing test
+            # ``test_move_analysis_card_to_done_decomposed_with_children_is_allowed``.
+            is_analysis_done = (
+                column == "Done" and service.is_analyst_leaf_spike(card)
             )
-        except service.MoveGateRejected as e:
-            logger.info("move_card: %s rejected — %s", card_id, e.error_code)
-            out: dict = {"error": e.error_code, "message": e.message}
-            if e.allowed is not None:
-                out["allowed"] = e.allowed
-            return out
-        summary = cleaned_summary
-        outcome = cleaned_outcome
-
-        # ``summary`` and ``outcome`` were reassigned to the cleaned values
-        # returned by ``enforce_move_gate`` earlier in this function. The
-        # routing-to-Impediment gate (kaart b8e3ac8b… decision A) is also
-        # enforced upstream and cannot reach here — so no second check is
-        # needed.
-
-        # Parent-parking (docs/cockpit/analyse-levenscyclus-decision.md §3):
-        # a Done move for a card with ≥1 child doesn't actually leave the
-        # board — it parks in `Awaiting Subtasks` until every child reaches
-        # Done. Parent-generic (§3.1: "heeft kinderen", not
-        # work_type=='analysis') and shares this interception point with
-        # the outcome gate above (§6) — outcome='decomposed' already
-        # verified ≥1 child exists, so that path always redirects here too.
-        final_column = column
-        if column == "Done" and await service.card_has_children(s, card_id):
-            final_column = "Awaiting Subtasks"
-            if card.project_key:
-                await service.ensure_awaiting_subtasks_column(s, card.project_key)
-
-        # Independent reviewer gate (docs/cockpit/reviewer-agent-decision.md,
-        # REVISED 2026-07-18): when the project has a `reviewer` column, a card
-        # reaching *genuine* Done is first routed through the reviewer for an
-        # independent, board-enforced feature-compliance + consistency check —
-        # the engineer cannot skip it because the redirect happens here, not in
-        # the persona prompt. The card's agent is flipped to `reviewer` so the
-        # dispatcher spawns the reviewer persona (a `reviewer` column alone
-        # isn't enough — `_phase_target_agent` reads `card.agent` first), and
-        # the persona that did the work is stashed so a rejection resumes *it*.
-        # Excluded: the reviewer's own Done move (else it loops forever) and
-        # analysis cards (their outcome contract + child cards are the review
-        # surface). Parent cards already parked in Awaiting Subtasks above never
-        # reach `final_column == "Done"`, so they're excluded too.
-        gated_to_review = False
-        if (final_column == "Done"
-                and card.agent != service.REVIEWER_COLUMN
-                and not service.is_analyst_leaf_spike(card)
-                and await service.reviewer_column_exists(s, card.project_key)):
-            gated_to_review = True
-            final_column = service.REVIEWER_COLUMN
-            from app.kanban.schemas import COLUMNS
-            return_agent = (
-                card.column if card.column not in COLUMNS
-                else (card.agent or "engineer")
+            await service.apply_move_summary_comment(
+                s, card_id, column, cleaned_summary
             )
-            new_meta = dict(card.meta or {})
-            new_meta[service.REVIEW_RETURN_AGENT_KEY] = return_agent
-            await apply_operation(s, op_type="update", entity_type="card",
-                project_key="", entity_id=card_id,
-                payload={"agent": service.REVIEWER_COLUMN, "metadata": new_meta})
+            if is_analysis_done and cleaned_outcome is not None:
+                await service.apply_outcome_side_effects(
+                    s, card, cleaned_outcome, cleaned_summary
+                )
 
-        await apply_operation(s, op_type="move", entity_type="card",
-            project_key="", entity_id=card_id, payload={"column": final_column})
-        # Shared side-effects (kaart efbb82e6…). ``apply_move_summary_comment``
-        # only fires when the destination column requires one (Done). The
-        # outcome helper does its own label-append + ``**Outcome:**`` comment
-        # — same place the REST mirror now uses. Materialising BEFORE commit
-        # is intentional: a partial state (label set, card not moved, or vice
-        # versa) cannot land on disk.
-        #
-        # Note: the Summary comment + outcome side-effects fire based on
-        # ``column == "Done"`` (the operator's intent), not ``final_column``
-        # — a parent card with children still parks in Awaiting Subtasks but
-        # the **Outcome:** comment lands too, so the activity feed captures
-        # the analyst's intent regardless of where the card actually ended
-        # up. This matches the pre-refactor behaviour and the existing test
-        # ``test_move_analysis_card_to_done_decomposed_with_children_is_allowed``.
-        is_analysis_done = (
-            column == "Done" and service.is_analyst_leaf_spike(card)
-        )
-        await service.apply_move_summary_comment(
-            s, card_id, column, summary
-        )
-        if is_analysis_done and outcome is not None:
-            await service.apply_outcome_side_effects(
-                s, card, outcome, summary
-            )
+            if gated_to_review:
+                await apply_operation(s, op_type="comment", entity_type="comment",
+                    project_key="", entity_id=card_id,
+                    payload={"text": (
+                        "**Review:** Routed to the reviewer for an independent "
+                        "feature-compliance + consistency check before Done. The "
+                        "reviewer either approves (→ Done) or reports an impediment "
+                        "explaining why it's not in order."
+                    )})
+                # The engineer's session finished its work by issuing this move, so
+                # tear it down (tmux + worktree + claim release) exactly as a real
+                # Done would. Releasing the claim also turns the card into an
+                # unclaimed orphan in the reviewer column, which the dispatcher then
+                # re-picks up as a fresh, cleared-context reviewer session.
+                _cleanup_after_commit(s, card_id, card.project_key, card.claimed_by)
 
-        if gated_to_review:
-            await apply_operation(s, op_type="comment", entity_type="comment",
-                project_key="", entity_id=card_id,
-                payload={"text": (
-                    "**Review:** Routed to the reviewer for an independent "
-                    "feature-compliance + consistency check before Done. The "
-                    "reviewer either approves (→ Done) or reports an impediment "
-                    "explaining why it's not in order."
-                )})
-            # The engineer's session finished its work by issuing this move, so
-            # tear it down (tmux + worktree + claim release) exactly as a real
-            # Done would. Releasing the claim also turns the card into an
-            # unclaimed orphan in the reviewer column, which the dispatcher then
-            # re-picks up as a fresh, cleared-context reviewer session.
-            _cleanup_after_commit(s, card_id, card.project_key, card.claimed_by)
+            # Auto-close (§3.2): this card actually reached Done (not parked) —
+            # if it's someone's child, check whether that parent can now close
+            # too, and walk up the chain for nested decomposition. The same walk
+            # is also fired from the single-card delete + Clear Done paths (kaart
+            # `400d6a77…`) so a parked parent never strands on a child that was
+            # removed via DELETE or /clear-column instead of a genuine Done.
+            if final_column == "Done" and card.parent_card_id:
+                await service.try_close_ancestors(s, card.parent_card_id)
 
-        # Auto-close (§3.2): this card actually reached Done (not parked) —
-        # if it's someone's child, check whether that parent can now close
-        # too, and walk up the chain for nested decomposition. The same walk
-        # is also fired from the single-card delete + Clear Done paths (kaart
-        # `400d6a77…`) so a parked parent never strands on a child that was
-        # removed via DELETE or /clear-column instead of a genuine Done.
-        if final_column == "Done" and card.parent_card_id:
-            await service.try_close_ancestors(s, card.parent_card_id)
-
-        await s.commit()
-        logger.info("move_card: %s → %s", card_id, final_column)
-        return await _card_dict(s, await service.get_card(s, card_id))
+            await s.commit()
+            logger.info("move_card: %s → %s", card_id, final_column)
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -640,31 +649,35 @@ async def update_card(card_id: str, title: str | None = None,
     (`schemas.py:200`) and the existing `depends_on` replace semantics
     so an agent can use the same mental model for both list-typed fields.
     """
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("update_card: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        payload = {k: v for k, v in {"title": title, "description": description,
-                                     "depends_on": depends_on,
-                                     "labels": labels,
-                                     "metadata": metadata}.items()
-                   if v is not None}
-        await apply_operation(s, op_type="update", entity_type="card",
-            project_key="", entity_id=card_id, payload=payload)
-        await s.commit()
-        return await _card_dict(s, await service.get_card(s, card_id))
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("update_card: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            payload = {k: v for k, v in {"title": title, "description": description,
+                                         "depends_on": depends_on,
+                                         "labels": labels,
+                                         "metadata": metadata}.items()
+                       if v is not None}
+            await apply_operation(s, op_type="update", entity_type="card",
+                project_key="", entity_id=card_id, payload=payload)
+            await s.commit()
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
 async def comment(card_id: str, text: str) -> dict:
     """Add a comment to a card's activity feed."""
-    async with KanbanSessionLocal() as s:
-        await apply_operation(s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=card_id, payload={"text": text})
-        await s.commit()
-        logger.info("comment: on %s", card_id)
-        return {"ok": True}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=card_id, payload={"text": text})
+            await s.commit()
+            logger.info("comment: on %s", card_id)
+            return {"ok": True}
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -690,36 +703,38 @@ async def set_card_gate(card_id: str, gated_on: str | None) -> dict:
     silently lose the intent. ``update_card`` will still work for raw
     metadata edits; this tool is the canonical, opinionated path.
     """
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            return {"error": _NOT_FOUND, "card_id": card_id}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                return {"error": _NOT_FOUND, "card_id": card_id}
 
-        # Normalize: empty string and None both mean "clear the gate", same
-        # contract as _is_gated's fail-open behaviour on empty values.
-        new_value = (gated_on or "").strip() or None
-        existing_meta = dict(card.meta or {})
-        if new_value is None:
-            existing_meta.pop("gated_on", None)
-            action = "cleared"
-        else:
-            existing_meta["gated_on"] = new_value
-            action = "set"
+            # Normalize: empty string and None both mean "clear the gate", same
+            # contract as _is_gated's fail-open behaviour on empty values.
+            new_value = (gated_on or "").strip() or None
+            existing_meta = dict(card.meta or {})
+            if new_value is None:
+                existing_meta.pop("gated_on", None)
+                action = "cleared"
+            else:
+                existing_meta["gated_on"] = new_value
+                action = "set"
 
-        await apply_operation(
-            s, op_type="update", entity_type="card",
-            project_key="", entity_id=card_id,
-            payload={"metadata": existing_meta},
-        )
-        await apply_operation(
-            s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=card_id,
-            payload={"text": f"**Gate:** {action} via set_card_gate"
-                              + (f" — {new_value}" if new_value else "")},
-        )
-        await s.commit()
-        logger.info("set_card_gate: %s on %s", action, card_id)
-        return await _card_dict(s, await service.get_card(s, card_id))
+            await apply_operation(
+                s, op_type="update", entity_type="card",
+                project_key="", entity_id=card_id,
+                payload={"metadata": existing_meta},
+            )
+            await apply_operation(
+                s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=card_id,
+                payload={"text": f"**Gate:** {action} via set_card_gate"
+                                  + (f" — {new_value}" if new_value else "")},
+            )
+            await s.commit()
+            logger.info("set_card_gate: %s on %s", action, card_id)
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -735,17 +750,19 @@ async def request_review(card_id: str, note: str) -> dict:
     Returns the new review card, or {error: not_found} if the card is missing, or
     {error: not_in_done, column: <col>} if the card isn't currently in Done.
     """
-    async with KanbanSessionLocal() as s:
-        try:
-            card = await service.request_review(s, card_id, note)
-        except service.CardNotInDone as e:
-            return {"error": "not_in_done", "column": e.column}
-        if card is None:
-            logger.debug("request_review: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        await s.commit()
-        logger.info("request_review: %s → review card %s", card_id, card.id)
-        return await _card_dict(s, card)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                card = await service.request_review(s, card_id, note)
+            except service.CardNotInDone as e:
+                return {"error": "not_in_done", "column": e.column}
+            if card is None:
+                logger.debug("request_review: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            await s.commit()
+            logger.info("request_review: %s → review card %s", card_id, card.id)
+            return await _card_dict(s, card)
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -765,17 +782,19 @@ async def reopen_card(card_id: str, note: str) -> dict:
     Returns the reopened card, or {error: not_found} if the card is missing,
     or {error: not_in_done, column: <col>} if the card isn't currently in Done.
     """
-    async with KanbanSessionLocal() as s:
-        try:
-            card = await service.reopen_card(s, card_id, note)
-        except service.CardNotInDone as e:
-            return {"error": "not_in_done", "column": e.column}
-        if card is None:
-            logger.debug("reopen_card: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        await s.commit()
-        logger.info("reopen_card: %s reopened", card_id)
-        return await _card_dict(s, card)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                card = await service.reopen_card(s, card_id, note)
+            except service.CardNotInDone as e:
+                return {"error": "not_in_done", "column": e.column}
+            if card is None:
+                logger.debug("reopen_card: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            await s.commit()
+            logger.info("reopen_card: %s reopened", card_id)
+            return await _card_dict(s, card)
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -799,16 +818,18 @@ async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
     if not ref:
         return {"error": "invalid_ref", "card_id": card_id,
                 "message": "ref must be a non-empty string"}
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("attach_deliverable: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        await apply_operation(s, op_type="attach", entity_type="deliverable",
-            project_key="", entity_id=card_id, payload={"kind": kind, "ref": ref})
-        await s.commit()
-        logger.info("attach_deliverable: %s kind=%s ref=%s", card_id, kind, ref)
-        return await _card_dict(s, await service.get_card(s, card_id))
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("attach_deliverable: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            await apply_operation(s, op_type="attach", entity_type="deliverable",
+                project_key="", entity_id=card_id, payload={"kind": kind, "ref": ref})
+            await s.commit()
+            logger.info("attach_deliverable: %s kind=%s ref=%s", card_id, kind, ref)
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -820,15 +841,17 @@ async def release_card(card_id: str) -> dict:
     finishing the card auto-flags it to Impediment for human triage instead of
     letting auto-dispatch keep re-claiming it forever.
     """
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("release_card: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        await release_card_claim(s, card_id=card_id, project_key=card.project_key)
-        await s.commit()
-        logger.info("release_card: %s", card_id)
-        return await _card_dict(s, await service.get_card(s, card_id))
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("release_card: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            await release_card_claim(s, card_id=card_id, project_key=card.project_key)
+            await s.commit()
+            logger.info("release_card: %s", card_id)
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -899,53 +922,55 @@ async def report_impediment(card_id: str, question: str,
             "card_id": card_id,
         }
 
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("report_impediment: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("report_impediment: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
 
-        # Reviewer-gate return routing: when a reviewer rejects a card it
-        # stashed a `review_return_agent` (the persona that produced the work)
-        # on redirect into the reviewer column. Restore that agent before the
-        # move so the human's impediment answer resumes *that* persona (the
-        # engineer, to fix the work) instead of re-running the reviewer against
-        # unchanged code. Only fires for reviewer-agent cards; every other
-        # caller is untouched. See docs/cockpit/reviewer-agent-decision.md.
-        return_agent = (card.meta or {}).get(service.REVIEW_RETURN_AGENT_KEY)
-        if card.agent == service.REVIEWER_COLUMN and return_agent:
-            new_meta = {
-                k: v for k, v in (card.meta or {}).items()
-                if k != service.REVIEW_RETURN_AGENT_KEY
-            }
-            await apply_operation(s, op_type="update", entity_type="card",
+            # Reviewer-gate return routing: when a reviewer rejects a card it
+            # stashed a `review_return_agent` (the persona that produced the work)
+            # on redirect into the reviewer column. Restore that agent before the
+            # move so the human's impediment answer resumes *that* persona (the
+            # engineer, to fix the work) instead of re-running the reviewer against
+            # unchanged code. Only fires for reviewer-agent cards; every other
+            # caller is untouched. See docs/cockpit/reviewer-agent-decision.md.
+            return_agent = (card.meta or {}).get(service.REVIEW_RETURN_AGENT_KEY)
+            if card.agent == service.REVIEWER_COLUMN and return_agent:
+                new_meta = {
+                    k: v for k, v in (card.meta or {}).items()
+                    if k != service.REVIEW_RETURN_AGENT_KEY
+                }
+                await apply_operation(s, op_type="update", entity_type="card",
+                    project_key="", entity_id=card_id,
+                    payload={"agent": return_agent, "metadata": new_meta})
+
+            await apply_operation(s, op_type="move", entity_type="card",
+                project_key="", entity_id=card_id, payload={"column": "Impediment"})
+
+            await apply_operation(s, op_type="comment", entity_type="comment",
                 project_key="", entity_id=card_id,
-                payload={"agent": return_agent, "metadata": new_meta})
+                payload={"text": f"**Impediment:** {question}"})
 
-        await apply_operation(s, op_type="move", entity_type="card",
-            project_key="", entity_id=card_id, payload={"column": "Impediment"})
+            # When structured options are supplied, also open a gate so the UI can
+            # render choice buttons. The gate carries the options + the question
+            # verbatim; answer_gate records the human's pick, which resolve_impediment
+            # then splices into the resumed session's prompt instead of the raw
+            # question text. See service.create_gate / answer_gate / GateResponse.
+            if options:
+                await service.create_gate(s, card_id=card_id,
+                    project_key=card.project_key,
+                    question=question, options=options)
 
-        await apply_operation(s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=card_id,
-            payload={"text": f"**Impediment:** {question}"})
+            await apply_operation(s, op_type="release", entity_type="card",
+                project_key="", entity_id=card_id, payload={})
 
-        # When structured options are supplied, also open a gate so the UI can
-        # render choice buttons. The gate carries the options + the question
-        # verbatim; answer_gate records the human's pick, which resolve_impediment
-        # then splices into the resumed session's prompt instead of the raw
-        # question text. See service.create_gate / answer_gate / GateResponse.
-        if options:
-            await service.create_gate(s, card_id=card_id,
-                project_key=card.project_key,
-                question=question, options=options)
-
-        await apply_operation(s, op_type="release", entity_type="card",
-            project_key="", entity_id=card_id, payload={})
-
-        await s.commit()
-        logger.info("report_impediment: %s — %s (options=%d)",
-                    card_id, question[:80], len(options or []))
-        return await _card_dict(s, await service.get_card(s, card_id))
+            await s.commit()
+            logger.info("report_impediment: %s — %s (options=%d)",
+                        card_id, question[:80], len(options or []))
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -971,19 +996,25 @@ async def open_gate(card_id: str, question: str, options: list[str],
     {"error": "timeout", "gate_id": ...} if nobody answers in time — the gate
     stays open, so a human can still answer it later via the UI/API.
     """
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("open_gate: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        gate = await service.create_gate(s, card_id=card_id, project_key=card.project_key,
-            question=question, options=options)
-        await apply_operation(s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=card_id,
-            payload={"text": f"**Gate:** {question}"})
-        await s.commit()
-        gate_id = gate.id
-        logger.info("open_gate: %s opened on %s", gate_id, card_id)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("open_gate: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            gate = await service.create_gate(s, card_id=card_id, project_key=card.project_key,
+                question=question, options=options)
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=card_id,
+                payload={"text": f"**Gate:** {question}"})
+            await s.commit()
+            gate_id = gate.id
+            logger.info("open_gate: %s opened on %s", gate_id, card_id)
+            return {"gate_id": gate_id}
+    write_result = await run_write_with_retry(_write)
+    if "error" in write_result:
+        return write_result
+    gate_id = write_result["gate_id"]
 
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -1083,21 +1114,27 @@ async def permission_prompt(card_id: str, tool_name: str,
         f"```json\n{args_json}\n```"
     )
 
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("permission_prompt: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        gate = await service.create_gate(s, card_id=card_id,
-            project_key=card.project_key,
-            question=question, options=["allow", "deny"])
-        await apply_operation(s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=card_id,
-            payload={"text": f"**Permission prompt:** `{tool_name}` — awaiting human decision."})
-        await s.commit()
-        gate_id = gate.id
-        logger.info("permission_prompt: %s opened on %s (tool=%s)",
-                    gate_id, card_id, tool_name)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("permission_prompt: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            gate = await service.create_gate(s, card_id=card_id,
+                project_key=card.project_key,
+                question=question, options=["allow", "deny"])
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=card_id,
+                payload={"text": f"**Permission prompt:** `{tool_name}` — awaiting human decision."})
+            await s.commit()
+            gate_id = gate.id
+            logger.info("permission_prompt: %s opened on %s (tool=%s)",
+                        gate_id, card_id, tool_name)
+            return {"gate_id": gate_id}
+    write_result = await run_write_with_retry(_write)
+    if "error" in write_result:
+        return write_result
+    gate_id = write_result["gate_id"]
 
     # Poll for the answer. Same lightweight loop as open_gate (2s normally,
     # 0.01s in tests via the autouse fixture in test_permission_prompt_tool.py).
@@ -1169,38 +1206,40 @@ async def set_resume(card_id: str, session_id: str,
     # a replacement.
     RESUME_RACE_GUARD_S = 2
 
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("set_resume: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        payload: dict = {"resume_session_id": session_id}
-        if project_folder is not None:
-            payload["resume_project_folder"] = project_folder
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("set_resume: %s not found", card_id)
+                return {"error": _NOT_FOUND, "card_id": card_id}
+            payload: dict = {"resume_session_id": session_id}
+            if project_folder is not None:
+                payload["resume_project_folder"] = project_folder
 
-        # Don't overwrite an existing future `scheduled_at` — that schedule
-        # is intentional (e.g. a reaper fallback set it to "next hour"
-        # because no resumable worktree was found) and the operator's resume
-        # stamp should layer on top without re-scheduling.
-        existing = card.scheduled_at
-        needs_guard = True
-        if existing:
-            try:
-                if ensure_aware(datetime.fromisoformat(existing)) > datetime.now(UTC):
-                    needs_guard = False
-            except ValueError:
-                # Unparseable scheduled_at — let _is_due's fail-open handle it
-                # and stamp the guard as usual.
-                pass
-        if needs_guard:
-            payload["scheduled_at"] = (
-                datetime.now(UTC) + timedelta(seconds=RESUME_RACE_GUARD_S)
-            ).isoformat()
+            # Don't overwrite an existing future `scheduled_at` — that schedule
+            # is intentional (e.g. a reaper fallback set it to "next hour"
+            # because no resumable worktree was found) and the operator's resume
+            # stamp should layer on top without re-scheduling.
+            existing = card.scheduled_at
+            needs_guard = True
+            if existing:
+                try:
+                    if ensure_aware(datetime.fromisoformat(existing)) > datetime.now(UTC):
+                        needs_guard = False
+                except ValueError:
+                    # Unparseable scheduled_at — let _is_due's fail-open handle it
+                    # and stamp the guard as usual.
+                    pass
+            if needs_guard:
+                payload["scheduled_at"] = (
+                    datetime.now(UTC) + timedelta(seconds=RESUME_RACE_GUARD_S)
+                ).isoformat()
 
-        await apply_operation(s, op_type="update", entity_type="card",
-            project_key="", entity_id=card_id, payload=payload)
-        await s.commit()
-        return await _card_dict(s, await service.get_card(s, card_id))
+            await apply_operation(s, op_type="update", entity_type="card",
+                project_key="", entity_id=card_id, payload=payload)
+            await s.commit()
+            return await _card_dict(s, await service.get_card(s, card_id))
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -1218,38 +1257,43 @@ async def redispatch_card(card_id: str, project_path: str, agent: str | None = N
         project_path: The project path for spawning the session
         agent: Optional agent override (uses card's current agent if not specified)
     """
-    async with KanbanSessionLocal() as s:
-        card = await _require_card(s, card_id)
-        if card is None:
-            logger.debug("redispatch_card: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
+    async def _check():
+        async with KanbanSessionLocal() as s:
+            card = await _require_card(s, card_id)
+            if card is None:
+                logger.debug("redispatch_card: %s not found", card_id)
+                return False
+        return True
 
-    from app.kanban import dispatch as dispatch_mod
+    async def _dispatch():
+        from app.kanban import dispatch as dispatch_mod
+        async with KanbanSessionLocal() as s:
+            result = await dispatch_mod.redispatch_card(
+                s, card_id=card_id, project_path=project_path,
+                agent_override=agent,
+                # The MCP-tool entry-point vs. the REST/UI one is the operator's
+                # primary triage question (see kaart [self-improve] Redispatch-
+                # trigger-bron onzichtbaar). A static `mcp` label discriminates
+                # that; plumbing the per-call `Context.session_id` through to
+                # disambiguate concurrent MCP callers can come later if anyone
+                # needs it — the activity-feed contract is "what entry-point",
+                # not "which caller".
+                caller_source="mcp",
+            )
+            await s.commit()
 
-    async with KanbanSessionLocal() as s:
-        result = await dispatch_mod.redispatch_card(
-            s, card_id=card_id, project_path=project_path,
-            agent_override=agent,
-            # The MCP-tool entry-point vs. the REST/UI one is the operator's
-            # primary triage question (see kaart [self-improve] Redispatch-
-            # trigger-bron onzichtbaar). A static `mcp` label discriminates
-            # that; plumbing the per-call `Context.session_id` through to
-            # disambiguate concurrent MCP callers can come later if anyone
-            # needs it — the activity-feed contract is "what entry-point",
-            # not "which caller".
-            caller_source="mcp",
-        )
-        await s.commit()
+            if result is None:
+                return {"error": _NOT_FOUND, "card_id": card_id}
 
-        if result is None:
-            return {"error": _NOT_FOUND, "card_id": card_id}
-
-        logger.info("redispatch_card: %s → session %s", card_id, result.get("session_name"))
-        return {
-            "ok": True,
-            "card_id": card_id,
-            "session_name": result.get("session_name"),
-        }
+            logger.info("redispatch_card: %s → session %s", card_id, result.get("session_name"))
+            return {
+                "ok": True,
+                "card_id": card_id,
+                "session_name": result.get("session_name"),
+            }
+    if not await run_write_with_retry(_check):
+        return {"error": _NOT_FOUND, "card_id": card_id}
+    return await run_write_with_retry(_dispatch)
 
 
 MAX_CHILDREN_PER_PLAN = 50
@@ -1307,66 +1351,68 @@ async def add_plan_attachment(
     if cycle is not None:
         return {"error": "cycle_detected", "cycle": cycle}
 
-    async with KanbanSessionLocal() as s:
-        from app.kanban.models import KanbanCard
-        parent = await s.get(KanbanCard, card_id)
-        if parent is None:
-            return {"error": _NOT_FOUND, "card_id": card_id}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            from app.kanban.models import KanbanCard
+            parent = await s.get(KanbanCard, card_id)
+            if parent is None:
+                return {"error": _NOT_FOUND, "card_id": card_id}
 
-        # Validate every child exists + has this parent.
-        for cid in child_card_ids:
-            child = await s.get(KanbanCard, cid)
-            if child is None:
-                return {"error": "child_not_found", "card_id": cid}
-            if child.parent_card_id != card_id:
-                return {"error": "parent_mismatch",
-                        "card_id": cid, "expected_parent": card_id}
+            # Validate every child exists + has this parent.
+            for cid in child_card_ids:
+                child = await s.get(KanbanCard, cid)
+                if child is None:
+                    return {"error": "child_not_found", "card_id": cid}
+                if child.parent_card_id != card_id:
+                    return {"error": "parent_mismatch",
+                            "card_id": cid, "expected_parent": card_id}
 
-        # Materialize the plan deliverable on the parent.
-        project_key = parent.project_key
-        await apply_operation(
-            s, op_type="add_plan_attachment", entity_type="deliverable",
-            project_key=project_key, entity_id=card_id,
-            payload={"plan_markdown": plan_markdown},
-        )
-        plan_deliverable_id = (
-            await s.execute(
-                select(KanbanDeliverable)
-                .where(KanbanDeliverable.card_id == card_id,
-                       KanbanDeliverable.kind == "plan")
-                .order_by(KanbanDeliverable.created_at.desc())
-            )
-        ).scalars().first().id
-
-        # Link plan_ref on each child + fan out depends_on.
-        plan_refs: dict[str, str] = {}
-        for cid in child_card_ids:
+            # Materialize the plan deliverable on the parent.
+            project_key = parent.project_key
             await apply_operation(
-                s, op_type="link_plan_ref", entity_type="deliverable",
-                project_key=project_key, entity_id=cid,
-                payload={"ref_json": json.dumps({
-                    "parent_card_id": card_id,
-                    "plan_deliverable_id": plan_deliverable_id,
-                }), "depends_on": list(deps.get(cid, []) or [])},
+                s, op_type="add_plan_attachment", entity_type="deliverable",
+                project_key=project_key, entity_id=card_id,
+                payload={"plan_markdown": plan_markdown},
             )
-            # Capture the freshly wired plan_ref deliverable id so the caller
-            # can verify the write landed without re-fetching the child card.
-            plan_ref_id = (
+            plan_deliverable_id = (
                 await s.execute(
                     select(KanbanDeliverable)
-                    .where(KanbanDeliverable.card_id == cid,
-                           KanbanDeliverable.kind == "plan_ref")
+                    .where(KanbanDeliverable.card_id == card_id,
+                           KanbanDeliverable.kind == "plan")
                     .order_by(KanbanDeliverable.created_at.desc())
                 )
             ).scalars().first().id
-            plan_refs[cid] = plan_ref_id
-        await s.commit()
-        return {
-            "parent_card_id": card_id,
-            "plan_deliverable_id": plan_deliverable_id,
-            "child_card_ids": list(child_card_ids),
-            "plan_refs": plan_refs,
-        }
+
+            # Link plan_ref on each child + fan out depends_on.
+            plan_refs: dict[str, str] = {}
+            for cid in child_card_ids:
+                await apply_operation(
+                    s, op_type="link_plan_ref", entity_type="deliverable",
+                    project_key=project_key, entity_id=cid,
+                    payload={"ref_json": json.dumps({
+                        "parent_card_id": card_id,
+                        "plan_deliverable_id": plan_deliverable_id,
+                    }), "depends_on": list(deps.get(cid, []) or [])},
+                )
+                # Capture the freshly wired plan_ref deliverable id so the caller
+                # can verify the write landed without re-fetching the child card.
+                plan_ref_id = (
+                    await s.execute(
+                        select(KanbanDeliverable)
+                        .where(KanbanDeliverable.card_id == cid,
+                               KanbanDeliverable.kind == "plan_ref")
+                        .order_by(KanbanDeliverable.created_at.desc())
+                    )
+                ).scalars().first().id
+                plan_refs[cid] = plan_ref_id
+            await s.commit()
+            return {
+                "parent_card_id": card_id,
+                "plan_deliverable_id": plan_deliverable_id,
+                "child_card_ids": list(child_card_ids),
+                "plan_refs": plan_refs,
+            }
+    return await run_write_with_retry(_write)
 
 
 @mcp.tool()
@@ -1436,17 +1482,18 @@ async def create_project_from_interview(
     from app.services.inception_service import InceptionService
 
     try:
-        async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
-            svc = InceptionService(ks, app_db)
-            result = await svc.create_project_from_interview(
-                project_name=project_name,
-                target_path=target_path,
-                title=title,
-                description=description,
-                spec_md=spec_md,
-                plan_md=plan_md,
-            )
-        return result
+        async def _write():
+            async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
+                svc = InceptionService(ks, app_db)
+                return await svc.create_project_from_interview(
+                    project_name=project_name,
+                    target_path=target_path,
+                    title=title,
+                    description=description,
+                    spec_md=spec_md,
+                    plan_md=plan_md,
+                )
+        return await run_write_with_retry(_write)
     except ValueError as e:
         return {"error": "validation_failed", "message": str(e)}
     except FileExistsError as e:
