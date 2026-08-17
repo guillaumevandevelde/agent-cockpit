@@ -161,6 +161,10 @@
 - [ci-gate-decision.md](./ci-gate-decision.md): type=unknown status=unknown
 - [ci-supersession-strategie-decision.md](./ci-supersession-strategie-decision.md): type=unknown status=unknown
 
+## design
+
+- [GitHub App credential binding voor push-identity](./github-app-credentials-design.md): type=design status=active
+
 ## how-to
 
 - [Auto-resume — sessie hervatten na een limietmelding](./auto-resume.md): type=how-to status=active
