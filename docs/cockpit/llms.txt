@@ -161,6 +161,10 @@
 - [ci-gate-decision.md](./ci-gate-decision.md): type=unknown status=unknown
 - [ci-supersession-strategie-decision.md](./ci-supersession-strategie-decision.md): type=unknown status=unknown
 
+## conventie
+
+- [agent-failure-response.md](./agent-failure-response.md): type=conventie status=actief
+
 ## design
 
 - [E2E + soak harness voor dispatch lifecycle](./e2e-soak-harness-design.md): type=design status=active

@@ -104,6 +104,32 @@ async def init_kanban_db() -> None:
         await conn.run_sync(KanbanBase.metadata.create_all)
 
 
+class LockContention(OperationalError):
+    """Raised when ``run_write_with_retry`` exhausts its retries on lock contention.
+
+    Subclasses ``OperationalError`` so callers that only catch the SQLAlchemy
+    class keep working; carries the structured fields of the
+    ``lock_contention`` agent-failure contract
+    (``docs/cockpit/agent-failure-response.md``): ``attempts`` and
+    ``retry_after_ms``. The REST layer renders it as a 503 via the handler in
+    ``app/main.py``; the MCP layer renders it as an ``{"error":
+    "lock_contention", …}`` dict via the tool decorator in ``mcp_server.py``.
+    """
+
+    reason = "lock_contention"
+
+    def __init__(
+        self,
+        cause: OperationalError,
+        *,
+        attempts: int,
+        retry_after_ms: int = 500,
+    ) -> None:
+        super().__init__(cause.statement, cause.params, cause.orig)
+        self.attempts = attempts
+        self.retry_after_ms = retry_after_ms
+
+
 def _is_lock_contention(exc: OperationalError) -> bool:
     """True iff ``exc`` is a SQLite "database is locked" raised by the busy_timeout.
 
@@ -181,4 +207,4 @@ async def run_write_with_retry(
 
     # All attempts exhausted. The loop body never returns on this path.
     assert last_lock_error is not None
-    raise last_lock_error
+    raise LockContention(last_lock_error, attempts=attempt) from last_lock_error

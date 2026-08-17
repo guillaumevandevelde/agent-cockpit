@@ -171,6 +171,13 @@ Acceptance criteria:
 
 ### Kind 5 — Feature: agent-failure-response + dispatch-prompt
 
+✅ Geïmplementeerd (kaart a78f2a00a84444b4905412c958c29fbe). Effect: een uitgeputte
+retry geeft nu 503 met `{"reason": "lock_contention", "retry_after_ms": 500,
+"attempts": 3}` (REST, centrale handler in `backend/app/main.py`) of dezelfde velden
+onder `error` (MCP, `_lock_aware_tool` in `mcp_server.py`); contract in
+[`agent-failure-response.md`](./agent-failure-response.md), retry-instructie in
+`.claude/agents/engineer.md` en `ship_prompt.py`.
+
 `work_type='feature'`. Depends op kind 2, 3, 4. Output: wanneer `run_write_with_retry` op is, retourneert de REST-route `HTTPException(503, detail={"reason": "lock_contention", "retry_after_ms": 500})` en de MCP-tool `{"error": "lock_contention", "retry_after_ms": 500}`. De dispatch-prompt voor agents krijgt een korte sectie "Bij 503 met `lock_contention`: wacht `retry_after_ms` en probeer opnieuw; escaleer via `report_impediment` als het na 3 pogingen niet lukt."
 
 Acceptance criteria:

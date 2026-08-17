@@ -27,6 +27,7 @@ import app.models.security_profile  # noqa: F401  (register tables for create_al
 from app.api.v1.router import router as api_v1_router
 from app.config import settings
 from app.database import init_db
+from app.kanban.db import LockContention
 from app.middleware.correlation_id import CorrelationIdMiddleware
 
 logger = logging.getLogger(__name__)
@@ -416,6 +417,25 @@ async def health():
     deployment. Verbose info lives behind the auth-protected /api/v1/status.
     """
     return {"status": "ok"}
+
+# Structured 503 for kanban lock contention. Central handler so no route has to
+# translate it: `run_write_with_retry` raises `LockContention` after its bounded
+# retries and every kanban write route bubbles it up. Contract:
+# docs/cockpit/agent-failure-response.md.
+@app.exception_handler(LockContention)
+async def lock_contention_handler(request: Request, exc: LockContention):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "reason": exc.reason,
+                "retry_after_ms": exc.retry_after_ms,
+                "attempts": exc.attempts,
+            }
+        },
+        headers={"Retry-After": str(max(1, round(exc.retry_after_ms / 1000)))},
+    )
+
 
 # Serve static files from the frontend build directory
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
