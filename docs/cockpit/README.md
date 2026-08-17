@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 137 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 139 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -133,12 +133,13 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Test-doubles convention — patch where the consumer looks](./test-doubles-convention.md) | 🟢 active |
 | [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md) | 🟢 active |
 
-### Spec (8)
+### Spec (9)
 
 | Document | Status |
 |---|---|
 | [Agent Mail — roster + discovery](./agent-mail-spec.md) | 🟢 active |
 | [Fase 2 — Spec: Scheduled messages](./fase-2-spec.md) | ⚪ superseded |
+| [GitHub-Issue webhook → kanban-kaart](./github-issue-webhook.md) | 🟢 active |
 | [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md) | 🟢 active |
 | [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md) | 🟢 active |
 | [Kernharding — duurzame toestand, schemamigratie en een afdwingbare architectuurgrens](./kernharding-design.md) | 🟢 active |
@@ -157,7 +158,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (47)
+### Decision (48)
 
 | Document | Status |
 |---|---|
@@ -183,6 +184,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md) | 🔵 decided |
 | [Kaartloze app-inceptie: interview → geboorte, zonder intake-kaart](./kaartloze-app-inceptie-decision.md) | 🔵 decided |
 | [Beslissing: eerlijke 410 Gone op onbekende MCP-sessie na backend-reload](./kanban-mcp-session-410-decision.md) | 🔵 decided |
+| [Kanban-Write-Retry-Vangnet — beslisdocument](./kanban-write-retry-vangnet-decision.md) | 🔵 decided |
 | [LiteLLM als sidecar — lifecycle, faalgedrag en scope van het kritieke pad](./litellm-sidecar-lifecycle-decision.md) | 🔵 decided |
 | [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md) | 🔵 decided |
 | [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md) | 🔵 decided |

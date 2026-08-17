@@ -45,6 +45,7 @@
 
 - [Agent Mail — roster + discovery](./agent-mail-spec.md): type=spec status=active
 - [Fase 2 — Spec: Scheduled messages](./fase-2-spec.md): type=spec status=superseded
+- [GitHub-Issue webhook → kanban-kaart](./github-issue-webhook.md): type=spec status=active
 - [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md): type=spec status=active
 - [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md): type=spec status=active
 - [Kernharding — duurzame toestand, schemamigratie en een afdwingbare architectuurgrens](./kernharding-design.md): type=spec status=active
@@ -85,6 +86,7 @@
 - [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md): type=decision status=decided
 - [Kaartloze app-inceptie: interview → geboorte, zonder intake-kaart](./kaartloze-app-inceptie-decision.md): type=decision status=decided
 - [Beslissing: eerlijke 410 Gone op onbekende MCP-sessie na backend-reload](./kanban-mcp-session-410-decision.md): type=decision status=decided
+- [Kanban-Write-Retry-Vangnet — beslisdocument](./kanban-write-retry-vangnet-decision.md): type=decision status=decided
 - [LiteLLM als sidecar — lifecycle, faalgedrag en scope van het kritieke pad](./litellm-sidecar-lifecycle-decision.md): type=decision status=decided
 - [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md): type=decision status=decided
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided

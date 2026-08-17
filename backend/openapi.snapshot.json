@@ -34826,7 +34826,7 @@
     },
     "/api/v1/webhooks/github": {
       "post": {
-        "description": "Receive a GitHub webhook and map it onto the kanban-dispatch layer.\n\n``project_key`` (query param) selects the board \u2014 configure it in the\nGitHub webhook URL, e.g. ``/api/v1/webhooks/github?project_key=<key>``.\n``X-GitHub-Event`` carries the event name (``pull_request``); the payload's\n``action`` field disambiguates it (``opened``), giving the event key\n``pull_request.opened`` looked up in the handler registry.",
+        "description": "Receive a GitHub webhook and map it onto the kanban-dispatch layer.\n\n``project_key`` (query param) selects the board \u2014 configure it in the\nGitHub webhook URL, e.g. ``/api/v1/webhooks/github?project_key=<key>``.\n``X-GitHub-Event`` carries the event name (``issues``, ``pull_request``);\nthe payload's ``action`` field disambiguates it (``opened``), giving the\nevent key ``issues.opened`` looked up in the handler registry.\n\n``parent_card_id`` (optional query param) files the resulting card as a\nchild of an existing card, with its ``plan_ref`` wired in the same\ntransaction. A parent id that does not resolve is refused (422) rather than\naccepted: the child would be held out of dispatch under ``missing_parent``\nwith nothing visible at this boundary.\n\n**Authentication.** This endpoint is an unauthenticated trust boundary, so\nevery delivery must carry ``X-Hub-Signature-256`` \u2014 GitHub's HMAC-SHA256\nover the raw body under the project's ``GITHUB_WEBHOOK_SECRET`` SecretStore\nentry. Failure modes are fail-closed and distinguishable: 503 when the\nproject has no readable secret (nothing can be verified), 401 when the\nsignature is missing or wrong. The body is parsed only after the signature\nverifies.",
         "operationId": "github_webhook_api_v1_webhooks_github_post",
         "parameters": [
           {
@@ -34839,12 +34839,38 @@
             }
           },
           {
+            "in": "query",
+            "name": "parent_card_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent Card Id"
+            }
+          },
+          {
             "in": "header",
             "name": "x-github-event",
             "required": false,
             "schema": {
               "default": "",
               "title": "X-Github-Event",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-hub-signature-256",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Hub-Signature-256",
               "type": "string"
             }
           }
