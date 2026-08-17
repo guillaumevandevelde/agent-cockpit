@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.kanban import attachments as attachment_store
 from app.kanban import service
-from app.kanban.db import KanbanSessionLocal
+from app.kanban.db import KanbanSessionLocal, run_write_with_retry
 from app.kanban.models import KanbanAttachment, KanbanCard
 from app.kanban.operations import ClaimRejected, apply_operation, release_card_claim
 from app.kanban.project_key import resolve_project_key, resolve_project_path
@@ -208,20 +208,22 @@ async def columns(project_key: str = Query(...)):
 
 @router.post("/columns", response_model=ColumnResponse, status_code=status.HTTP_201_CREATED)
 async def create_column(payload: ColumnCreate):
-    async with KanbanSessionLocal() as s:
-        # unknown ``default_provider`` surfaces as 422 so the operator sees the
-        # rejection at config time (kaart 293d1faa…); conversion is centralised
-        # in ``_column_validation_errors`` (kaart cc113dbc…).
-        with _column_validation_errors():
-            col = await service.create_column(
-                s, project_key=payload.project_key, name=payload.name,
-                rank=payload.rank, default_agent=payload.default_agent,
-                default_provider=payload.default_provider,
-                default_model=payload.default_model,
-                max_sessions=payload.max_sessions,
-            )
-        await s.commit()
-        return ColumnResponse.model_validate(col)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            # unknown ``default_provider`` surfaces as 422 so the operator sees the
+            # rejection at config time (kaart 293d1faa…); conversion is centralised
+            # in ``_column_validation_errors`` (kaart cc113dbc…).
+            with _column_validation_errors():
+                col = await service.create_column(
+                    s, project_key=payload.project_key, name=payload.name,
+                    rank=payload.rank, default_agent=payload.default_agent,
+                    default_provider=payload.default_provider,
+                    default_model=payload.default_model,
+                    max_sessions=payload.max_sessions,
+                )
+            await s.commit()
+            return ColumnResponse.model_validate(col)
+    return await run_write_with_retry(_write)
 
 
 @router.patch("/columns/{column_id}", response_model=ColumnResponse)
@@ -234,39 +236,41 @@ async def update_column(column_id: str, payload: ColumnUpdate):
     # would make every "clear X" a no-op (the same gap that hid behind the
     # provider→cli rename in kaart ad15e0827… — don't reintroduce it).
     patch = payload.model_dump(exclude_unset=True)
-    async with KanbanSessionLocal() as s:
-        # All storage-validation ValueErrors (the co-validation below and the
-        # unknown-provider raise inside ``service.update_column``) become a 422
-        # via the shared helper (kaart cc113dbc…). The 404 for a missing column
-        # is an HTTPException, not a ValueError, so it passes through untouched.
-        with _column_validation_errors():
-            # (provider, model) co-validation: a column with default_provider=minimax
-            # and default_model=opus would silently fall through to opus at dispatch
-            # time — the "stuck on opus" report behind kaart 1782fa43…. Reject the
-            # mismatch with 422 so the inconsistency can't land (kaart 1782fa43…
-            # follow-up). Validation is skipped when either side is null (the
-            # dispatch chain re-validates the resolved combo at spawn time) or when
-            # the provider has no model-options cache (e.g. bedrock).
-            if "default_provider" in patch or "default_model" in patch:
-                existing = await service.get_column(s, column_id)
-                if existing is None:
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            # All storage-validation ValueErrors (the co-validation below and the
+            # unknown-provider raise inside ``service.update_column``) become a 422
+            # via the shared helper (kaart cc113dbc…). The 404 for a missing column
+            # is an HTTPException, not a ValueError, so it passes through untouched.
+            with _column_validation_errors():
+                # (provider, model) co-validation: a column with default_provider=minimax
+                # and default_model=opus would silently fall through to opus at dispatch
+                # time — the "stuck on opus" report behind kaart 1782fa43…. Reject the
+                # mismatch with 422 so the inconsistency can't land (kaart 1782fa43…
+                # follow-up). Validation is skipped when either side is null (the
+                # dispatch chain re-validates the resolved combo at spawn time) or when
+                # the provider has no model-options cache (e.g. bedrock).
+                if "default_provider" in patch or "default_model" in patch:
+                    existing = await service.get_column(s, column_id)
+                    if existing is None:
+                        raise HTTPException(404, "column not found")
+                    new_provider = patch.get("default_provider", existing.default_provider)
+                    new_model = patch.get("default_model", existing.default_model)
+                    if new_provider and new_model:
+                        allowed = await _allowed_models_for_provider(s, new_provider)
+                        if allowed is not None and new_model not in allowed:
+                            raise ValueError(
+                                f"model {new_model!r} is not valid for provider "
+                                f"{new_provider!r}; known options: {allowed}"
+                            )
+                # kaart 293d1faa…: same fail-fast as ``create_column`` — an unknown
+                # provider in a PATCH body raises ValueError → 422 via the helper.
+                col = await service.update_column(s, column_id, **patch)
+                if col is None:
                     raise HTTPException(404, "column not found")
-                new_provider = patch.get("default_provider", existing.default_provider)
-                new_model = patch.get("default_model", existing.default_model)
-                if new_provider and new_model:
-                    allowed = await _allowed_models_for_provider(s, new_provider)
-                    if allowed is not None and new_model not in allowed:
-                        raise ValueError(
-                            f"model {new_model!r} is not valid for provider "
-                            f"{new_provider!r}; known options: {allowed}"
-                        )
-            # kaart 293d1faa…: same fail-fast as ``create_column`` — an unknown
-            # provider in a PATCH body raises ValueError → 422 via the helper.
-            col = await service.update_column(s, column_id, **patch)
-            if col is None:
-                raise HTTPException(404, "column not found")
-        await s.commit()
-        return ColumnResponse.model_validate(col)
+            await s.commit()
+            return ColumnResponse.model_validate(col)
+    return await run_write_with_retry(_write)
 
 
 async def _allowed_models_for_provider(session, provider: str) -> list[str] | None:
@@ -308,10 +312,12 @@ async def _allowed_models_for_provider(session, provider: str) -> list[str] | No
 
 @router.delete("/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_column(column_id: str):
-    async with KanbanSessionLocal() as s:
-        if not await service.delete_column(s, column_id):
-            raise HTTPException(404, "column not found")
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            if not await service.delete_column(s, column_id):
+                raise HTTPException(404, "column not found")
+            await s.commit()
+    await run_write_with_retry(_write)
 
 
 @router.get("/model-options")
@@ -331,13 +337,15 @@ async def refresh_model_options():
     and cache it. 502 if the CLI isn't installed/reachable -- the cached list
     from the last successful refresh (or the seed) is left untouched."""
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            options = await dispatch.refresh_claude_model_options(s)
-        except (OSError, subprocess.SubprocessError) as e:
-            raise HTTPException(502, f"failed to query claude CLI: {e}") from e
-        await s.commit()
-        return {"provider": "claude-code", "options": options}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                options = await dispatch.refresh_claude_model_options(s)
+            except (OSError, subprocess.SubprocessError) as e:
+                raise HTTPException(502, f"failed to query claude CLI: {e}") from e
+            await s.commit()
+            return {"provider": "claude-code", "options": options}
+    return await run_write_with_retry(_write)
 
 
 @router.get("/model-options/minimax")
@@ -370,13 +378,15 @@ async def refresh_minimax_model_options():
     result" guard.
     """
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            options = await dispatch.refresh_minimax_model_options(s)
-        except OSError as e:
-            raise HTTPException(502, f"failed to scan minimax JSONL: {e}") from e
-        await s.commit()
-        return {"provider": "minimax", "options": options}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                options = await dispatch.refresh_minimax_model_options(s)
+            except OSError as e:
+                raise HTTPException(502, f"failed to scan minimax JSONL: {e}") from e
+            await s.commit()
+            return {"provider": "minimax", "options": options}
+    return await run_write_with_retry(_write)
 
 
 @router.get("/columns/{column_id}/effective-model")
@@ -430,13 +440,15 @@ async def bulk_upsert_work_type_mappings(payload: WorkTypeMappingBulk):
     for m in payload.mappings:
         if m.work_type not in WORK_TYPES:
             raise HTTPException(422, f"work_type must be one of {WORK_TYPES}")
-    async with KanbanSessionLocal() as s:
-        rows = await service.bulk_replace_work_type_mappings(
-            s, project_key=payload.project_key,
-            mappings=[m.model_dump() for m in payload.mappings],
-        )
-        await s.commit()
-        return [WorkTypeMappingResponse.model_validate(r) for r in rows]
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            rows = await service.bulk_replace_work_type_mappings(
+                s, project_key=payload.project_key,
+                mappings=[m.model_dump() for m in payload.mappings],
+            )
+            await s.commit()
+            return [WorkTypeMappingResponse.model_validate(r) for r in rows]
+    return await run_write_with_retry(_write)
 
 
 @router.delete("/work-type-mappings/{work_type}", status_code=status.HTTP_204_NO_CONTENT)
@@ -447,9 +459,11 @@ async def delete_work_type_mapping(work_type: str, project_key: str = Query(...)
     """
     if work_type not in WORK_TYPES:
         raise HTTPException(422, f"work_type must be one of {WORK_TYPES}")
-    async with KanbanSessionLocal() as s:
-        await service.delete_work_type_mapping(s, project_key, work_type)
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await service.delete_work_type_mapping(s, project_key, work_type)
+            await s.commit()
+    await run_write_with_retry(_write)
 
 
 @router.get("/stats", response_model=AgentStatsResponse)
@@ -694,43 +708,45 @@ async def _reload(s, cid: str) -> CardResponse:
 
 @router.post("/cards", response_model=CardResponse, status_code=status.HTTP_201_CREATED)
 async def create_card(payload: CardCreate):
-    async with KanbanSessionLocal() as s:
-        # Refuse an unknown `project_key` unless the caller explicitly opts
-        # into creating the very first card of a brand-new project
-        # (`confirm_new_project=True`). The normal onboarding path is
-        # `POST /kanban/enable`, which seeds the columns and makes the key
-        # known — so an unknown key here is overwhelmingly a typo. This
-        # mirrors MCP `create_card`'s gate from kanban card 91c85199; see
-        # _assert_project_key_known for the rationale and
-        # `CardCreate.confirm_new_project` for the opt-in semantics.
-        if not payload.confirm_new_project:
-            await _assert_project_key_known(
-                s, payload.project_key, for_create=True
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            # Refuse an unknown `project_key` unless the caller explicitly opts
+            # into creating the very first card of a brand-new project
+            # (`confirm_new_project=True`). The normal onboarding path is
+            # `POST /kanban/enable`, which seeds the columns and makes the key
+            # known — so an unknown key here is overwhelmingly a typo. This
+            # mirrors MCP `create_card`'s gate from kanban card 91c85199; see
+            # _assert_project_key_known for the rationale and
+            # `CardCreate.confirm_new_project` for the opt-in semantics.
+            if not payload.confirm_new_project:
+                await _assert_project_key_known(
+                    s, payload.project_key, for_create=True
+                )
+            # Auto-fill `agent` from the work_type mapping when the caller did
+            # not set it explicitly. See service.resolve_create_agent and
+            # docs/cockpit/work-type-routing-analysis.md §2B. The resolved value
+            # is written to the op-log so a rematerialize() rebuild reproduces it.
+            # `confirm_new_project` is a guard signal, not card state — exclude
+            # it from the persisted payload so it never round-trips into the
+            # materialized row or survives a rematerialize() replay.
+            payload_dict = payload.model_dump(
+                exclude={"project_key", "confirm_new_project"}
             )
-        # Auto-fill `agent` from the work_type mapping when the caller did
-        # not set it explicitly. See service.resolve_create_agent and
-        # docs/cockpit/work-type-routing-analysis.md §2B. The resolved value
-        # is written to the op-log so a rematerialize() rebuild reproduces it.
-        # `confirm_new_project` is a guard signal, not card state — exclude
-        # it from the persisted payload so it never round-trips into the
-        # materialized row or survives a rematerialize() replay.
-        payload_dict = payload.model_dump(
-            exclude={"project_key", "confirm_new_project"}
-        )
-        payload_dict["agent"] = await service.resolve_create_agent(
-            s, payload.project_key,
-            work_type=payload.work_type,
-            explicit_agent=payload.agent,
-        )
-        cid = await apply_operation(s, op_type="create", entity_type="card",
-            project_key=payload.project_key, entity_id=None,
-            payload=payload_dict)
-        # If the caller set analyst_agent_id at create time, ensure the
-        # analyst column exists for this project. Matches the PATCH path.
-        if payload.analyst_agent_id:
-            await service.ensure_analyst_column(s, payload.project_key)
-        await s.commit()
-        return await _reload(s, cid)
+            payload_dict["agent"] = await service.resolve_create_agent(
+                s, payload.project_key,
+                work_type=payload.work_type,
+                explicit_agent=payload.agent,
+            )
+            cid = await apply_operation(s, op_type="create", entity_type="card",
+                project_key=payload.project_key, entity_id=None,
+                payload=payload_dict)
+            # If the caller set analyst_agent_id at create time, ensure the
+            # analyst column exists for this project. Matches the PATCH path.
+            if payload.analyst_agent_id:
+                await service.ensure_analyst_column(s, payload.project_key)
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/reorder")
@@ -739,19 +755,21 @@ async def reorder_cards(payload: ReorderRequest):
     move ops (no column change, no dispatch side effects). Unknown ids are skipped
     and ids whose rank is already correct are left untouched."""
     width = max(4, len(str(len(payload.ordered_ids))))
-    async with KanbanSessionLocal() as s:
-        for i, cid in enumerate(payload.ordered_ids):
-            card = await service.get_card(s, cid)
-            if card is None or card.column != payload.column:
-                continue
-            new_rank = str(i).zfill(width)
-            if card.rank == new_rank:
-                continue
-            await apply_operation(s, op_type="move", entity_type="card",
-                project_key="", entity_id=cid, payload={"rank": new_rank})
-        await s.commit()
-        rows = await service.list_cards(s, payload.project_key, payload.column)
-        return {"items": [CardResponse.model_validate(c) for c in rows]}
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            for i, cid in enumerate(payload.ordered_ids):
+                card = await service.get_card(s, cid)
+                if card is None or card.column != payload.column:
+                    continue
+                new_rank = str(i).zfill(width)
+                if card.rank == new_rank:
+                    continue
+                await apply_operation(s, op_type="move", entity_type="card",
+                    project_key="", entity_id=cid, payload={"rank": new_rank})
+            await s.commit()
+            rows = await service.list_cards(s, payload.project_key, payload.column)
+            return {"items": [CardResponse.model_validate(c) for c in rows]}
+    return await run_write_with_retry(_write)
 
 
 @router.get("/cards/{cid}", response_model=CardResponse)
@@ -845,54 +863,56 @@ async def card_run_ledger(cid: str):
 
 @router.patch("/cards/{cid}", response_model=CardResponse)
 async def update_card(cid: str, payload: CardUpdate):
-    async with KanbanSessionLocal() as s:
-        data = payload.model_dump(exclude_unset=True)
-        column_change = data.pop("column", None)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            data = payload.model_dump(exclude_unset=True)
+            column_change = data.pop("column", None)
 
-        if column_change:
-            card = await service.get_card(s, cid)
-            if card is None:
-                raise HTTPException(404, "card not found")
+            if column_change:
+                card = await service.get_card(s, cid)
+                if card is None:
+                    raise HTTPException(404, "card not found")
 
-            await apply_operation(s, op_type="move", entity_type="card",
-                project_key="", entity_id=cid,
-                payload={"column": column_change})
-
-        if data:
-            # A work_type change that leaves the pinned `agent` untouched keeps
-            # dispatch routing to the stale agent (the "explicit agent wins"
-            # rule is intentional — see service.resolve_create_agent). Surface
-            # that otherwise-silent decision as a visible board comment. Read
-            # the current agent *before* applying the update.
-            mismatch_comment = None
-            if "work_type" in data and "agent" not in data:
-                existing = await service.get_card(s, cid)
-                if existing is not None:
-                    mismatch_comment = await service.work_type_agent_mismatch_comment(
-                        s, existing.project_key or _project_key_from_card(s, existing),
-                        new_work_type=data["work_type"],
-                        current_agent=existing.agent,
-                    )
-
-            await apply_operation(s, op_type="update", entity_type="card",
-                project_key="", entity_id=cid, payload=data)
-
-            if mismatch_comment:
-                await apply_operation(s, op_type="comment", entity_type="comment",
+                await apply_operation(s, op_type="move", entity_type="card",
                     project_key="", entity_id=cid,
-                    payload={"text": mismatch_comment})
+                    payload={"column": column_change})
 
-        # If the card now has analyst_agent_id set, ensure the 'analyst'
-        # kanban_columns row exists for this project. Idempotent. Without
-        # this, the analyst session's move-to-analyst-column op lands the
-        # card in a phantom column that doesn't render in the UI.
-        updated = await service.get_card(s, cid)
-        if updated is not None and updated.analyst_agent_id:
-            project_key = updated.project_key or _project_key_from_card(s, updated)
-            await service.ensure_analyst_column(s, project_key)
+            if data:
+                # A work_type change that leaves the pinned `agent` untouched keeps
+                # dispatch routing to the stale agent (the "explicit agent wins"
+                # rule is intentional — see service.resolve_create_agent). Surface
+                # that otherwise-silent decision as a visible board comment. Read
+                # the current agent *before* applying the update.
+                mismatch_comment = None
+                if "work_type" in data and "agent" not in data:
+                    existing = await service.get_card(s, cid)
+                    if existing is not None:
+                        mismatch_comment = await service.work_type_agent_mismatch_comment(
+                            s, existing.project_key or _project_key_from_card(s, existing),
+                            new_work_type=data["work_type"],
+                            current_agent=existing.agent,
+                        )
 
-        await s.commit()
-        return await _reload(s, cid)
+                await apply_operation(s, op_type="update", entity_type="card",
+                    project_key="", entity_id=cid, payload=data)
+
+                if mismatch_comment:
+                    await apply_operation(s, op_type="comment", entity_type="comment",
+                        project_key="", entity_id=cid,
+                        payload={"text": mismatch_comment})
+
+            # If the card now has analyst_agent_id set, ensure the 'analyst'
+            # kanban_columns row exists for this project. Idempotent. Without
+            # this, the analyst session's move-to-analyst-column op lands the
+            # card in a phantom column that doesn't render in the UI.
+            updated = await service.get_card(s, cid)
+            if updated is not None and updated.analyst_agent_id:
+                project_key = updated.project_key or _project_key_from_card(s, updated)
+                await service.ensure_analyst_column(s, project_key)
+
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 def _project_key_from_card(s, card) -> str:
@@ -914,161 +934,169 @@ async def move_card(cid: str, payload: MoveRequest):
     # closing the route here is what keeps the product owner's
     # invariant alive even on a degraded dispatch path.
 
-    async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, cid)
-        if card is None:
-            raise HTTPException(404, "card not found")
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await service.get_card(s, cid)
+            if card is None:
+                raise HTTPException(404, "card not found")
 
-        # Shared gate (kaart efbb82e6…). Same logic the MCP tool runs,
-        # same error codes (``summary_required`` / ``outcome_required`` /
-        # ``invalid_outcome`` / ``no_children`` / ``no_filed_cards`` /
-        # ``use_report_impediment``) AND the same wire shape on refusal:
-        # ``{"error": code, "message": ..., "allowed": [...]}`` at the
-        # top level — not nested under ``{"detail": ...}``. The MCP
-        # fallback-instructie told agents to expect ``{"error":
-        # "summary_required"}`` literally; matching that means returning
-        # a ``JSONResponse`` directly instead of ``HTTPException(detail=
-        # {...})``, which would otherwise wrap the dict under
-        # ``detail``. Tests assert the top-level ``error`` key.
-        try:
-            cleaned_summary, cleaned_outcome = await service.enforce_move_gate(
-                s, card, payload.column, payload.summary, payload.outcome
+            # Shared gate (kaart efbb82e6…). Same logic the MCP tool runs,
+            # same error codes (``summary_required`` / ``outcome_required`` /
+            # ``invalid_outcome`` / ``no_children`` / ``no_filed_cards`` /
+            # ``use_report_impediment``) AND the same wire shape on refusal:
+            # ``{"error": code, "message": ..., "allowed": [...]}`` at the
+            # top level — not nested under ``{"detail": ...}``. The MCP
+            # fallback-instructie told agents to expect ``{"error":
+            # "summary_required"}`` literally; matching that means returning
+            # a ``JSONResponse`` directly instead of ``HTTPException(detail=
+            # {...})``, which would otherwise wrap the dict under
+            # ``detail``. Tests assert the top-level ``error`` key.
+            try:
+                cleaned_summary, cleaned_outcome = await service.enforce_move_gate(
+                    s, card, payload.column, payload.summary, payload.outcome
+                )
+            except service.MoveGateRejected as e:
+                body: dict = {"error": e.error_code, "message": e.message}
+                if e.allowed is not None:
+                    body["allowed"] = e.allowed
+                return JSONResponse(status_code=422, content=body)
+
+            # Auto-assign agent from column default if card has no explicit agent
+            if card.agent is None:
+                default_agent = await service.get_column_default_agent(
+                    s, card.project_key, payload.column
+                )
+                if default_agent:
+                    await apply_operation(s, op_type="update", entity_type="card",
+                        project_key=card.project_key, entity_id=cid,
+                        payload={"agent": default_agent})
+
+            # Parent-parking (mirror of ``mcp_server.move_card:518-522``,
+            # kaart ``eb75b599…``): a Done move for a card with ≥1 child
+            # doesn't actually leave the board — it parks in
+            # ``Awaiting Subtasks`` until every child reaches Done.
+            # Parent-generic (``analyse-levenscyclus-decision.md`` §3.1:
+            # "heeft kinderen", not ``work_type=='analysis'``).
+            final_column = payload.column
+            if (payload.column == "Done"
+                    and await service.card_has_children(s, cid)):
+                final_column = "Awaiting Subtasks"
+                if card.project_key:
+                    await service.ensure_awaiting_subtasks_column(s, card.project_key)
+
+            await apply_operation(s, op_type="move", entity_type="card",
+                project_key="", entity_id=cid,
+                payload={"column": final_column,
+                         "rank": payload.rank})
+            # Post the side-effects the gate guaranteed would land —
+            # otherwise the gate fires but the board still shows an empty
+            # Done card. Same helpers the MCP move_card uses; no logic
+            # duplicated. ``payload.column`` is the *intended* column;
+            # ``final_column`` is where the card actually lands (may be
+            # ``Awaiting Subtasks`` after the parking redirect above).
+            #
+            # Deliberate REST divergence (kaart 85a06bc7…, AC #4):
+            # the REST handler does NOT mirror one MCP redirect:
+            #
+            # 1. Reviewer-routing — MCP routes engineer→Done through a
+            #    project-level reviewer column when one exists (board-
+            #    enforced feature-compliance gate, kaart
+            #    ``docs/cockpit/reviewer-agent-decision.md``). REST lands
+            #    in Done directly. A human can therefore bypass the
+            #    reviewer by dragging to Done; an agent dispatching via
+            #    MCP cannot. Kept divergent for now because the REST path
+            #    doubles as the dispatch-fallback when the MCP handshake
+            #    is broken (kaart a962b209…): forcing the redirect on
+            #    REST would silently re-route the fallback the same way,
+            #    which the MCP path already covers.
+            #
+            # What REST DOES share with MCP (the contract that matters
+            # for board consistency): the summary/outcome gate (kaart
+            # efbb82e6…), and — added in kaart 85a06bc7… — the parent
+            # auto-close walk below. Both are non-redirect side-effects,
+            # so they apply cleanly to the REST path with no UI-redirect
+            # concern.
+            await service.apply_move_summary_comment(
+                s, cid, payload.column, cleaned_summary
             )
-        except service.MoveGateRejected as e:
-            body: dict = {"error": e.error_code, "message": e.message}
-            if e.allowed is not None:
-                body["allowed"] = e.allowed
-            return JSONResponse(status_code=422, content=body)
+            if payload.column == "Done" and cleaned_outcome is not None \
+                    and service.is_analyst_leaf_spike(card):
+                await service.apply_outcome_side_effects(
+                    s, card, cleaned_outcome, cleaned_summary
+                )
 
-        # Auto-assign agent from column default if card has no explicit agent
-        if card.agent is None:
-            default_agent = await service.get_column_default_agent(
-                s, card.project_key, payload.column
-            )
-            if default_agent:
-                await apply_operation(s, op_type="update", entity_type="card",
-                    project_key=card.project_key, entity_id=cid,
-                    payload={"agent": default_agent})
+            # Auto-close walk (kaart 85a06bc7…, REST mirror added): the MCP
+            # path runs ``service.try_close_ancestors`` after a *genuine*
+            # Done to close a parked parent whose children all reached Done.
+            # Now that REST also redirects Done → Awaiting Subtasks when this
+            # card has ≥1 child (kaart eb75b599…, see parking block above),
+            # the walk fires on ``final_column == "Done"`` — only a card
+            # that actually reached Done cascades up; a parked card does
+            # not (it has no parent to walk into, the parking itself was
+            # the redirect). Same helper, same parked-only invariant inside
+            # ``close_parent_if_all_children_done`` — a parent still in an
+            # agent column is left alone. Mirrors ``mcp_server.py:604-605``.
+            if final_column == "Done" and card.parent_card_id:
+                await service.try_close_ancestors(s, card.parent_card_id)
 
-        # Parent-parking (mirror of ``mcp_server.move_card:518-522``,
-        # kaart ``eb75b599…``): a Done move for a card with ≥1 child
-        # doesn't actually leave the board — it parks in
-        # ``Awaiting Subtasks`` until every child reaches Done.
-        # Parent-generic (``analyse-levenscyclus-decision.md`` §3.1:
-        # "heeft kinderen", not ``work_type=='analysis'``).
-        final_column = payload.column
-        if (payload.column == "Done"
-                and await service.card_has_children(s, cid)):
-            final_column = "Awaiting Subtasks"
-            if card.project_key:
-                await service.ensure_awaiting_subtasks_column(s, card.project_key)
+            # In-place close for the just-parked card itself (kaart eb75b599…,
+            # review-round 2): a parent whose children are *already* Done
+            # when the operator drags it to Done via REST parks in
+            # ``Awaiting Subtasks`` (the redirect above) but has nothing to
+            # wait for — without an explicit close attempt it strands there
+            # forever, because the genuine-Done walk above only fires on a
+            # card that actually reached Done, and nothing else runs
+            # ``close_parent_if_all_children_done`` on the freshly parked
+            # card. ``try_close_ancestors(card_id)`` walks from this card:
+            # its first iteration sees the parked card, finds every child
+            # already Done, and moves it to Done in the same transaction —
+            # the user sees Done, not a pointless round-trip through
+            # ``Awaiting Subtasks``. When at least one child is still open
+            # ``close_parent_if_all_children_done`` returns False and the
+            # walk terminates without a close, matching the existing parked-
+            # parent invariant. Mirrors the auto-close invariant the MCP
+            # path upholds via its own post-move walk (``mcp_server.py:604-605``).
+            if final_column == "Awaiting Subtasks":
+                await service.try_close_ancestors(s, cid)
 
-        await apply_operation(s, op_type="move", entity_type="card",
-            project_key="", entity_id=cid,
-            payload={"column": final_column,
-                     "rank": payload.rank})
-        # Post the side-effects the gate guaranteed would land —
-        # otherwise the gate fires but the board still shows an empty
-        # Done card. Same helpers the MCP move_card uses; no logic
-        # duplicated. ``payload.column`` is the *intended* column;
-        # ``final_column`` is where the card actually lands (may be
-        # ``Awaiting Subtasks`` after the parking redirect above).
-        #
-        # Deliberate REST divergence (kaart 85a06bc7…, AC #4):
-        # the REST handler does NOT mirror one MCP redirect:
-        #
-        # 1. Reviewer-routing — MCP routes engineer→Done through a
-        #    project-level reviewer column when one exists (board-
-        #    enforced feature-compliance gate, kaart
-        #    ``docs/cockpit/reviewer-agent-decision.md``). REST lands
-        #    in Done directly. A human can therefore bypass the
-        #    reviewer by dragging to Done; an agent dispatching via
-        #    MCP cannot. Kept divergent for now because the REST path
-        #    doubles as the dispatch-fallback when the MCP handshake
-        #    is broken (kaart a962b209…): forcing the redirect on
-        #    REST would silently re-route the fallback the same way,
-        #    which the MCP path already covers.
-        #
-        # What REST DOES share with MCP (the contract that matters
-        # for board consistency): the summary/outcome gate (kaart
-        # efbb82e6…), and — added in kaart 85a06bc7… — the parent
-        # auto-close walk below. Both are non-redirect side-effects,
-        # so they apply cleanly to the REST path with no UI-redirect
-        # concern.
-        await service.apply_move_summary_comment(
-            s, cid, payload.column, cleaned_summary
-        )
-        if payload.column == "Done" and cleaned_outcome is not None \
-                and service.is_analyst_leaf_spike(card):
-            await service.apply_outcome_side_effects(
-                s, card, cleaned_outcome, cleaned_summary
-            )
-
-        # Auto-close walk (kaart 85a06bc7…, REST mirror added): the MCP
-        # path runs ``service.try_close_ancestors`` after a *genuine*
-        # Done to close a parked parent whose children all reached Done.
-        # Now that REST also redirects Done → Awaiting Subtasks when this
-        # card has ≥1 child (kaart eb75b599…, see parking block above),
-        # the walk fires on ``final_column == "Done"`` — only a card
-        # that actually reached Done cascades up; a parked card does
-        # not (it has no parent to walk into, the parking itself was
-        # the redirect). Same helper, same parked-only invariant inside
-        # ``close_parent_if_all_children_done`` — a parent still in an
-        # agent column is left alone. Mirrors ``mcp_server.py:604-605``.
-        if final_column == "Done" and card.parent_card_id:
-            await service.try_close_ancestors(s, card.parent_card_id)
-
-        # In-place close for the just-parked card itself (kaart eb75b599…,
-        # review-round 2): a parent whose children are *already* Done
-        # when the operator drags it to Done via REST parks in
-        # ``Awaiting Subtasks`` (the redirect above) but has nothing to
-        # wait for — without an explicit close attempt it strands there
-        # forever, because the genuine-Done walk above only fires on a
-        # card that actually reached Done, and nothing else runs
-        # ``close_parent_if_all_children_done`` on the freshly parked
-        # card. ``try_close_ancestors(card_id)`` walks from this card:
-        # its first iteration sees the parked card, finds every child
-        # already Done, and moves it to Done in the same transaction —
-        # the user sees Done, not a pointless round-trip through
-        # ``Awaiting Subtasks``. When at least one child is still open
-        # ``close_parent_if_all_children_done`` returns False and the
-        # walk terminates without a close, matching the existing parked-
-        # parent invariant. Mirrors the auto-close invariant the MCP
-        # path upholds via its own post-move walk (``mcp_server.py:604-605``).
-        if final_column == "Awaiting Subtasks":
-            await service.try_close_ancestors(s, cid)
-
-        await s.commit()
-        return await _reload(s, cid)
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/claim", response_model=CardResponse)
 async def claim_card(cid: str, payload: ClaimRequest):
-    async with KanbanSessionLocal() as s:
-        try:
-            await apply_operation(s, op_type="claim", entity_type="card",
-                project_key="", entity_id=cid, payload=payload.model_dump())
-        except ClaimRejected as e:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(e))
-        await s.commit()
-        return await _reload(s, cid)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                await apply_operation(s, op_type="claim", entity_type="card",
+                    project_key="", entity_id=cid, payload=payload.model_dump())
+            except ClaimRejected as e:
+                raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/release", response_model=CardResponse)
 async def release_card(cid: str):
-    async with KanbanSessionLocal() as s:
-        await release_card_claim(s, card_id=cid, project_key="")
-        await s.commit()
-        return await _reload(s, cid)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await release_card_claim(s, card_id=cid, project_key="")
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/comment", response_model=CardResponse)
 async def comment(cid: str, payload: CommentRequest):
-    async with KanbanSessionLocal() as s:
-        await apply_operation(s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=cid, payload=payload.model_dump())
-        await s.commit()
-        return await _reload(s, cid)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=cid, payload=payload.model_dump())
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/set-gate", response_model=CardResponse)
@@ -1087,29 +1115,31 @@ async def set_gate(cid: str, payload: SetGateRequest):
     choice of ``metadata.gated_on`` over alternatives (depends_on / scheduled_at
     / dedicated column).
     """
-    async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, cid)
-        if card is None:
-            raise HTTPException(404, "card not found")
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await service.get_card(s, cid)
+            if card is None:
+                raise HTTPException(404, "card not found")
 
-        existing_meta = dict(card.meta or {})
-        new_value = (payload.gated_on or "").strip() or None
-        if new_value is None:
-            existing_meta.pop("gated_on", None)
-            action = "cleared"
-        else:
-            existing_meta["gated_on"] = new_value
-            action = "set"
+            existing_meta = dict(card.meta or {})
+            new_value = (payload.gated_on or "").strip() or None
+            if new_value is None:
+                existing_meta.pop("gated_on", None)
+                action = "cleared"
+            else:
+                existing_meta["gated_on"] = new_value
+                action = "set"
 
-        await apply_operation(s, op_type="update", entity_type="card",
-            project_key="", entity_id=cid,
-            payload={"metadata": existing_meta})
-        await apply_operation(s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=cid,
-            payload={"text": f"**Gate:** {action} via set-gate"
-                              + (f" — {new_value}" if new_value else "")})
-        await s.commit()
-        return await _reload(s, cid)
+            await apply_operation(s, op_type="update", entity_type="card",
+                project_key="", entity_id=cid,
+                payload={"metadata": existing_meta})
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=cid,
+                payload={"text": f"**Gate:** {action} via set-gate"
+                                  + (f" — {new_value}" if new_value else "")})
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/request-review", response_model=CardResponse,
@@ -1122,19 +1152,21 @@ async def request_review(cid: str, payload: ReviewRequest):
     persona) linked back via metadata.reviewed_card_id. Returns the new review
     card. 404 if the card is missing, 409 if it isn't currently in Done.
     """
-    async with KanbanSessionLocal() as s:
-        try:
-            card = await service.request_review(s, cid, payload.note)
-        except service.CardNotInDone as e:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                f"card is in {e.column!r}, not Done; review can only be "
-                "requested on a completed card",
-            )
-        if card is None:
-            raise HTTPException(404, "card not found")
-        await s.commit()
-        return await _reload(s, card.id)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                card = await service.request_review(s, cid, payload.note)
+            except service.CardNotInDone as e:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"card is in {e.column!r}, not Done; review can only be "
+                    "requested on a completed card",
+                )
+            if card is None:
+                raise HTTPException(404, "card not found")
+            await s.commit()
+            return await _reload(s, card.id)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/reopen", response_model=CardResponse)
@@ -1154,28 +1186,32 @@ async def reopen_card(cid: str, payload: ReopenRequest):
     in Done. Returns the reopened card so the UI can refresh without a
     second round-trip.
     """
-    async with KanbanSessionLocal() as s:
-        try:
-            card = await service.reopen_card(s, cid, payload.note)
-        except service.CardNotInDone as e:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                f"card is in {e.column!r}, not Done; reopen can only be "
-                "requested on a completed card",
-            )
-        if card is None:
-            raise HTTPException(404, "card not found")
-        await s.commit()
-        return await _reload(s, card.id)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                card = await service.reopen_card(s, cid, payload.note)
+            except service.CardNotInDone as e:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"card is in {e.column!r}, not Done; reopen can only be "
+                    "requested on a completed card",
+                )
+            if card is None:
+                raise HTTPException(404, "card not found")
+            await s.commit()
+            return await _reload(s, card.id)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/deliverables", response_model=CardResponse)
 async def attach(cid: str, payload: AttachRequest):
-    async with KanbanSessionLocal() as s:
-        await apply_operation(s, op_type="attach", entity_type="deliverable",
-            project_key="", entity_id=cid, payload=payload.model_dump())
-        await s.commit()
-        return await _reload(s, cid)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await apply_operation(s, op_type="attach", entity_type="deliverable",
+                project_key="", entity_id=cid, payload=payload.model_dump())
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/attachments", response_model=CardResponse,
@@ -1185,21 +1221,23 @@ async def upload_attachment(cid: str, file: UploadFile = File(...)):
     absolute path is injected into the dispatch prompt so the spawned session
     can Read it (see dispatch.build_card_prompt)."""
     content = await file.read(settings.kanban_attachment_max_bytes + 1)
-    async with KanbanSessionLocal() as s:
-        # Existence check via s.get (not service.get_card) so the card's
-        # attachments relationship stays unloaded — otherwise the post-commit
-        # _reload would return the stale (pre-upload) collection from the
-        # identity map. See the _reload docstring for the full trap.
-        if await s.get(KanbanCard, cid) is None:
-            raise HTTPException(404, "card not found")
-        try:
-            meta = attachment_store.save_attachment(cid, content)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        await apply_operation(s, op_type="attach", entity_type="attachment",
-            project_key="", entity_id=cid, payload=meta)
-        await s.commit()
-        return await _reload(s, cid)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            # Existence check via s.get (not service.get_card) so the card's
+            # attachments relationship stays unloaded — otherwise the post-commit
+            # _reload would return the stale (pre-upload) collection from the
+            # identity map. See the _reload docstring for the full trap.
+            if await s.get(KanbanCard, cid) is None:
+                raise HTTPException(404, "card not found")
+            try:
+                meta = attachment_store.save_attachment(cid, content)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            await apply_operation(s, op_type="attach", entity_type="attachment",
+                project_key="", entity_id=cid, payload=meta)
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.get("/cards/{cid}/attachments/{attachment_id}")
@@ -1225,20 +1263,22 @@ async def get_attachment_file(cid: str, attachment_id: str):
 
 @router.delete("/cards/{cid}/attachments/{attachment_id}", response_model=CardResponse)
 async def delete_attachment(cid: str, attachment_id: str):
-    async with KanbanSessionLocal() as s:
-        row = (await s.execute(
-            select(KanbanAttachment)
-            .where(KanbanAttachment.card_id == cid)
-            .where(KanbanAttachment.id == attachment_id)
-        )).scalar_one_or_none()
-        if row is None:
-            raise HTTPException(404, "attachment not found")
-        storage_path = row.storage_path
-        await apply_operation(s, op_type="detach", entity_type="attachment",
-            project_key="", entity_id=cid, payload={"id": attachment_id})
-        await s.commit()
-        attachment_store.unlink_attachment(storage_path)
-        return await _reload(s, cid)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            row = (await s.execute(
+                select(KanbanAttachment)
+                .where(KanbanAttachment.card_id == cid)
+                .where(KanbanAttachment.id == attachment_id)
+            )).scalar_one_or_none()
+            if row is None:
+                raise HTTPException(404, "attachment not found")
+            storage_path = row.storage_path
+            await apply_operation(s, op_type="detach", entity_type="attachment",
+                project_key="", entity_id=cid, payload={"id": attachment_id})
+            await s.commit()
+            attachment_store.unlink_attachment(storage_path)
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 @router.patch("/cards/{cid}/plan-attachment", response_model=CardResponse)
@@ -1251,27 +1291,29 @@ async def update_plan_attachment(cid: str, payload: UpdatePlanAttachmentRequest)
     child `plan_ref` rows keep resolving to the same plan on the next dispatch.
     """
     from app.kanban.models import KanbanDeliverable
-    async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, cid)
-        if card is None:
-            raise HTTPException(404, "card not found")
-        existing = (await s.execute(
-            select(KanbanDeliverable)
-            .where(KanbanDeliverable.card_id == cid)
-            .where(KanbanDeliverable.kind == "plan")
-            .order_by(KanbanDeliverable.created_at.desc())
-            .limit(1)
-        )).scalars().first()
-        if existing is None:
-            raise HTTPException(
-                404,
-                "no plan attachment on this card; create one first",
-            )
-        await apply_operation(s, op_type="update_plan_attachment",
-            entity_type="deliverable", project_key="",
-            entity_id=cid, payload=payload.model_dump())
-        await s.commit()
-        return await _reload(s, cid)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await service.get_card(s, cid)
+            if card is None:
+                raise HTTPException(404, "card not found")
+            existing = (await s.execute(
+                select(KanbanDeliverable)
+                .where(KanbanDeliverable.card_id == cid)
+                .where(KanbanDeliverable.kind == "plan")
+                .order_by(KanbanDeliverable.created_at.desc())
+                .limit(1)
+            )).scalars().first()
+            if existing is None:
+                raise HTTPException(
+                    404,
+                    "no plan attachment on this card; create one first",
+                )
+            await apply_operation(s, op_type="update_plan_attachment",
+                entity_type="deliverable", project_key="",
+                entity_id=cid, payload=payload.model_dump())
+            await s.commit()
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
 
 
 # Cap mirrors backend/app/kanban/mcp_server.MAX_CHILDREN_PER_PLAN. Keep the
@@ -1323,91 +1365,94 @@ async def add_plan_attachment(cid: str, payload: AddPlanAttachmentRequest):
             detail={"error": "cycle_detected", "cycle": cycle},
         )
 
-    async with KanbanSessionLocal() as s:
-        parent = await s.get(KanbanCard, cid)
-        if parent is None:
-            raise HTTPException(404, "card not found")
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            parent = await s.get(KanbanCard, cid)
+            if parent is None:
+                raise HTTPException(404, "card not found")
 
-        for child_id in payload.child_card_ids:
-            child = await s.get(KanbanCard, child_id)
-            if child is None:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail={"error": "child_not_found", "card_id": child_id},
-                )
-            if child.parent_card_id != cid:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail={
-                        "error": "parent_mismatch",
-                        "card_id": child_id,
-                        "expected_parent": cid,
-                    },
-                )
+            for child_id in payload.child_card_ids:
+                child = await s.get(KanbanCard, child_id)
+                if child is None:
+                    raise HTTPException(
+                        status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail={"error": "child_not_found", "card_id": child_id},
+                    )
+                if child.parent_card_id != cid:
+                    raise HTTPException(
+                        status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail={
+                            "error": "parent_mismatch",
+                            "card_id": child_id,
+                            "expected_parent": cid,
+                        },
+                    )
 
-        project_key = parent.project_key
-        await apply_operation(
-            s, op_type="add_plan_attachment", entity_type="deliverable",
-            project_key=project_key, entity_id=cid,
-            payload={"plan_markdown": payload.plan_markdown},
-        )
-        plan_deliverable_id = (
-            await s.execute(
-                select(KanbanDeliverable)
-                .where(KanbanDeliverable.card_id == cid,
-                       KanbanDeliverable.kind == "plan")
-                .order_by(KanbanDeliverable.created_at.desc())
-            )
-        ).scalars().first().id
-
-        plan_refs: dict[str, str] = {}
-        for child_id in payload.child_card_ids:
+            project_key = parent.project_key
             await apply_operation(
-                s, op_type="link_plan_ref", entity_type="deliverable",
-                project_key=project_key, entity_id=child_id,
-                payload={"ref_json": json.dumps({
-                    "parent_card_id": cid,
-                    "plan_deliverable_id": plan_deliverable_id,
-                }), "depends_on": list(deps.get(child_id, []) or [])},
+                s, op_type="add_plan_attachment", entity_type="deliverable",
+                project_key=project_key, entity_id=cid,
+                payload={"plan_markdown": payload.plan_markdown},
             )
-            # Capture the freshly wired plan_ref deliverable id so the caller
-            # can verify the write landed without re-fetching the child card.
-            # Mirrors the dispatch-side pattern for the plan deliverable above
-            # (the most-recently-created plan_ref row for this child).
-            plan_ref_id = (
+            plan_deliverable_id = (
                 await s.execute(
                     select(KanbanDeliverable)
-                    .where(KanbanDeliverable.card_id == child_id,
-                           KanbanDeliverable.kind == "plan_ref")
+                    .where(KanbanDeliverable.card_id == cid,
+                           KanbanDeliverable.kind == "plan")
                     .order_by(KanbanDeliverable.created_at.desc())
                 )
             ).scalars().first().id
-            plan_refs[child_id] = plan_ref_id
-        await s.commit()
 
-    return AddPlanAttachmentResponse(
-        parent_card_id=cid,
-        plan_deliverable_id=plan_deliverable_id,
-        child_card_ids=list(payload.child_card_ids),
-        plan_refs=plan_refs,
-    )
+            plan_refs: dict[str, str] = {}
+            for child_id in payload.child_card_ids:
+                await apply_operation(
+                    s, op_type="link_plan_ref", entity_type="deliverable",
+                    project_key=project_key, entity_id=child_id,
+                    payload={"ref_json": json.dumps({
+                        "parent_card_id": cid,
+                        "plan_deliverable_id": plan_deliverable_id,
+                    }), "depends_on": list(deps.get(child_id, []) or [])},
+                )
+                # Capture the freshly wired plan_ref deliverable id so the caller
+                # can verify the write landed without re-fetching the child card.
+                # Mirrors the dispatch-side pattern for the plan deliverable above
+                # (the most-recently-created plan_ref row for this child).
+                plan_ref_id = (
+                    await s.execute(
+                        select(KanbanDeliverable)
+                        .where(KanbanDeliverable.card_id == child_id,
+                               KanbanDeliverable.kind == "plan_ref")
+                        .order_by(KanbanDeliverable.created_at.desc())
+                    )
+                ).scalars().first().id
+                plan_refs[child_id] = plan_ref_id
+            await s.commit()
+            return AddPlanAttachmentResponse(
+                parent_card_id=cid,
+                plan_deliverable_id=plan_deliverable_id,
+                child_card_ids=list(payload.child_card_ids),
+                plan_refs=plan_refs,
+            )
+    return await run_write_with_retry(_write)
 
 
 @router.post("/cards/{cid}/gates", response_model=GateResponse, status_code=status.HTTP_201_CREATED)
 async def open_gate(cid: str, payload: GateOpenRequest):
     """Open a decision gate: a question + structured choices rendered in the
     UI. Also logs a comment so it shows up in the card's activity feed."""
-    async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, cid)
-        if card is None:
-            raise HTTPException(404, "card not found")
-        gate = await service.create_gate(s, card_id=cid, project_key=card.project_key,
-            question=payload.question, options=payload.options)
-        await apply_operation(s, op_type="comment", entity_type="comment",
-            project_key="", entity_id=cid,
-            payload={"text": f"**Gate:** {payload.question}"})
-        await s.commit()
-        return GateResponse.model_validate(gate)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await service.get_card(s, cid)
+            if card is None:
+                raise HTTPException(404, "card not found")
+            gate = await service.create_gate(s, card_id=cid, project_key=card.project_key,
+                question=payload.question, options=payload.options)
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=cid,
+                payload={"text": f"**Gate:** {payload.question}"})
+            await s.commit()
+            return GateResponse.model_validate(gate)
+    return await run_write_with_retry(_write)
 
 
 @router.get("/cards/{cid}/gates", response_model=list[GateResponse])
@@ -1419,15 +1464,17 @@ async def list_gates(cid: str):
 
 @router.post("/gates/{gate_id}/answer", response_model=GateResponse)
 async def answer_gate(gate_id: str, payload: GateAnswerRequest):
-    async with KanbanSessionLocal() as s:
-        try:
-            gate = await service.answer_gate(s, gate_id, payload.answer)
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-        if gate is None:
-            raise HTTPException(404, "gate not found")
-        await s.commit()
-        return GateResponse.model_validate(gate)
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                gate = await service.answer_gate(s, gate_id, payload.answer)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            if gate is None:
+                raise HTTPException(404, "gate not found")
+            await s.commit()
+            return GateResponse.model_validate(gate)
+    return await run_write_with_retry(_write)
 
 
 @router.post("/enable")
@@ -1452,43 +1499,45 @@ async def enable(payload: EnableRequest, request: Request):
     # Ensure fixed columns exist for this project (Backlog, Impediment, Done)
     # Agent columns are created dynamically based on project agents
     from app.kanban.schemas import COLUMNS
-    async with KanbanSessionLocal() as s:
-        existing = await service.list_columns(s, key)
-        existing_names = {c.name for c in existing}
-        
-        # Get agents from .claude/agents directory
-        agents_dir = path / ".claude" / "agents"
-        agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
-        valid_names = set(COLUMNS) | set(agents)
-        
-        # Move cards from orphaned columns to Backlog before removing columns
-        orphaned = [c.name for c in existing if c.name not in valid_names]
-        if orphaned:
-            from sqlalchemy import update
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            existing = await service.list_columns(s, key)
+            existing_names = {c.name for c in existing}
 
-            from app.kanban.models import KanbanCard
-            for col_name in orphaned:
-                await s.execute(
-                    update(KanbanCard)
-                    .where(KanbanCard.project_key == key)
-                    .where(KanbanCard.column == col_name)
-                    .values(column="Backlog")
-                )
-        
-        # Remove orphaned columns
-        for col in existing:
-            if col.name not in valid_names:
-                await service.delete_column(s, col.id)
-        
-        # Create missing fixed columns
-        for i, col_name in enumerate(COLUMNS):
-            if col_name not in existing_names:
-                await service.create_column(s, key, name=col_name, rank=f"{i:04d}")
-        
-        # Sync agent columns
-        await service.sync_agent_columns(s, key, agents)
-        
-        await s.commit()
+            # Get agents from .claude/agents directory
+            agents_dir = path / ".claude" / "agents"
+            agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+            valid_names = set(COLUMNS) | set(agents)
+
+            # Move cards from orphaned columns to Backlog before removing columns
+            orphaned = [c.name for c in existing if c.name not in valid_names]
+            if orphaned:
+                from sqlalchemy import update
+
+                from app.kanban.models import KanbanCard
+                for col_name in orphaned:
+                    await s.execute(
+                        update(KanbanCard)
+                        .where(KanbanCard.project_key == key)
+                        .where(KanbanCard.column == col_name)
+                        .values(column="Backlog")
+                    )
+
+            # Remove orphaned columns
+            for col in existing:
+                if col.name not in valid_names:
+                    await service.delete_column(s, col.id)
+
+            # Create missing fixed columns
+            for i, col_name in enumerate(COLUMNS):
+                if col_name not in existing_names:
+                    await service.create_column(s, key, name=col_name, rank=f"{i:04d}")
+
+            # Sync agent columns
+            await service.sync_agent_columns(s, key, agents)
+
+            await s.commit()
+    await run_write_with_retry(_write)
 
     return {"project_key": key, "enabled": True}
 
@@ -1556,9 +1605,11 @@ async def get_autodispatch(project_key: str = Query(...)):
 @router.post("/autodispatch")
 async def set_autodispatch(payload: AutodispatchRequest):
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        await dispatch.set_autodispatch(s, payload.project_key, payload.enabled)
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await dispatch.set_autodispatch(s, payload.project_key, payload.enabled)
+            await s.commit()
+    await run_write_with_retry(_write)
     return {"project_key": payload.project_key, "enabled": payload.enabled}
 
 
@@ -1588,20 +1639,32 @@ async def create_project_from_interview(payload: CreateProjectFromInterviewReque
     the first kanban card placed in the new project's Backlog. The first
     card carries ``metadata["spec_doc"]`` pointing at the design doc —
     the spec-driven-development pipeline can trace it from there.
+
+    Wrap contract: only the kanban session goes through
+    ``run_write_with_retry`` (kind-4). The app DB session is opened
+    once outside the wrapper so a retry never re-inserts the Project
+    row — see kanban-write-retry-vangnet-decision.md §4 kind-4.
     """
     from app.database import AsyncSessionLocal
     from app.services.inception_service import InceptionService
 
-    try:
-        async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
+    async def _write(app_db):
+        async with KanbanSessionLocal() as ks:
             svc = InceptionService(ks, app_db)
-            result = await svc.create_project_from_interview(
+            return await svc.create_project_from_interview(
                 project_name=payload.project_name,
                 target_path=payload.target_path,
                 title=payload.title,
                 description=payload.description,
                 spec_md=payload.spec_md,
                 plan_md=payload.plan_md,
+            )
+
+    try:
+        async with AsyncSessionLocal() as app_db:
+            result = await run_write_with_retry(
+                lambda: _write(app_db),
+                max_retries=3, backoff_base_ms=200, total_budget_ms=2000,
             )
         return CreateProjectFromInterviewResponse(**result)
     except ValueError as e:
@@ -1658,28 +1721,31 @@ async def clear_dispatch_pause():
     banner can still un-freeze via this endpoint.
     """
     from app.kanban import dispatch, dispatch_pause
-    async with KanbanSessionLocal() as s:
-        # Snapshot every pause kind BEFORE clearing so the response correctly
-        # reports "we cleared something". FCR-blokkade: the previous flow
-        # only inspected the legacy global slot — a manual-only pause (no
-        # global pause set) was silently wiped but the response said
-        # `cleared=false`, which the banner treated as a failure and
-        # displayed a false error toast.
-        global_paused = await dispatch_pause.is_dispatch_paused(s)
-        time_paused = await dispatch_pause.list_paused_providers(s)
-        manual_paused = await dispatch_pause.list_manually_paused_providers(s)
-        any_paused = bool(global_paused or time_paused or manual_paused)
-        # `was_paused` keeps its historical contract: it reflects the legacy
-        # global pause state, which the audit-comment-on-To-Resume contract
-        # downstream consumers rely on is keyed off.
-        cleared, was_paused = await dispatch.clear_dispatch_pause(s)
-        await dispatch_pause.clear_all_pauses(s)
-        # Commit whenever the legacy clear ran (to persist the audit comment
-        # + global clear) OR whenever any per-provider pause existed (to
-        # persist the wipe). Without this a per-provider-only pause set
-        # without the global pause would be rolled back when the session
-        # exits the `async with` block.
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            # Snapshot every pause kind BEFORE clearing so the response correctly
+            # reports "we cleared something". FCR-blokkade: the previous flow
+            # only inspected the legacy global slot — a manual-only pause (no
+            # global pause set) was silently wiped but the response said
+            # `cleared=false`, which the banner treated as a failure and
+            # displayed a false error toast.
+            global_paused = await dispatch_pause.is_dispatch_paused(s)
+            time_paused = await dispatch_pause.list_paused_providers(s)
+            manual_paused = await dispatch_pause.list_manually_paused_providers(s)
+            any_paused = bool(global_paused or time_paused or manual_paused)
+            # `was_paused` keeps its historical contract: it reflects the legacy
+            # global pause state, which the audit-comment-on-To-Resume contract
+            # downstream consumers rely on is keyed off.
+            cleared, was_paused = await dispatch.clear_dispatch_pause(s)
+            await dispatch_pause.clear_all_pauses(s)
+            # Commit whenever the legacy clear ran (to persist the audit comment
+            # + global clear) OR whenever any per-provider pause existed (to
+            # persist the wipe). Without this a per-provider-only pause set
+            # without the global pause would be rolled back when the session
+            # exits the `async with` block.
+            await s.commit()
+            return global_paused, time_paused, manual_paused, any_paused, was_paused
+    global_paused, time_paused, manual_paused, any_paused, was_paused = await run_write_with_retry(_write)
     logger.info(
         "dispatch-pause manually cleared via API "
         "(was_paused=%s, time_paused=%s, manual_paused=%s)",
@@ -1737,12 +1803,12 @@ async def set_subscription_pause(provider: str, payload: dict):
             "'paused' must be a JSON boolean",
         )
     from app.kanban import dispatch_pause
-    async with KanbanSessionLocal() as s:
-        await dispatch_pause.set_manual_pause(s, provider, paused)
-        await s.commit()
-        manually_paused_providers = (
-            await dispatch_pause.list_manually_paused_providers(s)
-        )
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await dispatch_pause.set_manual_pause(s, provider, paused)
+            await s.commit()
+            return await dispatch_pause.list_manually_paused_providers(s)
+    manually_paused_providers = await run_write_with_retry(_write)
     logger.info(
         "dispatch-pause subscription manually set via API "
         "(provider=%s, paused=%s)", provider, paused,
@@ -1765,12 +1831,14 @@ async def get_shipmode(project_key: str = Query(...)):
 @router.post("/shipmode")
 async def set_shipmode(payload: ShipModeRequest):
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            await dispatch.set_ship_mode(s, payload.project_key, payload.mode)
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                await dispatch.set_ship_mode(s, payload.project_key, payload.mode)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            await s.commit()
+    await run_write_with_retry(_write)
     return {"project_key": payload.project_key, "mode": payload.mode}
 
 
@@ -1785,9 +1853,11 @@ async def get_skip_permissions(project_key: str = Query(...)):
 @router.post("/skip-permissions")
 async def set_skip_permissions(payload: SkipPermissionsRequest):
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        await dispatch.set_skip_permissions(s, payload.project_key, payload.enabled)
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await dispatch.set_skip_permissions(s, payload.project_key, payload.enabled)
+            await s.commit()
+    await run_write_with_retry(_write)
     return {"project_key": payload.project_key, "enabled": payload.enabled}
 
 
@@ -1802,12 +1872,14 @@ async def get_transport(project_key: str = Query(...)):
 @router.post("/transport")
 async def set_transport(payload: DefaultTransportRequest):
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            await dispatch.set_default_transport(s, payload.project_key, payload.transport)
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                await dispatch.set_default_transport(s, payload.project_key, payload.transport)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            await s.commit()
+    await run_write_with_retry(_write)
     return {"project_key": payload.project_key, "transport": payload.transport}
 
 
@@ -1837,11 +1909,13 @@ async def set_token_saver(payload: TokenSaverRequest):
     touching the per-lane column flags.
     """
     from app.kanban import token_saver
-    async with KanbanSessionLocal() as s:
-        await token_saver.set_board_enabled(
-            s, payload.project_key, payload.enabled,
-        )
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await token_saver.set_board_enabled(
+                s, payload.project_key, payload.enabled,
+            )
+            await s.commit()
+    await run_write_with_retry(_write)
     return {"project_key": payload.project_key, "enabled": payload.enabled}
 
 
@@ -1875,11 +1949,13 @@ async def set_prompt_injector(payload: PromptInjectorRequest):
     (not op-log-backed), so no audit comment is posted.
     """
     from app.kanban import prompt_injectors
-    async with KanbanSessionLocal() as s:
-        await prompt_injectors.set_kill_switch_on(
-            s, payload.project_key, payload.enabled,
-        )
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await prompt_injectors.set_kill_switch_on(
+                s, payload.project_key, payload.enabled,
+            )
+            await s.commit()
+    await run_write_with_retry(_write)
     return {"project_key": payload.project_key, "enabled": payload.enabled}
 
 
@@ -1912,14 +1988,16 @@ async def set_subscription_override(payload: ActiveSubscriptionOverrideRequest):
     landed.
     """
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            await dispatch.set_active_subscription_override(
-                s, payload.project_key, payload.override,
-            )
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                await dispatch.set_active_subscription_override(
+                    s, payload.project_key, payload.override,
+                )
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            await s.commit()
+    await run_write_with_retry(_write)
     return {
         "project_key": payload.project_key,
         "override": payload.override,
@@ -2015,29 +2093,31 @@ async def set_subscription_pool(payload: SubscriptionPoolRequest):
     column has the same blast radius as writing one."""
     from app.kanban import subscription_pool as pool_mod
     from app.kanban.models import KanbanColumn
-    async with KanbanSessionLocal() as s:
-        if payload.column:
-            col_row = await s.execute(
-                select(KanbanColumn.id).where(
-                    KanbanColumn.project_key == payload.project_key,
-                    KanbanColumn.name == payload.column,
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            if payload.column:
+                col_row = await s.execute(
+                    select(KanbanColumn.id).where(
+                        KanbanColumn.project_key == payload.project_key,
+                        KanbanColumn.name == payload.column,
+                    )
                 )
-            )
-            if col_row.scalar_one_or_none() is None:
-                raise HTTPException(
-                    422,
-                    f"unknown column {payload.column!r} for project "
-                    f"{payload.project_key!r}; only configured "
-                    f"kanban_columns are valid per-column pool scopes",
+                if col_row.scalar_one_or_none() is None:
+                    raise HTTPException(
+                        422,
+                        f"unknown column {payload.column!r} for project "
+                        f"{payload.project_key!r}; only configured "
+                        f"kanban_columns are valid per-column pool scopes",
+                    )
+            try:
+                await pool_mod.set_subscription_pool(
+                    s, payload.project_key, payload.entries,
+                    column=payload.column,
                 )
-        try:
-            await pool_mod.set_subscription_pool(
-                s, payload.project_key, payload.entries,
-                column=payload.column,
-            )
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-        await s.commit()
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            await s.commit()
+    await run_write_with_retry(_write)
     return {
         "project_key": payload.project_key,
         "column": payload.column,
@@ -2049,69 +2129,71 @@ async def set_subscription_pool(payload: SubscriptionPoolRequest):
 async def delete_card(cid: str, force: bool = Query(False)):
     from app.kanban.session_cleanup import find_worktree_unmerged_warning
 
-    async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, cid)
-        # Capture the parent_card_id BEFORE the delete so we can re-evaluate
-        # the parent after the row is gone (kaart `400d6a77…` — see the
-        # auto-close-walk comment below). The lookup itself is informational;
-        # `orphan_children_on_delete` already clears children's parent_card_id,
-        # but the *parent of the deleted card* is a separate row and needs its
-        # own re-evaluation: if the parent was parked in `Awaiting Subtasks`
-        # and this child was its last one, the parent must auto-close, the
-        # same way `mcp_server.move_card` walks the chain on a real Done.
-        parent_of_deleted = card.parent_card_id if card is not None else None
-        if card is not None:
-            warning = await find_worktree_unmerged_warning(card)
-            if warning is not None:
-                if not force:
-                    parts = []
-                    if warning["ahead"] > 0:
-                        parts.append(
-                            f"{warning['ahead']} commit(s) on branch '{warning['branch']}' "
-                            f"not yet merged into {warning['default_branch']}"
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await service.get_card(s, cid)
+            # Capture the parent_card_id BEFORE the delete so we can re-evaluate
+            # the parent after the row is gone (kaart `400d6a77…` — see the
+            # auto-close-walk comment below). The lookup itself is informational;
+            # `orphan_children_on_delete` already clears children's parent_card_id,
+            # but the *parent of the deleted card* is a separate row and needs its
+            # own re-evaluation: if the parent was parked in `Awaiting Subtasks`
+            # and this child was its last one, the parent must auto-close, the
+            # same way `mcp_server.move_card` walks the chain on a real Done.
+            parent_of_deleted = card.parent_card_id if card is not None else None
+            if card is not None:
+                warning = await find_worktree_unmerged_warning(card)
+                if warning is not None:
+                    if not force:
+                        parts = []
+                        if warning["ahead"] > 0:
+                            parts.append(
+                                f"{warning['ahead']} commit(s) on branch '{warning['branch']}' "
+                                f"not yet merged into {warning['default_branch']}"
+                            )
+                        if warning["dirty"]:
+                            parts.append("uncommitted changes")
+                        logger.warning(
+                            "blocked delete of card %s %r: unmerged worktree %s (%s)",
+                            cid, card.title, warning["worktree_path"], " and ".join(parts),
                         )
-                    if warning["dirty"]:
-                        parts.append("uncommitted changes")
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=(
+                                f"This card's worktree still has {' and '.join(parts)} "
+                                f"({warning['worktree_path']}). Deleting the card won't delete "
+                                f"the work, but it will no longer be tracked on the board. "
+                                f"Retry with force=true to delete anyway."
+                            ),
+                        )
                     logger.warning(
-                        "blocked delete of card %s %r: unmerged worktree %s (%s)",
-                        cid, card.title, warning["worktree_path"], " and ".join(parts),
+                        "force-deleting card %s %r despite unmerged worktree %s",
+                        cid, card.title, warning["worktree_path"],
                     )
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=(
-                            f"This card's worktree still has {' and '.join(parts)} "
-                            f"({warning['worktree_path']}). Deleting the card won't delete "
-                            f"the work, but it will no longer be tracked on the board. "
-                            f"Retry with force=true to delete anyway."
-                        ),
-                    )
-                logger.warning(
-                    "force-deleting card %s %r despite unmerged worktree %s",
-                    cid, card.title, warning["worktree_path"],
-                )
-        # Dep-aware guard: strip this card out of any non-Done dependent's
-        # depends_on (+ audit comment) before the hard delete, so a satisfied
-        # dependency never silently becomes a permanent fail-closed block. See
-        # docs/cockpit/dangling-depends-on-analyse.md §1.2/§4.
-        await service.strip_dangling_deps_on_delete(s, cid)
-        # Same repair for the sibling soft reference — see its docstring for why
-        # `parent_card_id` failing the same way went unfixed far longer.
-        await service.orphan_children_on_delete(s, cid)
-        await apply_operation(s, op_type="delete", entity_type="card",
-            project_key="", entity_id=cid, payload={})
-        # Auto-close the parent of the deleted card (if any) and walk up the
-        # chain — mirrors `mcp_server.move_card` for genuine Done moves. Without
-        # this, a parked parent whose last child is deleted via DELETE strands
-        # itself on `Awaiting Subtasks` forever: `close_parent_if_all_children_done`
-        # used to short-circuit on `not children` and return False. The chain
-        # walk is bounded by the parked-only invariant (the helper stops as
-        # soon as a parent in the chain is not parked or has a still-pending
-        # child), so this never auto-closes a parent that is still in flight.
-        # See kaart `400d6a77…` for the full history — five parents on the
-        # live board had been stuck this way for up to 6 weeks.
-        if parent_of_deleted:
-            await service.try_close_ancestors(s, parent_of_deleted)
-        await s.commit()
+            # Dep-aware guard: strip this card out of any non-Done dependent's
+            # depends_on (+ audit comment) before the hard delete, so a satisfied
+            # dependency never silently becomes a permanent fail-closed block. See
+            # docs/cockpit/dangling-depends-on-analyse.md §1.2/§4.
+            await service.strip_dangling_deps_on_delete(s, cid)
+            # Same repair for the sibling soft reference — see its docstring for why
+            # `parent_card_id` failing the same way went unfixed far longer.
+            await service.orphan_children_on_delete(s, cid)
+            await apply_operation(s, op_type="delete", entity_type="card",
+                project_key="", entity_id=cid, payload={})
+            # Auto-close the parent of the deleted card (if any) and walk up the
+            # chain — mirrors `mcp_server.move_card` for genuine Done moves. Without
+            # this, a parked parent whose last child is deleted via DELETE strands
+            # itself on `Awaiting Subtasks` forever: `close_parent_if_all_children_done`
+            # used to short-circuit on `not children` and return False. The chain
+            # walk is bounded by the parked-only invariant (the helper stops as
+            # soon as a parent in the chain is not parked or has a still-pending
+            # child), so this never auto-closes a parent that is still in flight.
+            # See kaart `400d6a77…` for the full history — five parents on the
+            # live board had been stuck this way for up to 6 weeks.
+            if parent_of_deleted:
+                await service.try_close_ancestors(s, parent_of_deleted)
+            await s.commit()
+    await run_write_with_retry(_write)
 
 
 @router.get("/agents")
@@ -2137,10 +2219,12 @@ async def sync_agent_columns_endpoint(payload: EnableRequest):
     agents_dir = path / ".claude" / "agents"
     agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
     
-    async with KanbanSessionLocal() as s:
-        await service.sync_agent_columns(s, key, agents)
-        await s.commit()
-    
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            await service.sync_agent_columns(s, key, agents)
+            await s.commit()
+    await run_write_with_retry(_write)
+
     return {"project_key": key, "agents": agents, "synced": True}
 
 
@@ -2148,13 +2232,16 @@ async def sync_agent_columns_endpoint(payload: EnableRequest):
 async def dispatch_now(cid: str, payload: DispatchRequest):
     """Manually run the chosen agent on one card now, regardless of auto-pick."""
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            res = await dispatch.dispatch_card(s, card_id=cid,
-                project_path=payload.project_path, agent_override=payload.agent)
-        except Exception as e:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                res = await dispatch.dispatch_card(s, card_id=cid,
+                    project_path=payload.project_path, agent_override=payload.agent)
+            except Exception as e:
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
+            await s.commit()
+            return res
+    res = await run_write_with_retry(_write)
     if res is None:
         raise HTTPException(status.HTTP_409_CONFLICT,
             "could not dispatch (card missing or already claimed)")
@@ -2165,23 +2252,26 @@ async def dispatch_now(cid: str, payload: DispatchRequest):
 async def redispatch_now(cid: str, payload: RedispatchRequest):
     """Release a stuck card and re-dispatch it with a fresh session."""
     from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            res = await dispatch.redispatch_card(
-                s, card_id=cid, project_path=payload.project_path,
-                agent_override=payload.agent,
-                # The REST handler is the CardDrawer's Redispatch button —
-                # label it `ui` so an operator investigating a redispatch
-                # from the activity feed sees a human-facing source.
-                # Programmatically called REST clients (e.g. an external
-                # orchestrator) MAY override via `caller_source` in the
-                # request body for their own identity; the default `ui` is
-                # still appropriate when they don't (or as a fallback).
-                caller_source=payload.caller_source or "ui",
-            )
-        except Exception as e:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"redispatch failed: {e}")
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                res = await dispatch.redispatch_card(
+                    s, card_id=cid, project_path=payload.project_path,
+                    agent_override=payload.agent,
+                    # The REST handler is the CardDrawer's Redispatch button —
+                    # label it `ui` so an operator investigating a redispatch
+                    # from the activity feed sees a human-facing source.
+                    # Programmatically called REST clients (e.g. an external
+                    # orchestrator) MAY override via `caller_source` in the
+                    # request body for their own identity; the default `ui` is
+                    # still appropriate when they don't (or as a fallback).
+                    caller_source=payload.caller_source or "ui",
+                )
+            except Exception as e:
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"redispatch failed: {e}")
+            await s.commit()
+            return res
+    res = await run_write_with_retry(_write)
     if res is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "card not found")
     return res
@@ -2199,15 +2289,17 @@ async def take_over(cid: str, payload: TakeOverRequest):
     """
     from app.kanban import takeover
     key = resolve_project_key(payload.project_path)
-    async with KanbanSessionLocal() as s:
-        try:
-            result = await takeover.promote_to_tmux(
-                s, card_id=cid, project_key=key, project_path=payload.project_path,
-            )
-        except takeover.TakeoverError as e:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(e))
-        await s.commit()
-    return result
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            try:
+                result = await takeover.promote_to_tmux(
+                    s, card_id=cid, project_key=key, project_path=payload.project_path,
+                )
+            except takeover.TakeoverError as e:
+                raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+            await s.commit()
+            return result
+    return await run_write_with_retry(_write)
 
 
 @router.post("/redispatch-all")
@@ -2216,11 +2308,14 @@ async def redispatch_all(payload: EnableRequest):
     from app.kanban import dispatch
     from app.kanban.project_key import resolve_project_key
     key = resolve_project_key(payload.project_path)
-    async with KanbanSessionLocal() as s:
-        results = await dispatch.redispatch_all_orphans(
-            s, project_key=key, project_path=payload.project_path,
-        )
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            results = await dispatch.redispatch_all_orphans(
+                s, project_key=key, project_path=payload.project_path,
+            )
+            await s.commit()
+            return results
+    results = await run_write_with_retry(_write)
     return {"redispatched": len(results), "results": results}
 
 
@@ -2230,49 +2325,55 @@ async def dispatch_all(payload: EnableRequest):
     from app.kanban import dispatch
     from app.kanban.project_key import resolve_project_key
     key = resolve_project_key(payload.project_path)
-    async with KanbanSessionLocal() as s:
-        results = await dispatch.dispatch_all_pending(
-            s, project_key=key, project_path=payload.project_path,
-        )
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            results = await dispatch.dispatch_all_pending(
+                s, project_key=key, project_path=payload.project_path,
+            )
+            await s.commit()
+            return results
+    results = await run_write_with_retry(_write)
     return {"dispatched": len(results), "results": results}
 
 
 @router.post("/clear-column")
 async def clear_column(payload: ColumnClearRequest):
     """Delete all cards in a given column for a project."""
-    async with KanbanSessionLocal() as s:
-        cards = await service.list_cards(s, payload.project_key, column=payload.column)
-        count = 0
-        for card in cards:
-            # Capture the parent BEFORE the delete so we can re-evaluate it
-            # after the row is gone. Same shape as the single-card delete path
-            # — see its comment for the rationale (kaart `400d6a77…`).
-            parent_of_deleted = card.parent_card_id
-            # Same dep-aware guard as the single-card delete: strip each cleared
-            # card out of any non-Done dependent's depends_on (+ audit comment)
-            # so "Clear Done" never orphans a satisfied dependency into a
-            # permanent fail-closed block. dangling-depends-on-analyse.md §1.2/§4.
-            await service.strip_dangling_deps_on_delete(s, card.id)
-            # ...and the parent link, which fails identically. This is the path
-            # that actually produced the orphans on this board: "Clear Done" is
-            # the routine end-of-life sweep, and every analysis parent it removes
-            # used to strand its children permanently.
-            await service.orphan_children_on_delete(s, card.id)
-            await apply_operation(s, op_type="delete", entity_type="card",
-                project_key="", entity_id=card.id, payload={})
-            # Auto-close the parent of each cleared card (if any) and walk up
-            # the chain — same walk as `mcp_server.move_card` for genuine Done
-            # moves. This is the routine end-of-life path that produced the
-            # historical stuck-parents (kaart `400d6a77…`): a parked parent
-            # whose last Done child was swept into Clear Done used to strand
-            # itself on `Awaiting Subtasks` forever. The chain walk is
-            # bounded by the parked-only invariant, so it never auto-closes a
-            # parent that is still in flight.
-            if parent_of_deleted:
-                await service.try_close_ancestors(s, parent_of_deleted)
-            count += 1
-        await s.commit()
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            cards = await service.list_cards(s, payload.project_key, column=payload.column)
+            count = 0
+            for card in cards:
+                # Capture the parent BEFORE the delete so we can re-evaluate it
+                # after the row is gone. Same shape as the single-card delete path
+                # — see its comment for the rationale (kaart `400d6a77…`).
+                parent_of_deleted = card.parent_card_id
+                # Same dep-aware guard as the single-card delete: strip each cleared
+                # card out of any non-Done dependent's depends_on (+ audit comment)
+                # so "Clear Done" never orphans a satisfied dependency into a
+                # permanent fail-closed block. dangling-depends-on-analyse.md §1.2/§4.
+                await service.strip_dangling_deps_on_delete(s, card.id)
+                # ...and the parent link, which fails identically. This is the path
+                # that actually produced the orphans on this board: "Clear Done" is
+                # the routine end-of-life sweep, and every analysis parent it removes
+                # used to strand its children permanently.
+                await service.orphan_children_on_delete(s, card.id)
+                await apply_operation(s, op_type="delete", entity_type="card",
+                    project_key="", entity_id=card.id, payload={})
+                # Auto-close the parent of each cleared card (if any) and walk up
+                # the chain — same walk as `mcp_server.move_card` for genuine Done
+                # moves. This is the routine end-of-life path that produced the
+                # historical stuck-parents (kaart `400d6a77…`): a parked parent
+                # whose last Done child was swept into Clear Done used to strand
+                # itself on `Awaiting Subtasks` forever. The chain walk is
+                # bounded by the parked-only invariant, so it never auto-closes a
+                # parent that is still in flight.
+                if parent_of_deleted:
+                    await service.try_close_ancestors(s, parent_of_deleted)
+                count += 1
+            await s.commit()
+            return count
+    count = await run_write_with_retry(_write)
     return {"cleared": count}
 
 
@@ -2311,86 +2412,87 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
     """
     from app.kanban import dispatch
 
-    async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, cid)
-        if card is None:
-            raise HTTPException(404, "card not found")
+    async def _write():
+        async with KanbanSessionLocal() as s:
+            card = await service.get_card(s, cid)
+            if card is None:
+                raise HTTPException(404, "card not found")
 
-        if card.column != "Impediment":
-            raise HTTPException(422, "card is not in Impediment column")
+            if card.column != "Impediment":
+                raise HTTPException(422, "card is not in Impediment column")
 
-        # A human's answer, when supplied, is stamped as a durable
-        # `**Resolution:**` comment before we re-read the feed — that makes it
-        # auditable and lets extract_impediment_answer pick it up uniformly
-        # (whether it came in on this request or via a manual comment).
-        if payload.answer and payload.answer.strip():
-            await apply_operation(s, op_type="comment", entity_type="comment",
-                project_key="", entity_id=cid,
-                payload={"text": f"{dispatch._IMPEDIMENT_ANSWER_PREFIX}{payload.answer.strip()}"})
+            # A human's answer, when supplied, is stamped as a durable
+            # `**Resolution:**` comment before we re-read the feed — that makes it
+            # auditable and lets extract_impediment_answer pick it up uniformly
+            # (whether it came in on this request or via a manual comment).
+            if payload.answer and payload.answer.strip():
+                await apply_operation(s, op_type="comment", entity_type="comment",
+                    project_key="", entity_id=cid,
+                    payload={"text": f"{dispatch._IMPEDIMENT_ANSWER_PREFIX}{payload.answer.strip()}"})
+                await s.commit()
+
+            # Close any open KanbanGate on this card so the resolved state is
+            # internally consistent (kaart 504b4e8a…): when ``report_impediment``
+            # opened a gate via ``options=`` and the human only used free-text
+            # to resolve, ``ImpedimentPage.submit`` deliberately does NOT call
+            # ``answerGate`` — leaving a stale ``status='open'`` gate that
+            # surfaced as ``gate_open`` in ``po_wachtrij`` (any column, even
+            # Done) and as a stale "Decision requested" paneel in ``CardDrawer``
+            # once the card moved off Impediment. The free text becomes the
+            # gate's recorded answer so ``service.latest_gate_answer`` keeps
+            # forwarding it to the resumed session via the same channel a
+            # structured pick uses (kaart c3419f63). Idempotent — already
+            # answered gates are left untouched.
+            await service.close_open_gates_for_card(
+                s, cid, free_text_answer=payload.answer,
+            )
             await s.commit()
 
-        # Close any open KanbanGate on this card so the resolved state is
-        # internally consistent (kaart 504b4e8a…): when ``report_impediment``
-        # opened a gate via ``options=`` and the human only used free-text
-        # to resolve, ``ImpedimentPage.submit`` deliberately does NOT call
-        # ``answerGate`` — leaving a stale ``status='open'`` gate that
-        # surfaced as ``gate_open`` in ``po_wachtrij`` (any column, even
-        # Done) and as a stale "Decision requested" paneel in ``CardDrawer``
-        # once the card moved off Impediment. The free text becomes the
-        # gate's recorded answer so ``service.latest_gate_answer`` keeps
-        # forwarding it to the resumed session via the same channel a
-        # structured pick uses (kaart c3419f63). Idempotent — already
-        # answered gates are left untouched.
-        await service.close_open_gates_for_card(
-            s, cid, free_text_answer=payload.answer,
-        )
-        await s.commit()
+            # Get impediment question + latest human answer from activity. Match the
+            # exact `**Impediment:** ` prefix (not a loose "Impediment:" substring)
+            # so a human's `**Resolution:**` answer that happens to mention the word
+            # isn't mistaken for the question.
+            activity = await service.card_activity(s, cid)
+            impediment_question = None
+            for entry in reversed(activity):
+                text = entry.payload.get("text", "") if entry.op_type == "comment" else ""
+                if text.startswith("**Impediment:** "):
+                    impediment_question = text[len("**Impediment:** "):]
+                    break
 
-        # Get impediment question + latest human answer from activity. Match the
-        # exact `**Impediment:** ` prefix (not a loose "Impediment:" substring)
-        # so a human's `**Resolution:**` answer that happens to mention the word
-        # isn't mistaken for the question.
-        activity = await service.card_activity(s, cid)
-        impediment_question = None
-        for entry in reversed(activity):
-            text = entry.payload.get("text", "") if entry.op_type == "comment" else ""
-            if text.startswith("**Impediment:** "):
-                impediment_question = text[len("**Impediment:** "):]
-                break
+            if not impediment_question:
+                impediment_question = "No impediment question found"
 
-        if not impediment_question:
-            impediment_question = "No impediment question found"
-
-        # Both answer substrates are merged by the single shared composer in
-        # dispatch (`compose_impediment_answer`): the structured gate choice is
-        # the decision, a free-text `**Resolution:**` comment is supporting
-        # context, and both are rendered when both exist. Using the same helper
-        # the auto-tick reader uses keeps this endpoint and
-        # `dispatch._resolve_impediment` from drifting apart — the drift is
-        # exactly what made the gate choice vanish downstream (kaart c3419f63).
-        impediment_answer = dispatch.compose_impediment_answer(
-            await service.latest_gate_answer(s, cid),
-            dispatch.extract_impediment_answer(activity),
-        )
-
-        # Determine target agent based on workflow rules or override
-        target_agent = payload.target_agent
-        if not target_agent:
-            current_agent = card.agent or "engineer"
-            possible_agents = _IMPEDIMENT_AGENTS.get(current_agent, ["engineer"])
-            target_agent = possible_agents[0] if possible_agents else "engineer"
-
-        try:
-            res = await dispatch.dispatch_impediment_card(
-                s, card_id=cid, project_path=payload.project_path,
-                target_agent=target_agent, impediment_question=impediment_question,
-                impediment_answer=impediment_answer,
+            # Both answer substrates are merged by the single shared composer in
+            # dispatch (`compose_impediment_answer`): the structured gate choice is
+            # the decision, a free-text `**Resolution:**` comment is supporting
+            # context, and both are rendered when both exist. Using the same helper
+            # the auto-tick reader uses keeps this endpoint and
+            # `dispatch._resolve_impediment` from drifting apart — the drift is
+            # exactly what made the gate choice vanish downstream (kaart c3419f63).
+            impediment_answer = dispatch.compose_impediment_answer(
+                await service.latest_gate_answer(s, cid),
+                dispatch.extract_impediment_answer(activity),
             )
-        except Exception as e:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
-        await s.commit()
 
-    if res is None:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-            "could not resolve impediment (card missing or no longer in Impediment)")
-    return await _reload(s, cid)
+            # Determine target agent based on workflow rules or override
+            target_agent = payload.target_agent
+            if not target_agent:
+                current_agent = card.agent or "engineer"
+                possible_agents = _IMPEDIMENT_AGENTS.get(current_agent, ["engineer"])
+                target_agent = possible_agents[0] if possible_agents else "engineer"
+
+            try:
+                res = await dispatch.dispatch_impediment_card(
+                    s, card_id=cid, project_path=payload.project_path,
+                    target_agent=target_agent, impediment_question=impediment_question,
+                    impediment_answer=impediment_answer,
+                )
+            except Exception as e:
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
+            await s.commit()
+            if res is None:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                    "could not resolve impediment (card missing or no longer in Impediment)")
+            return await _reload(s, cid)
+    return await run_write_with_retry(_write)
