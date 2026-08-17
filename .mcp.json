@@ -2,7 +2,7 @@
   "mcpServers": {
     "cockpit-kanban": {
       "type": "sse",
-      "url": "http://localhost:8000/kanban-mcp/sse"
+      "url": "http://localhost:5173/kanban-mcp/sse"
     }
   }
 }
