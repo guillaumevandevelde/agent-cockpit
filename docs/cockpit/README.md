@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 136 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 137 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -157,7 +157,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (46)
+### Decision (47)
 
 | Document | Status |
 |---|---|
@@ -173,6 +173,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Richting van Agent Cockpit — essentie, hosting, meldingen, kenniswerk en de volgorde van werken](./cockpit-richting-decision.md) | 🔵 decided |
 | [Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie](./code-knowledge-graph-navigation-decision.md) | 🔵 decided |
 | [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md) | 🔵 decided |
+| [Fork-strategie — upstream claude-deck PR #316](./fork-strategy-claude-deck-316.md) | 🔵 decided |
 | [Harnassen die een agent spawnen — inventarisatie en sandbox-status](./harnas-spawn-inventaris.md) | 🔵 decided |
 | [Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies](./headless-session-retro-decision.md) | 🔵 decided |
 | [Beslissing: human-takeover-UX voor headless sessies](./human-takeover-headless-decision.md) | 🔵 decided |
