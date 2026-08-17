@@ -76,12 +76,19 @@ committed, and you move them back out when done (step 4).
 ```
 
 `frontend/src/preview-entry.tsx` — import the **real** component you
-changed and wrap it in only the providers it actually needs (check the
-component's existing usages for which contexts it reads):
+changed and wrap it in only the providers it actually needs. The fastest
+way to get the full global chain right is to wrap in `<AppProviders>`
+(from `frontend/src/AppProviders.tsx`), which already mounts the four
+global contexts (`ProjectProvider`, `ProviderProvider`,
+`DashboardProvider`, `AttentionProvider`) — `App.tsx` uses the same
+wrapper so a preview cannot drift from production. Add additional
+contexts only when the component reads them and `AppProviders` doesn't
+already cover them (e.g. `SidebarContext.Provider` for `Header`,
+which is normally mounted by `MainLayout`):
 
 ```tsx
 import { createRoot } from 'react-dom/client'
-import { ThemeProvider } from '@/contexts/ThemeContext'
+import { AppProviders } from '@/AppProviders'
 import './index.css'
 // Swap in the component + props under test:
 import { CardItem } from '@/features/kanban/components/CardItem'
@@ -101,9 +108,9 @@ const fixtureCard: Card = {
 
 const root = createRoot(document.getElementById('root')!)
 root.render(
-  <ThemeProvider>
+  <AppProviders>
     <CardItem card={fixtureCard} onOpen={() => {}} />
-  </ThemeProvider>,
+  </AppProviders>,
 )
 ```
 

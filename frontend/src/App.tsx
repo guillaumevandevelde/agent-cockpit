@@ -1,10 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'sonner'
-import { ProjectProvider } from './contexts/ProjectContext'
-import { DashboardProvider } from './contexts/DashboardContext'
-import { ProviderProvider } from './contexts/ProviderContext'
-import { AttentionProvider } from './contexts/AttentionContext'
+import { AppProviders } from './AppProviders'
 import { MainLayout } from './components/layout/MainLayout'
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const ConfigViewerPage = lazy(() => import('./features/config/ConfigViewerPage').then((m) => ({ default: m.ConfigViewerPage })))
@@ -44,59 +41,53 @@ const EndpointsPage = lazy(() => import('./features/endpoints/EndpointsPage').th
 
 function App() {
   return (
-    <ProjectProvider>
-      <ProviderProvider>
-        <DashboardProvider>
-          <AttentionProvider>
-          <BrowserRouter>
-            <Toaster richColors position="top-right" />
-            <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading...</div>}>
-            <Routes>
-              <Route path="/" element={<MainLayout />}>
-                <Route index element={<DashboardPage />} />
-                <Route path="config" element={<ConfigViewerPage />} />
-                <Route path="mcp" element={<MCPServersPage />} />
-                <Route path="commands" element={<CommandsPage />} />
-                <Route path="plugins" element={<PluginsPage />} />
-                <Route path="hooks" element={<HooksPage />} />
-                <Route path="permissions" element={<PermissionsPage />} />
-                <Route path="agents" element={<AgentsPage />} />
-                <Route path="skills" element={<SkillsPage />} />
-                <Route path="memory" element={<MemoryPage />} />
-                <Route path="projects" element={<ProjectsPage />} />
-                <Route path="backup" element={<BackupPage />} />
-                <Route path="output-styles" element={<OutputStylesPage />} />
-                <Route path="statusline" element={<StatusLinePage />} />
-                <Route path="sessions/:projectFolder/:sessionId" element={<SessionViewPage />} />
-                <Route path="sessions" element={<SessionsPage />} />
-                <Route path="agent-bridge" element={<CCBridgePage />} />
-                <Route path="cc-bridge" element={<CCBridgePage />} />
-                <Route path="presence" element={<PresencePage />} />
-                <Route path="agent-mail" element={<AgentMailPage />} />
-                <Route path="plans/:filename" element={<PlanDetailPage />} />
-                <Route path="plans" element={<PlansPage />} />
-                <Route path="context" element={<ContextPage />} />
-                <Route path="usage" element={<UsagePage />} />
-                <Route path="kanban" element={<KanbanPage />} />
-                <Route path="kanban/impediment/:cardId" element={<ImpedimentPage />} />
-                <Route path="apm" element={<ApmPage />} />
-                <Route path="agent-performance" element={<AgentPerformancePage />} />
-                <Route path="mcp-server" element={<MCPServerPage />} />
-                <Route path="sandcastle" element={<SandcastlePage />} />
-                <Route path="hosts" element={<HostsPage />} />
-                <Route path="subscriptions" element={<SubscriptionsPage />} />
-                <Route path="blueprints" element={<BlueprintsPage />} />
-                <Route path="portfolio" element={<PortfolioPage />} />
-                <Route path="security" element={<SecurityProfilePage />} />
-                <Route path="endpoints" element={<EndpointsPage />} />
-              </Route>
-            </Routes>
-            </Suspense>
-          </BrowserRouter>
-          </AttentionProvider>
-        </DashboardProvider>
-      </ProviderProvider>
-    </ProjectProvider>
+    <AppProviders>
+      <BrowserRouter>
+        <Toaster richColors position="top-right" />
+        <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading...</div>}>
+        <Routes>
+          <Route path="/" element={<MainLayout />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="config" element={<ConfigViewerPage />} />
+            <Route path="mcp" element={<MCPServersPage />} />
+            <Route path="commands" element={<CommandsPage />} />
+            <Route path="plugins" element={<PluginsPage />} />
+            <Route path="hooks" element={<HooksPage />} />
+            <Route path="permissions" element={<PermissionsPage />} />
+            <Route path="agents" element={<AgentsPage />} />
+            <Route path="skills" element={<SkillsPage />} />
+            <Route path="memory" element={<MemoryPage />} />
+            <Route path="projects" element={<ProjectsPage />} />
+            <Route path="backup" element={<BackupPage />} />
+            <Route path="output-styles" element={<OutputStylesPage />} />
+            <Route path="statusline" element={<StatusLinePage />} />
+            <Route path="sessions/:projectFolder/:sessionId" element={<SessionViewPage />} />
+            <Route path="sessions" element={<SessionsPage />} />
+            <Route path="agent-bridge" element={<CCBridgePage />} />
+            <Route path="cc-bridge" element={<CCBridgePage />} />
+            <Route path="presence" element={<PresencePage />} />
+            <Route path="agent-mail" element={<AgentMailPage />} />
+            <Route path="plans/:filename" element={<PlanDetailPage />} />
+            <Route path="plans" element={<PlansPage />} />
+            <Route path="context" element={<ContextPage />} />
+            <Route path="usage" element={<UsagePage />} />
+            <Route path="kanban" element={<KanbanPage />} />
+            <Route path="kanban/impediment/:cardId" element={<ImpedimentPage />} />
+            <Route path="apm" element={<ApmPage />} />
+            <Route path="agent-performance" element={<AgentPerformancePage />} />
+            <Route path="mcp-server" element={<MCPServerPage />} />
+            <Route path="sandcastle" element={<SandcastlePage />} />
+            <Route path="hosts" element={<HostsPage />} />
+            <Route path="subscriptions" element={<SubscriptionsPage />} />
+            <Route path="blueprints" element={<BlueprintsPage />} />
+            <Route path="portfolio" element={<PortfolioPage />} />
+            <Route path="security" element={<SecurityProfilePage />} />
+            <Route path="endpoints" element={<EndpointsPage />} />
+          </Route>
+        </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </AppProviders>
   )
 }
 
