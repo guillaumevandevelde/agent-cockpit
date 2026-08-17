@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 133 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 136 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -208,12 +208,13 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
 | [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
 
-### Analysis (37)
+### Analysis (38)
 
 | Document | Status |
 |---|---|
 | [Audit: voltooide analyses zonder aangemaakte vervolgkaarten](./analyse-orphaned-followups-audit.md) | 🟢 active |
 | [Analyse — Approval-model: privilege-scheiding tussen agent en gebruiker](./approval-privilege-separation-analyse.md) | 🔵 decided |
+| [Analyse — Attention Span: kunnen we de stijlregels overnemen of de tool integreren?](./attention-span-analyse.md) | 🟢 active |
 | [Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten](./build-prioriteiten-analyse.md) | 🟢 active |
 | [Kaarten refereerbaar maken — analyse](./card-references-analysis.md) | 🟢 active |
 | [Communicatie & weergave — analyse](./communicatie-en-weergave-analyse.md) | 🟢 active |
@@ -250,12 +251,14 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Card work-type → agent-routing — analyse & aanbevelingen](./work-type-routing-analysis.md) | 🟢 active |
 | [Worktree-isolatie van Claude Code: wat onze dispatch wel en niet krijgt](./worktree-isolatie-meting.md) | 🟢 active |
 
-### (geen type) (2)
+### (geen type) (4)
 
 | Document | Status |
 |---|---|
 | [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md) | — |
+| [ci-e2e-verdwijnen-decision.md](./ci-e2e-verdwijnen-decision.md) | — |
 | [ci-gate-decision.md](./ci-gate-decision.md) | — |
+| [ci-supersession-strategie-decision.md](./ci-supersession-strategie-decision.md) | — |
 
 ### how-to (1)
 

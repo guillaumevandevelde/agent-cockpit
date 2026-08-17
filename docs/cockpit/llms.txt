@@ -114,6 +114,7 @@
 
 - [Audit: voltooide analyses zonder aangemaakte vervolgkaarten](./analyse-orphaned-followups-audit.md): type=analysis status=active
 - [Analyse — Approval-model: privilege-scheiding tussen agent en gebruiker](./approval-privilege-separation-analyse.md): type=analysis status=decided
+- [Analyse — Attention Span: kunnen we de stijlregels overnemen of de tool integreren?](./attention-span-analyse.md): type=analysis status=active
 - [Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten](./build-prioriteiten-analyse.md): type=analysis status=active
 - [Kaarten refereerbaar maken — analyse](./card-references-analysis.md): type=analysis status=active
 - [Communicatie & weergave — analyse](./communicatie-en-weergave-analyse.md): type=analysis status=active
@@ -153,7 +154,9 @@
 ## (geen type)
 
 - [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md): type=unknown status=unknown
+- [ci-e2e-verdwijnen-decision.md](./ci-e2e-verdwijnen-decision.md): type=unknown status=unknown
 - [ci-gate-decision.md](./ci-gate-decision.md): type=unknown status=unknown
+- [ci-supersession-strategie-decision.md](./ci-supersession-strategie-decision.md): type=unknown status=unknown
 
 ## how-to
 
