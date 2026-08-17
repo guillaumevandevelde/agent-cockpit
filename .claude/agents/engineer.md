@@ -518,6 +518,18 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 
 Volg de `Ship mode` uit je prompt (pull-request vs direct).
 
+## Bij een 503 met `lock_contention`
+
+Een kanban-schrijfactie kan vastlopen op databaselock-contentie. De REST-route
+antwoordt dan met 503 en
+`{"detail": {"reason": "lock_contention", "retry_after_ms": 500, "attempts": 3}}`;
+de MCP-tool met `{"error": "lock_contention", "retry_after_ms": 500, …}`.
+
+Wacht `retry_after_ms` milliseconden en doe dezelfde call opnieuw, maximaal 3
+pogingen. Lukt het daarna nog niet, gebruik `report_impediment`. Doe tussendoor
+geen andere board-mutatie — dat vergroot de contentie die je juist ontloopt.
+Contract: [`docs/cockpit/agent-failure-response.md`](../../docs/cockpit/agent-failure-response.md).
+
 ## Product-taal voor `summary` (Done) en `report_impediment`-options
 
 `move_card` naar `Done` eist een `summary` (zie MCP-tool),

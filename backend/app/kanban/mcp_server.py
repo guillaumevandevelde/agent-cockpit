@@ -5,6 +5,7 @@ Each tool is a thin wrapper over apply_operation/service, returning plain
 dicts (JSON-serializable) for the MCP layer.
 """
 import asyncio
+import functools
 import json
 import logging
 import time
@@ -14,7 +15,7 @@ from sqlalchemy import select, text
 
 from app.kanban import dep_resolver as mcp_kanban_deps
 from app.kanban import service
-from app.kanban.db import KanbanSessionLocal, run_write_with_retry
+from app.kanban.db import KanbanSessionLocal, LockContention, run_write_with_retry
 from app.kanban.models import KanbanDeliverable
 from app.kanban.operations import (
     ClaimRejected,
@@ -28,6 +29,34 @@ from app.kanban.schemas import CardResponse, CardSummaryResponse
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("cockpit-kanban")
+
+
+def _lock_aware_tool():
+    """``mcp.tool()`` plus the ``lock_contention`` agent-failure contract.
+
+    Every tool is registered through this decorator so an exhausted
+    ``run_write_with_retry`` surfaces as the documented error dict instead of a
+    raw ``OperationalError`` traceback. One boundary, all tools — no per-call
+    try/except. Contract: ``docs/cockpit/agent-failure-response.md``.
+    """
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except LockContention as exc:
+                logger.warning(
+                    "kanban MCP tool %s hit lock contention after %s attempts",
+                    fn.__name__, exc.attempts,
+                )
+                return {
+                    "error": exc.reason,
+                    "retry_after_ms": exc.retry_after_ms,
+                    "attempts": exc.attempts,
+                    "operation": fn.__name__,
+                }
+        return mcp.tool()(wrapper)
+    return deco
 
 _NOT_FOUND = "not_found"
 
@@ -60,7 +89,7 @@ _IMPEDIMENT_OPTION_COUNT = 4
 # ``--permission-prompt-tool``. Format is ``mcp__<server>__<tool>``; the server
 # name ``cockpit-kanban`` matches the FastMCP("cockpit-kanban") below and the
 # tool name ``permission_prompt`` matches the function name registered via
-# ``@mcp.tool()`` further down in this file. Centralising it here keeps the
+# ``@_lock_aware_tool()`` further down in this file. Centralising it here keeps the
 # dispatch wire-up and the gate producer in lockstep — change one and the
 # other goes out of sync visibly.
 PERMISSION_PROMPT_TOOL_NAME = "mcp__cockpit-kanban__permission_prompt"
@@ -94,7 +123,7 @@ async def _require_card(s, card_id: str):
     return await s.get(KanbanCard, card_id)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def ping() -> dict:
     """Verify the kanban MCP server is reachable and the database is responsive."""
     async def _write():
@@ -104,7 +133,7 @@ async def ping() -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def resolve_project_key(project_path: str) -> dict:
     """Resolve a filesystem path to this board's canonical project key.
 
@@ -143,7 +172,7 @@ async def _unknown_project_key_error(s, project: str, *, for_create: bool) -> di
     }
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def list_cards(project: str, column: str | None = None,
                      compact: bool = False) -> list[dict] | dict:
     """List cards for a project, optionally filtered by column.
@@ -176,7 +205,7 @@ async def list_cards(project: str, column: str | None = None,
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def get_card(card_id: str) -> dict:
     """Get a single card with its deliverables.
 
@@ -247,7 +276,7 @@ async def get_card(card_id: str) -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def create_card(project: str, title: str, description: str = "",
                       column: str = "Backlog",
                       work_type: str | None = None,
@@ -385,7 +414,7 @@ async def create_card(project: str, title: str, description: str = "",
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def claim_card(card_id: str, claimed_by: str) -> dict:
     """Claim a card. Returns the card, or {error: already_claimed, owner} or {error: not_found}."""
     async def _write():
@@ -413,7 +442,7 @@ async def claim_card(card_id: str, claimed_by: str) -> dict:
 # live alongside the gate in ``app.kanban.service``.
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def move_card(card_id: str, column: str,
                     summary: str | None = None,
                     outcome: str | None = None) -> dict:
@@ -618,7 +647,7 @@ async def move_card(card_id: str, column: str,
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def update_card(card_id: str, title: str | None = None,
                       description: str | None = None,
                       depends_on: list[str] | None = None,
@@ -667,7 +696,7 @@ async def update_card(card_id: str, title: str | None = None,
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def comment(card_id: str, text: str) -> dict:
     """Add a comment to a card's activity feed."""
     async def _write():
@@ -680,7 +709,7 @@ async def comment(card_id: str, text: str) -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def set_card_gate(card_id: str, gated_on: str | None) -> dict:
     """Set or clear a card's business-trigger gate.
 
@@ -737,7 +766,7 @@ async def set_card_gate(card_id: str, gated_on: str | None) -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def request_review(card_id: str, note: str) -> dict:
     """Flag doubt on a *completed* (Done) card and route it to the analyst for triage.
 
@@ -765,7 +794,7 @@ async def request_review(card_id: str, note: str) -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def reopen_card(card_id: str, note: str) -> dict:
     """Weerleg & heropen: reopen a *completed* (Done) card with a rebuttal.
 
@@ -797,7 +826,7 @@ async def reopen_card(card_id: str, note: str) -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
     """Bind a deliverable (pr|branch|commit|link|note|spec|plan|plan_ref) as a portable reference.
 
@@ -832,7 +861,7 @@ async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def release_card(card_id: str) -> dict:
     """Release a claim on a card.
 
@@ -854,7 +883,7 @@ async def release_card(card_id: str) -> dict:
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def report_impediment(card_id: str, question: str,
                             options: list[str] | None = None) -> dict:
     """Report an impediment on a card. Moves it to Impediment column with a clear
@@ -973,7 +1002,7 @@ async def report_impediment(card_id: str, question: str,
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def open_gate(card_id: str, question: str, options: list[str],
                     timeout_seconds: int = _GATE_DEFAULT_TIMEOUT_SECONDS) -> dict:
     """Open an in-browser decision gate and block until a human answers it.
@@ -1029,7 +1058,7 @@ async def open_gate(card_id: str, question: str, options: list[str],
     return {"error": "timeout", "gate_id": gate_id}
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def permission_prompt(card_id: str, tool_name: str,
                             tool_input: dict,
                             timeout_seconds: int = _PERMISSION_PROMPT_DEFAULT_TIMEOUT_SECONDS) -> dict:
@@ -1170,7 +1199,7 @@ async def permission_prompt(card_id: str, tool_name: str,
     }
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def set_resume(card_id: str, session_id: str,
                      project_folder: str | None = None) -> dict:
     """Mark this card to resume an existing Claude session on next dispatch.
@@ -1242,7 +1271,7 @@ async def set_resume(card_id: str, session_id: str,
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def redispatch_card(card_id: str, project_path: str, agent: str | None = None) -> dict:
     """Release a stuck card and re-dispatch it with a fresh session.
 
@@ -1299,7 +1328,7 @@ async def redispatch_card(card_id: str, project_path: str, agent: str | None = N
 MAX_CHILDREN_PER_PLAN = 50
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def add_plan_attachment(
     card_id: str,
     plan_markdown: str,
@@ -1415,7 +1444,7 @@ async def add_plan_attachment(
     return await run_write_with_retry(_write)
 
 
-@mcp.tool()
+@_lock_aware_tool()
 async def create_project_from_interview(
     project_name: str,
     target_path: str,

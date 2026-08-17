@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 142 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 143 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -262,6 +262,12 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [ci-e2e-verdwijnen-decision.md](./ci-e2e-verdwijnen-decision.md) | — |
 | [ci-gate-decision.md](./ci-gate-decision.md) | — |
 | [ci-supersession-strategie-decision.md](./ci-supersession-strategie-decision.md) | — |
+
+### conventie (1)
+
+| Document | Status |
+|---|---|
+| [agent-failure-response.md](./agent-failure-response.md) | actief |
 
 ### design (2)
 

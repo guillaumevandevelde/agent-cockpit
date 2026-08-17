@@ -542,6 +542,17 @@ def _build_mcp_fallback_instructions() -> str:
         "returns the same shape)\n"
         "- `GET /project-key?project_path=<abs path>` — resolve the project "
         "key; returns `{\"project_key\": \"…\"}`\n"
+        "\n"
+        "## Bij een 503 met `lock_contention`\n"
+        "Een kanban-schrijfactie kan vastlopen op databaselock-contentie. De "
+        "REST-route antwoordt dan met 503 en "
+        "`{\"detail\": {\"reason\": \"lock_contention\", "
+        "\"retry_after_ms\": 500, \"attempts\": 3}}`; de MCP-tool met "
+        "`{\"error\": \"lock_contention\", \"retry_after_ms\": 500, …}`. "
+        "Wacht `retry_after_ms` milliseconden en doe dezelfde call opnieuw, "
+        "maximaal 3 pogingen. Lukt het daarna nog niet: `report_impediment`. "
+        "Doe tussendoor geen andere board-mutatie — dat vergroot de contentie. "
+        "Contract: `docs/cockpit/agent-failure-response.md`.\n"
     )
 
 
