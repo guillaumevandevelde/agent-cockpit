@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 #
-# worktree-gc.sh — garbage-collect stale git worktrees under .claude/worktrees/
+# worktree-gc.sh — garbage-collect stale git worktrees and branches
 #
 # Safety net for the "mess of leftover worktrees" problem: over time, dispatched
 # sessions (kanban / engineer agents) and manual worktrees pile up. The kanban
 # backend auto-removes a worktree when its card reaches Done, but that only fires
 # for cards that actually reach Done — merged-but-not-Done or manually created
 # worktrees leak. This script reclaims the leaked ones, safely.
+#
+# It runs in two passes:
+#   Pass 1 — worktrees under .claude/worktrees/ (plus their branch).
+#   Pass 2 — orphan branches: local branches with no worktree left. The Done-move
+#            teardown removes the worktree but keeps the branch on purpose (the
+#            ship-recipe wants it for redispatch/resume), which put every shipped
+#            card's branch permanently out of pass 1's reach. Pass 2 is the only
+#            thing that reclaims those.
 #
 # A worktree is REMOVED only when ALL of the following are true:
 #   1. no kanban card currently holds an active agent claim on it. A kanban
@@ -30,7 +38,8 @@
 #
 # Anything dirty, unmerged, actively claimed, or under a live lease is KEPT
 # and reported. The bare top-level checkout and the `master` branch are never
-# touched.
+# touched. Pass 2 applies the same guards except "clean", which is meaningless
+# without a checkout.
 #
 # Usage:
 #   scripts/worktree-gc.sh            # dry-run: show what WOULD be removed (default)
@@ -173,8 +182,11 @@ while IFS= read -r line; do
   fi
 
   # 2. Fully merged? (no '+' lines from git cherry == every commit is in base)
+  #    `grep -c` rather than `grep -q` — see the note in pass 2: -q exits early,
+  #    SIGPIPEs `git cherry`, and `set -o pipefail` then turns a successful
+  #    match into a failed pipeline, reading an unmerged branch as merged.
   if [ "$is_base" = 0 ]; then
-    if git cherry "$BASE_BRANCH" "$branch" 2>/dev/null | grep -q '^+'; then
+    if [ "$(git cherry "$BASE_BRANCH" "$branch" 2>/dev/null | grep -c '^+' || true)" -gt 0 ]; then
       printf 'KEEP   %-40s  unmerged commits on %s\n' "$(basename "$path")" "$branch"
       kept=$((kept+1)); continue
     fi
@@ -202,6 +214,75 @@ while IFS= read -r line; do
   fi
   removed=$((removed+1))
 done < <(git worktree list | tail -n +2)
+
+# ---------------------------------------------------------------------------
+# Pass 2 — orphan branches: local branches with no worktree at all.
+#
+# The loop above is worktree-driven, so it can only ever see a branch that
+# still has a checkout. But the backend's Done-move teardown
+# (`session_cleanup._remove_worktree_at`) removes the worktree and
+# deliberately keeps the branch — the ship-recipe wants it alive for
+# redispatch/resume. From that moment the branch is invisible to pass 1 and
+# nothing else ever reclaims it, so every shipped card left one behind: 82
+# dead local branches had piled up on the live repo when this pass was added.
+#
+# Same four guards as pass 1 (active claim, live lease, merged) minus the
+# clean-worktree check, which has no meaning without a checkout.
+# ---------------------------------------------------------------------------
+# Two ways a live worktree lays claim to a branch name, and pass 2 must honour
+# both: the branch it has checked out, and — for a detached checkout, which
+# prints `detached` instead of a `branch` line — the directory name the
+# transport derived from the branch. Missing the second one made pass 2 report
+# a still-occupied branch as an orphan.
+declare -A CHECKED_OUT=()
+while IFS= read -r porcelain_line; do
+  case "$porcelain_line" in
+    "branch refs/heads/"*) CHECKED_OUT["${porcelain_line#branch refs/heads/}"]=1 ;;
+    "worktree "*)          CHECKED_OUT["$(basename "${porcelain_line#worktree }")"]=1 ;;
+  esac
+done < <(git worktree list --porcelain)
+
+while IFS= read -r branch; do
+  # Never the base branch, and never anything pass 1 already owns.
+  [ "$branch" = "$BASE_BRANCH" ] && continue
+  [ -n "${CHECKED_OUT[$branch]:-}" ] && continue
+
+  # Leases and claims are keyed by session name, which is exactly the branch
+  # name the worktree transport creates (`git worktree add -b "$session_name"`).
+  if [ -n "${ACTIVE_WTS[$branch]:-}" ]; then
+    printf 'KEEP   %-40s  active claim (kanban card agent:%s still alive)\n' \
+      "$branch" "$branch"
+    kept=$((kept+1)); continue
+  fi
+
+  if [ -n "${LEASED_WTS[$branch]:-}" ] && is_lease_live "${LEASE_EXPIRIES[$branch]}"; then
+    printf 'KEEP   %-40s  live lease (owner=%s, expires %s)\n' \
+      "$branch" "${LEASE_OWNERS[$branch]}" "${LEASE_EXPIRIES[$branch]}"
+    kept=$((kept+1)); continue
+  fi
+
+  # `grep -c`, not `grep -q`: -q exits on the first match, which SIGPIPEs
+  # `git cherry`, and under `set -o pipefail` the pipeline then reports
+  # failure even though the match succeeded — i.e. an unmerged branch would
+  # read as merged and get deleted. -c drains the input, so the status is
+  # honest. (Only reachable for outputs large enough to fill the pipe buffer,
+  # which is precisely the many-unmerged-commits branch we must not lose.)
+  if [ "$(git cherry "$BASE_BRANCH" "$branch" 2>/dev/null | grep -c '^+' || true)" -gt 0 ]; then
+    printf 'KEEP   %-40s  unmerged commits on %s (no worktree)\n' "$branch" "$branch"
+    kept=$((kept+1)); continue
+  fi
+
+  if [ "$APPLY" = 1 ]; then
+    git branch -D "$branch" >/dev/null
+    printf 'REMOVED-BRANCH %-31s  merged, no worktree\n' "$branch"
+    if [ -n "${LEASED_WTS[$branch]:-}" ]; then
+      python3 "$(dirname "$0")/kanban_worktree_leases.py" --db "$KANBAN_DB" --clear "$branch" 2>/dev/null || true
+    fi
+  else
+    printf 'WOULD-REMOVE-BRANCH %-26s  merged, no worktree\n' "$branch"
+  fi
+  removed=$((removed+1))
+done < <(git for-each-ref --format='%(refname:short)' refs/heads/)
 
 echo
 echo "worktree-gc: $removed to-remove, $kept kept."

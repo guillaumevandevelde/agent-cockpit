@@ -424,15 +424,17 @@ supervisor_main() {
     wait
 }
 
-# Auto-reclaim finished worktrees on every start: worktree-gc.sh --apply only
-# ever removes a worktree that is BOTH clean and fully merged into master, so
-# it's safe to run unattended — nothing dirty or unmerged is ever touched.
+# Auto-reclaim finished worktrees AND their branches on every start:
+# worktree-gc.sh --apply only ever removes something that is BOTH clean and
+# fully merged into master, so it's safe to run unattended — nothing dirty or
+# unmerged is ever touched. `^REMOVED` matches both the `REMOVED` (worktree)
+# and `REMOVED-BRANCH` (orphan branch, pass 2) lines.
 run_worktree_gc() {
     [ -x "$SCRIPT_DIR/worktree-gc.sh" ] || return 0
     local out
     out="$("$SCRIPT_DIR/worktree-gc.sh" --apply 2>&1)" || true
     if grep -q '^REMOVED' <<<"$out"; then
-        sup_log "worktree-gc: $(grep -c '^REMOVED' <<<"$out") leftover worktree(s) auto-removed"
+        sup_log "worktree-gc: $(grep -c '^REMOVED' <<<"$out") leftover worktree(s)/branch(es) auto-removed"
         echo "$out" | grep '^REMOVED'
     fi
 }

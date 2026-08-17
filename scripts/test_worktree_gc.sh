@@ -107,6 +107,28 @@ make_worktree() {
     )
 }
 
+# Make a repo with a branch that has NO worktree — the shape the backend
+# leaves behind after it removes the worktree on a Done move but keeps the
+# branch. Args: root_dir branch_name [--unmerged]
+make_orphan_branch_repo() {
+    local root="$1" brname="$2" unmerged="${3:-}"
+    rm -rf "$root"
+    mkdir -p "$root/.claude/worktrees"
+    ( cd "$root"
+      git init -q -b master
+      git config user.email "t@t" && git config user.name "t"
+      touch "a.txt" && git add a.txt && git commit -qm a
+      git branch "$brname"
+      if [ "$unmerged" = "--unmerged" ]; then
+        # One commit that master does not have — must survive gc.
+        git worktree add -q ".claude/worktrees/tmp-$brname" "$brname"
+        ( cd ".claude/worktrees/tmp-$brname"
+          echo work > b.txt && git add b.txt && git commit -qm "unmerged work" )
+        git worktree remove --force ".claude/worktrees/tmp-$brname"
+      fi
+    )
+}
+
 echo "Task 1: dry-run skips worktree matching an active (Backlog) claim"
 T="$(mktemp -d)"
 make_worktree "$T" "k-active-1" "k-active-1"
@@ -309,6 +331,119 @@ PY
 out="$(run_gc "" "$T" "$T/kanban.db")"
 check "WOULD-REMOVE for malformed lease (skipped, not crashed)" \
     'echo "$out" | grep -qE "WOULD-REMOVE.*k-bad-exp"'
+rm -rf "$T"
+
+echo ""
+echo "Task 14: a merged branch with NO worktree is reclaimed (the orphan-branch leak)"
+# The backend removes the worktree on the Done move but never the branch
+# (session_cleanup._remove_worktree_at). The worktree pass below can never
+# see such a branch again, so it accumulated forever — 82 dead branches on
+# the live repo before this pass existed.
+T="$(mktemp -d)"
+make_orphan_branch_repo "$T" "k-orphan-merged"
+seed_kanban_db "$T/kanban.db"
+out="$(run_gc "" "$T" "$T/kanban.db")"
+check "WOULD-REMOVE-BRANCH for merged worktree-less branch" \
+    'echo "$out" | grep -qE "WOULD-REMOVE-BRANCH.*k-orphan-merged"'
+check "branch still present (dry-run)" \
+    'git -C "$T" branch --list k-orphan-merged | grep -q k-orphan-merged'
+rm -rf "$T"
+
+echo ""
+echo "Task 15: --apply deletes the merged worktree-less branch"
+T="$(mktemp -d)"
+make_orphan_branch_repo "$T" "k-orphan-apply"
+seed_kanban_db "$T/kanban.db"
+out="$(run_gc --apply "$T" "$T/kanban.db")"
+check "REMOVED-BRANCH message printed" \
+    'echo "$out" | grep -qE "REMOVED-BRANCH.*k-orphan-apply"'
+check "branch actually deleted" \
+    '! git -C "$T" branch --list k-orphan-apply | grep -q k-orphan-apply'
+rm -rf "$T"
+
+echo ""
+echo "Task 16: an UNMERGED worktree-less branch is kept"
+T="$(mktemp -d)"
+make_orphan_branch_repo "$T" "k-orphan-unmerged" --unmerged
+seed_kanban_db "$T/kanban.db"
+out="$(run_gc --apply "$T" "$T/kanban.db")"
+check "KEEP for unmerged orphan branch" \
+    'echo "$out" | grep -qE "KEEP[[:space:]]+k-orphan-unmerged.*unmerged"'
+check "branch survives --apply" \
+    'git -C "$T" branch --list k-orphan-unmerged | grep -q k-orphan-unmerged'
+rm -rf "$T"
+
+echo ""
+echo "Task 17: an active kanban claim protects a worktree-less branch"
+# A dispatched session whose worktree was removed out from under it (or a
+# sandcastle/headless transport that never made one) still owns the branch.
+T="$(mktemp -d)"
+make_orphan_branch_repo "$T" "k-orphan-claimed"
+seed_kanban_db "$T/kanban.db"
+insert_card "$T/kanban.db" "k-orphan-claimed" "Backlog" "agent:k-orphan-claimed"
+out="$(run_gc --apply "$T" "$T/kanban.db")"
+check "KEEP for actively claimed orphan branch" \
+    'echo "$out" | grep -qE "KEEP[[:space:]]+k-orphan-claimed.*active claim"'
+check "branch survives --apply" \
+    'git -C "$T" branch --list k-orphan-claimed | grep -q k-orphan-claimed'
+rm -rf "$T"
+
+echo ""
+echo "Task 18: a live lease protects a worktree-less branch"
+T="$(mktemp -d)"
+make_orphan_branch_repo "$T" "k-orphan-leased"
+seed_kanban_db "$T/kanban.db"
+FUTURE="$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%S+00:00' 2>/dev/null || \
+          date -u -v+1H '+%Y-%m-%dT%H:%M:%S+00:00')"
+insert_lease "$T/kanban.db" "k-orphan-leased" "dispatch:k-orphan-leased" "$FUTURE"
+out="$(run_gc --apply "$T" "$T/kanban.db")"
+check "KEEP for leased orphan branch" \
+    'echo "$out" | grep -qE "KEEP[[:space:]]+k-orphan-leased.*live lease"'
+check "branch survives --apply" \
+    'git -C "$T" branch --list k-orphan-leased | grep -q k-orphan-leased'
+rm -rf "$T"
+
+echo ""
+echo "Task 19: master is never deleted by the orphan-branch pass"
+T="$(mktemp -d)"
+make_orphan_branch_repo "$T" "k-orphan-master-guard"
+seed_kanban_db "$T/kanban.db"
+out="$(run_gc --apply "$T" "$T/kanban.db")"
+check "master not reported" '! echo "$out" | grep -qE "BRANCH[[:space:]]+master"'
+check "master still present" 'git -C "$T" branch --list master | grep -q master'
+rm -rf "$T"
+
+echo ""
+echo "Task 20: a branch checked out in a worktree is not double-handled"
+# Pass 1 owns it; the orphan pass must skip anything with a checkout.
+T="$(mktemp -d)"
+make_worktree "$T" "k-has-wt" "k-has-wt"
+seed_kanban_db "$T/kanban.db"
+out="$(run_gc "" "$T" "$T/kanban.db")"
+check "reported once by the worktree pass" \
+    '[ "$(echo "$out" | grep -c "k-has-wt")" = "1" ]'
+check "not reported as an orphan branch" \
+    '! echo "$out" | grep -qE "BRANCH.*k-has-wt"'
+rm -rf "$T"
+
+echo ""
+echo "Task 21: a DETACHED worktree still shields the branch it was made for"
+# `git worktree list --porcelain` prints `detached` instead of `branch
+# refs/heads/<x>` for a detached checkout, so matching on the branch line
+# alone misses it and pass 2 reports the branch as an orphan — observed on
+# the live repo, where a dispatched session had gone detached.
+T="$(mktemp -d)"
+make_worktree "$T" "k-detached" "k-detached"
+( cd "$T/.claude/worktrees/k-detached" && git checkout -q --detach )
+seed_kanban_db "$T/kanban.db"
+out="$(run_gc "" "$T" "$T/kanban.db")"
+check "branch not reported as an orphan" \
+    '! echo "$out" | grep -qE "WOULD-REMOVE-BRANCH.*k-detached"'
+check "reported at most once" \
+    '[ "$(echo "$out" | grep -c "k-detached")" -le 1 ]'
+out_apply="$(run_gc --apply "$T" "$T/kanban.db")"
+check "branch survives --apply while the worktree dir exists" \
+    '[ ! -d "$T/.claude/worktrees/k-detached" ] || git -C "$T" branch --list k-detached | grep -q k-detached'
 rm -rf "$T"
 
 echo ""
