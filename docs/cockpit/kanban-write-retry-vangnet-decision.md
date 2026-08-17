@@ -130,6 +130,8 @@ Acceptance criteria:
 
 `work_type='feature'`. Depends op kind 1. Output: de helper in `backend/app/kanban/db.py`, plus `backend/tests/test_kanban_write_retry.py` (de naam die de oorspronkelijke kaart al noemde). Het contract:
 
+✅ Geïmplementeerd (kaart `29a4c7eb9c534fdaafa71050d63325f6`): helper in `db.py` + 6 tests in `test_kanban_write_retry.py` (de vijf uit de acceptance-criteria plus een budget-bound-pintest).
+
 - Herhaalt alleen `sqlalchemy.exc.OperationalError` waarvan de oorzaak `database is locked` is (gefilterd op substring in `str(exc.orig)`).
 - Bounded retries (default 3, configureerbaar).
 - Bounded totale wachttijd (default 2s, configureerbaar).

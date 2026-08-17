@@ -4,11 +4,15 @@ Intentionally independent from app.database: the board is portable and
 sync-able, whereas app.database holds device-local data (tmux targets,
 absolute paths, scheduled deliveries).
 """
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -98,3 +102,83 @@ async def init_kanban_db() -> None:
 
     async with kanban_engine.begin() as conn:
         await conn.run_sync(KanbanBase.metadata.create_all)
+
+
+def _is_lock_contention(exc: OperationalError) -> bool:
+    """True iff ``exc`` is a SQLite "database is locked" raised by the busy_timeout.
+
+    Matches on ``str(exc.orig)`` per the contract (§4 kind-2): a substring
+    check against the wrapped cause. Non-lock ``OperationalError``
+    (schema-mismatch, no such table, etc.) returns False, so the wrapper
+    does not retry them.
+    """
+    orig = exc.orig
+    if orig is None:
+        return False
+    return "database is locked" in str(orig)
+
+
+async def run_write_with_retry(
+    coro_factory: Callable[[], Awaitable[Any]],
+    *,
+    max_retries: int = 3,
+    backoff_base_ms: int = 200,
+    total_budget_ms: int = 2000,
+) -> Any:
+    """Retry a kanban write coroutine on transient SQLite lock contention.
+
+    The wrapper calls ``coro_factory()`` to obtain a fresh coroutine for each
+    attempt, awaits it, and only retries on
+    ``sqlalchemy.exc.OperationalError`` whose wrapped cause is
+    ``"database is locked"``. Three error classes with distinct behaviour:
+
+    * **Lock-contention ``OperationalError``**: slept with **exponential
+      backoff** (``backoff_base_ms * 2**attempt``) and retried, bounded by
+      both ``max_retries`` and ``total_budget_ms``. The remaining budget is
+      checked *before* the sleep so the bound is honoured even when the
+      configured ``backoff_base_ms`` alone would exceed it.
+    * **Non-lock ``OperationalError``**: propagated unchanged. These are
+      genuine bugs (schema-mismatch, no such table, etc.) and retrying
+      would only mask the failure.
+    * **Any other exception** (including ``ClaimRejected`` from
+      ``apply_operation``): propagated unchanged. ``ClaimRejected`` is
+      business logic — the caller checks claim ownership, not a lock — so
+      a retry would be incorrect.
+
+    ``coro_factory`` is invoked afresh on every attempt, so the caller can
+    open a brand-new ``KanbanSessionLocal()`` inside it and the retry
+    receives a session with no pre-mutation state. The wrapper does not
+    manage session lifecycle itself; that stays with the caller.
+    """
+    # Lazy import: ``app.kanban.operations`` imports ``app.kanban.models``,
+    # which in turn imports ``KanbanBase`` from this module. A top-level
+    # import of ``ClaimRejected`` would form a cycle.
+    from app.kanban.operations import ClaimRejected
+
+    last_lock_error: OperationalError | None = None
+    total_budget_s = total_budget_ms / 1000.0
+    deadline = asyncio.get_event_loop().time() + total_budget_s
+    # ``max_retries`` is the number of *retries* on top of the initial
+    # attempt, so the loop runs at most ``max_retries + 1`` times.
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro_factory()
+        except OperationalError as exc:
+            if not _is_lock_contention(exc):
+                raise
+            last_lock_error = exc
+            # No more retries configured — bail with the last error.
+            if attempt == max_retries:
+                break
+            # If the next backoff would exceed the remaining budget, bail
+            # without sleeping. ``last_lock_error`` already holds the cause.
+            sleep_s = (backoff_base_ms * (2 ** attempt)) / 1000.0
+            if asyncio.get_event_loop().time() + sleep_s > deadline:
+                break
+            await asyncio.sleep(sleep_s)
+        except ClaimRejected:
+            raise
+
+    # All attempts exhausted. The loop body never returns on this path.
+    assert last_lock_error is not None
+    raise last_lock_error
