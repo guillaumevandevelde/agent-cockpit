@@ -71,11 +71,18 @@ for harness in "$HARNESS_DIR"/test_*.sh; do
     if [ -n "${BASH_TEST_SKIP:-}" ] && printf '%s' "$name" | grep -qE "$BASH_TEST_SKIP"; then
         continue
     fi
-    out="$( cd "$BASH_TEST_CWD" && bash "$harness" 2>&1 )" || true
+    out="$( cd "$BASH_TEST_CWD" && bash "$harness" 2>&1 )"
+    rc=$?
 
     fails="$(printf '%s\n' "$out" | grep -E '^  FAIL: ' | sed -E 's/^  FAIL: //')"
 
-    if [ -z "$fails" ]; then
+    # Only re-check stderr for crash signatures when the harness actually
+    # exited non-zero. A clean exit 0 + no FAIL lines = passed; stderr
+    # noise (e.g. a banner echo whose backtick command-substitution fails
+    # on a unicode glyph, kanban card dbcae6ae…) is not a crash. Without
+    # this gate the heuristic's `command not found` arm flagged every
+    # banner with that pattern as a harness crash, even on green suites.
+    if [ -z "$fails" ] && [ "$rc" -ne 0 ]; then
         err="$( cd "$BASH_TEST_CWD" && bash "$harness" 2>&1 1>/dev/null )" || true
         # Bash emits parse errors as `<file>: line N: syntax error: ...`,
         # NOT `bash: ...` — see bash(1) PARSE ERROR FORMAT. Cover both forms
