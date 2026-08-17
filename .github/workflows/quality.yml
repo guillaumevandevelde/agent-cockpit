@@ -212,3 +212,58 @@ jobs:
       - run: npm run test:e2e
         working-directory: frontend
     continue-on-error: true
+
+  dispatch-lifecycle:
+    # Hard gate (geen ``continue-on-error``): een PR die de dispatch-loop
+    # of het git-ship-recept aanraakt MOET de lifecycle nog doorlopen
+    # voordat 'ie mag mergen. Vuurt alleen wanneer die paden in de PR
+    # gewijzigd zijn — een niet-gerelateerde docs-/frontend-PR betaalt
+    # niet de 5+ min Playwright-kost (kaart 6b662c35… / design §7,
+    # 5e acceptance-checkbox).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Needs backend-tests + frontend zodat we niet bouwen op een build
+    # die al wist dat de stack niet compileert. De paden-filter hieronder
+    # skipt de job volledig als geen van de trigger-paden geraakt is.
+    needs: [backend-tests, frontend]
+    if: >-
+      github.event_name == 'pull_request' &&
+      (
+        contains(toJSON(github.event.pull_request.changed_files), 'backend/app/kanban/dispatch.py') ||
+        contains(toJSON(github.event.pull_request.changed_files), '.claude/skills/git-ship/')
+      )
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+        working-directory: backend
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Start backend
+        run: |
+          nohup uvicorn app.main:app --port 8000 > /tmp/uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && break
+            sleep 1
+          done
+        working-directory: backend
+      - name: Run dispatch lifecycle + agent mail suites
+        # ``--workers=1`` is gelockt in ``frontend/playwright.config.ts``
+        # project ``dispatch``; de share-kanban.db race maakt workers>1
+        # flaky (zie kaart 6b662c35… §6).
+        run: npm run test:e2e:dispatch
+        working-directory: frontend

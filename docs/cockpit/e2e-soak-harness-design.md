@@ -15,6 +15,8 @@ vangnet vóór merge van een ship-recept- of dispatch-loop-wijziging.
 
 **Effect:** een engineer die ship-recept of dispatch-loop aanraakt weet vóór merge of de lifecycle nog werkt. Tizonia-style scratch-sandbox + Playwright-flow + nachtelijke soak onder canonieke provider vangt regressies die de huidige smoke afdekking mist.
 
+✅ Geïmplementeerd (kaart 69ed8cf4…) — `frontend/e2e/dispatch/lifecycle.spec.ts` (S1–S5), `frontend/e2e/dispatch/agent-mail.spec.ts` (M1–M3), `backend/tests/fixtures/dispatch_stub.py`, `backend/scripts/cockpit_soak.py`, `scripts/cockpit-soak-report.py`, en de hard-gate in `.github/workflows/quality.yml::dispatch-lifecycle`.
+
 **Kaart:** `6b662c3541ae4b93b90ce1a16b7a6a7a` (kind van [`fork-strategy-claude-deck-316.md`](./fork-strategy-claude-deck-316.md) §4.5).
 
 ## 1. Premisse en wat adopteren we
