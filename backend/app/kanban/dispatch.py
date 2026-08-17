@@ -4806,6 +4806,21 @@ async def _run_card(
         entity_id=card.id, payload={"pending_spawn_session": name},
     )
 
+    # Release the write lock here, not at the pre-spawn commit below. The
+    # three writes above open the transaction, and SQLite hands out one write
+    # lock; everything between here and that commit is slow resolution work,
+    # so committing only there locked the board for tens of seconds per card.
+    # ``dispatch_project``'s own two lock-release commits cannot cover this —
+    # the claim/move above re-open the transaction right after them. Measured
+    # window + the 500s it caused: see the pre-spawn-phase test in
+    # ``tests/test_kanban_dispatch_lock_during_spawn.py``.
+    #
+    # Durability changes in window, not in kind: the pre-spawn commit already
+    # made claim + move + bookmark durable before the ~37s spawn, and the same
+    # recovery covers the wider window — ``reap_stale_claims`` releases an
+    # ``agent:`` claim with no live session on the next tick.
+    await session.commit()
+
     # Load persona for the target agent. Analyst phase uses a dedicated
     # helper that falls back to the hardcoded ANALYST_PROMPT when no
     # `analyst.md` exists in the project — otherwise the analyst session
@@ -4993,22 +5008,16 @@ async def _run_card(
             "endpoint_base_url": endpoint_resolution["base_url"],
             "endpoint_auth_token": endpoint_resolution["auth_token"],
         }
-    if is_fresh_worktree:
-        # The synchronous worktree transport installs RTK through a private
-        # worker-thread event loop and DB connection. Release this session's
-        # SQLite write lock first; otherwise the worker blocks while posting
-        # its activity note and the token saver silently degrades to failed.
-        # Claim + move are durable before spawn, and the existing exception
-        # path applies and commits compensating release/move operations.
-        await session.commit()
-    else:
-        # Resume / headless / sandcastle paths also need claim + move +
-        # ``pending_spawn_session`` on disk BEFORE ``tmux new-session`` runs:
-        # otherwise a crash in the ~37s spawn window leaves a live tmux
-        # session with no DB row that recognises it (kaart "Onderbroken spawn
-        # lekt zijn tmux-sessie"). Commit is unconditional rather than gated
-        # on transport type so the bookmark is consistent across paths.
-        await session.commit()
+    # Second lock release, for whatever the resolution phase above wrote
+    # after the first one (usually the model-options cache). Unconditional
+    # across transports: the worktree transport installs RTK on a private
+    # worker thread with its own DB connection, which would block on a lock
+    # this session still held and degrade the token saver to ``failed``; and
+    # every path needs claim + move + ``pending_spawn_session`` on disk
+    # before ``tmux new-session`` runs, or a crash in the ~37s spawn window
+    # leaves a tmux session no DB row recognises (kaart "Onderbroken spawn
+    # lekt zijn tmux-sessie").
+    await session.commit()
     try:
         # Run the synchronous transport on a thread-pool worker so the
         # subprocess fan-out (git fetch + git worktree add + tmux
