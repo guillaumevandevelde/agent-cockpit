@@ -89,6 +89,8 @@ Drie principes uit `attention-kind.md` die nog niet expliciet in onze conventies
 2. **"A warning is the last word to cut, never the first."** Onze [`taalgebruik-conventies.md`](./taalgebruik-conventies.md) §3 stelt "diepte achter een verwijzing", niet expliciet "warnings reizen mee met het punt dat ze bewaken, nooit deferred, nooit getrimd". Een implementatie-fix die een waarschuwing in een `**Rest/nazicht**`-bullet parkeert, voldoet nu aan de drie-delen-vorm maar kan een waarschuwing begraven.
 3. **"Deliverable purity — When asked to produce a thing, output only that thing, nothing wrapped around it."** Onze [`kanban-conventions.md` §5](../../CLAUDE.md) zegt geen proces-meta in de banner, maar niet specifiek dat *output naar een afnemer* (een commit message, een code-snippet) niet in een wrapper staat. Dat is een smallere, engineer-kant-regel.
 
+**✅ Geïmplementeerd (kaart `bee6609a…`)** — de drie regels staan als nieuwe subsectie *Drie inhoudsregels uit attention-kind* in [`taalgebruik-conventies.md`](./taalgebruik-conventies.md) §3.
+
 ## 4. Wat we concreet kunnen overnemen (gerangschikt op leverage)
 
 ### 4.1 ⭐ Drie regels uit `attention-kind.md` toevoegen aan `taalgebruik-conventies.md`

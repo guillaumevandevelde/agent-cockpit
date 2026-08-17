@@ -86,6 +86,22 @@ eigen paragraaf met een anker. De hoofdtekst houdt de conclusie en de link.
 Zo blijft het instaptekst voor wie oriënteert, en naslag voor wie het detail
 nodig heeft.
 
+### Drie inhoudsregels uit attention-kind
+
+Drie regels die we nog niet expliciet hadden, overgenomen uit de
+[`attention-kind`](https://github.com/alexgreensh/attention-span)-stijl en in
+onze toon geformuleerd. Geen prompt-import; alleen de gedistilleerde regel.
+
+1. **Cijfers, drempels en scoped condities zijn essentieel, niet detail.**
+   Noem het getal exact; *sneller* / *minder* / *voor de meeste gevallen*
+   laat de lezer verkeerd handelen.
+2. **Een waarschuwing reist mee met het punt dat ze bewakt.** Niet parkeren
+   in een nazicht-sectie of achter *zie elders* wanneer de waarschuwing
+   bepaalt of de lezer het punt goed toepast.
+3. **Wanneer de output één ding is, lever dan dat ding alleen.** Een
+   commit-message, snippet of commando staat kaal, zonder inleiding,
+   afsluiting of herhaling van wat erin staat.
+
 ## 4. Verwijzen zonder de lezer te blokkeren
 
 Twee soorten verwijzing komen in dit project veel voor. Beide hebben een vaste
