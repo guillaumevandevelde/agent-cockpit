@@ -9,11 +9,16 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.kanban import attachments as attachment_store
 from app.kanban import service
-from app.kanban.db import KanbanSessionLocal
+from app.kanban.db import (
+    KanbanSessionLocal,
+    is_sqlite_locked_error,
+    run_write_with_retry,
+)
 from app.kanban.models import KanbanAttachment, KanbanCard
 from app.kanban.operations import ClaimRejected, apply_operation, release_card_claim
 from app.kanban.project_key import resolve_project_key, resolve_project_path
@@ -694,7 +699,17 @@ async def _reload(s, cid: str) -> CardResponse:
 
 @router.post("/cards", response_model=CardResponse, status_code=status.HTTP_201_CREATED)
 async def create_card(payload: CardCreate):
-    async with KanbanSessionLocal() as s:
+    """Create a card, retrying briefly when another writer holds the DB lock.
+
+    SQLite serialises writers. Any concurrent writer that outlasts
+    `sqlite_busy_timeout_ms` used to turn this into an unhandled 500 —
+    observed against the auto-dispatch tick, which held one transaction
+    across its whole resolution phase. `run_write_with_retry` re-runs the
+    whole body in a fresh session (nothing is committed on a failed attempt,
+    so a retry cannot double-create), and genuine exhaustion becomes a 503
+    the caller can retry rather than a 500 that reads like a board defect.
+    """
+    async def _create(s):
         # Refuse an unknown `project_key` unless the caller explicitly opts
         # into creating the very first card of a brand-new project
         # (`confirm_new_project=True`). The normal onboarding path is
@@ -731,6 +746,17 @@ async def create_card(payload: CardCreate):
             await service.ensure_analyst_column(s, payload.project_key)
         await s.commit()
         return await _reload(s, cid)
+
+    try:
+        return await run_write_with_retry(_create, label="create_card")
+    except OperationalError as exc:
+        if not is_sqlite_locked_error(exc):
+            raise
+        logger.warning("create_card gave up: board write lock held by another writer")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="board is busy (another writer holds the lock); retry shortly",
+        ) from exc
 
 
 @router.post("/cards/reorder")

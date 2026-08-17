@@ -6526,6 +6526,30 @@ async def dispatch_project(
         session, project_key=project_key, cards=cards,
     )
 
+    # Release the SQLite write lock before the resolution phase below.
+    #
+    # Everything above is the tick's sweep phase, and every one of those
+    # sweeps writes: `reap_stale_claims` releases dead claims,
+    # the three liveness detectors move stuck cards, `_persist_holds` stamps
+    # hold state, `_escalate_overdue_plan_ref` comments. SQLite takes the
+    # single write lock at the first of those flushes and does not let go
+    # until a commit. Without this one, the lock stayed held through the
+    # per-card resolution loop and all of `_run_card`'s pre-spawn work
+    # (persona + ceremony profile + prior-branch git + prompt injectors +
+    # plan lookup + a 2s endpoint HTTP probe) — tens of seconds during which
+    # every *other* writer on the board fails. That is the mechanism behind
+    # "card create faalt": `POST /kanban/cards` exhausted its 5s
+    # `busy_timeout` and 500'd, five times inside one two-minute tick
+    # (logs/backend/run-20260817-082951-3592-0.log).
+    #
+    # Committing here is safe and is not a new pattern: `_run_card` already
+    # commits this same session mid-tick (see its pre-spawn commit) so the
+    # claim is durable before a ~37s spawn. Each sweep's effect is meant to
+    # stand on its own — a reaped stale claim must not be rolled back
+    # because a later phase raised — and the caller's exception handler
+    # applies and commits its own compensating ops regardless.
+    await session.commit()
+
     # Consumptiekant van het zelfverbeteringsbudget (kaart ff9877ca…, begrensd
     # in kaart 9a567259…). `budget_closed` weegt drie dingen: de aan/uit-
     # schakelaar, het slot-aandeel (max 25% van de bezette claims) en de
@@ -6670,6 +6694,13 @@ async def dispatch_project(
                 session, card=card, project_key=project_key,
                 project_path=project_path,
             )
+
+        # Second lock-release point, for the same reason as the one after the
+        # sweep phase: the per-card filters above write too
+        # (`_flag_dangling_dep_card`, `_stamp_resume_target`), and `_run_card`
+        # does not commit until just before its spawn — so without this, the
+        # write lock is held across its whole resolution phase.
+        await session.commit()
 
         # Two-phase dispatch: when the card has an analyst_agent_id and no
         # analyst_run_id yet, spawn the analyst first and persist the run id
