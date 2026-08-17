@@ -78,8 +78,8 @@ committed, and you move them back out when done (step 4).
 `frontend/src/preview-entry.tsx` — import the **real** component you
 changed and wrap it in only the providers it actually needs. The fastest
 way to get the full global chain right is to wrap in `<AppProviders>`
-(from `frontend/src/AppProviders.tsx`), which already mounts the four
-global contexts (`ProjectProvider`, `ProviderProvider`,
+(from `frontend/src/AppProviders.tsx`), which already mounts the five
+global contexts (`ThemeProvider`, `ProjectProvider`, `ProviderProvider`,
 `DashboardProvider`, `AttentionProvider`) — `App.tsx` uses the same
 wrapper so a preview cannot drift from production. Add additional
 contexts only when the component reads them and `AppProviders` doesn't
