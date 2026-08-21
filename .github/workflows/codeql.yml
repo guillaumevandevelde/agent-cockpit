@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      # actions: read — required for github/codeql-action/init@v3 to read the
+      # actions: read — required for github/codeql-action/init@v4 to read the
       #   workflow run context.
       # contents: read — clone the repo.
       # security-events: write — upload SARIF to the code-scanning tab.
@@ -46,12 +46,12 @@ jobs:
       # `.github/codeql/codeql-config.yml`; `queries: security-extended` is
       # also pinned there.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           config-file: .github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
