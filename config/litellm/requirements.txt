@@ -28,7 +28,7 @@
 # daadwerkelijk hebben gemeten (zie docs/cockpit/litellm-pilot-meting.md);
 # auto-update breekt stil de hardening-check zodra upstream een
 # flag-naam hernoemt.
-litellm==1.93.0
+litellm==1.93.2
 
 # Wordt door LiteLLM geïmporteerd in de auth-exception-handler. Zonder
 # `prisma` antwoordt de proxy HTTP 500 in plaats van 401 op een
